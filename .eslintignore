@@ -1,0 +1,8 @@
+node_modules/
+server/dist/
+dist/
+build/
+android/
+ios/
+coverage/
+.bundle/
