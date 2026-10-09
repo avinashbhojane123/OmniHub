@@ -209,6 +209,7 @@ export interface BackupData {
   habits: Habit[];
   habitLogs: HabitLog[];
   goals: Goal[];
+  goalTasks?: { id?: string; goalId: string; taskId: string }[];
   notes: Note[];
   settings: Record<string, any>;
 }

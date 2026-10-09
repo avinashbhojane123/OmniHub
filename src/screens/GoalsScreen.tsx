@@ -129,6 +129,7 @@ export const GoalsScreen: React.FC = () => {
     }
     const updated = await goalService.getGoalTasks(selectedGoal.id);
     setGoalTasks(updated);
+    await loadGoals();
   };
 
   const averageProgress =

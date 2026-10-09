@@ -118,6 +118,16 @@ export class GoalRepository {
     await db.execute('DELETE FROM goal_tasks WHERE goalId = ? AND taskId = ?', [goalId, taskId]);
   }
 
+  async getAllLinks(): Promise<{ id: string; goalId: string; taskId: string }[]> {
+    const db = await getDatabase();
+    const result = await db.execute('SELECT * FROM goal_tasks');
+    return result.rows.map((r) => ({
+      id: r.id,
+      goalId: r.goalId,
+      taskId: r.taskId,
+    }));
+  }
+
   async getTasksForGoal(goalId: string): Promise<Task[]> {
     const db = await getDatabase();
     const result = await db.execute(

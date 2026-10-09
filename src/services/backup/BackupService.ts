@@ -15,7 +15,8 @@ export class BackupService {
     const calendarEvents = await calendarRepository.findAll();
     const habits = await habitRepository.findAll();
     const goals = await goalRepository.findAll();
-    const notes = await noteRepository.findByEntity('general');
+    const goalTasks = await goalRepository.getAllLinks();
+    const notes = await noteRepository.findAll();
     const settings = await settingsRepository.getAll();
 
     // Fetch all habit logs
@@ -34,6 +35,7 @@ export class BackupService {
       habits,
       habitLogs,
       goals,
+      goalTasks,
       notes,
       settings,
     };
@@ -106,6 +108,13 @@ export class BackupService {
         if (data.goals) {
           for (const g of data.goals) {
             await goalRepository.create(g);
+          }
+        }
+
+        // Restore goal-task links
+        if (data.goalTasks) {
+          for (const gt of data.goalTasks) {
+            await goalRepository.linkTask(gt.goalId, gt.taskId);
           }
         }
 

@@ -105,6 +105,12 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       } else if (trimmed.includes('WHERE key = ?')) {
         const k = params[0];
         rows = rows.filter((r) => r.key === k);
+      } else if (trimmed.includes('WHERE entityType = ?')) {
+        const et = params[0];
+        rows = rows.filter((r) => r.entityType === et);
+        if (trimmed.includes('AND entityId = ?') && params[1]) {
+          rows = rows.filter((r) => r.entityId === params[1]);
+        }
       } else if (trimmed.includes('LIKE ?')) {
         const rawTerm = (params[0] || '').replace(/%/g, '').toLowerCase();
         rows = rows.filter((r) => {

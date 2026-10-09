@@ -9,6 +9,7 @@ import { getDatabase } from '../src/database/connection';
 import { computeAgeStats } from '../src/components/ProfileModal';
 import { goalService } from '../src/services/goals/GoalService';
 import { goalRepository } from '../src/database/repositories/GoalRepository';
+import { noteRepository } from '../src/database/repositories/NoteRepository';
 import { format, subDays, addDays } from 'date-fns';
 
 describe('LifePlanner Local-First Core Test Suite', () => {
@@ -347,6 +348,66 @@ describe('LifePlanner Local-First Core Test Suite', () => {
       const results = await taskRepository.search(uniqueKeyword);
       expect(results.length).toBeGreaterThanOrEqual(1);
       expect(results.some((t) => t.id === taskWithNotes.id)).toBe(true);
+    });
+  });
+
+  describe('13. Notes Repository & Comprehensive Entity Types', () => {
+    it('should create and retrieve notes across all entity types with findAll', async () => {
+      const now = new Date().toISOString();
+      const note1 = await noteRepository.create({
+        id: `note_gen_${Date.now()}`,
+        entityType: 'general',
+        title: 'General Idea',
+        content: 'Random inspiration note',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const note2 = await noteRepository.create({
+        id: `note_task_${Date.now()}`,
+        entityType: 'task',
+        entityId: 'task_123',
+        title: 'Task Note',
+        content: 'Specific note for task',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const allNotes = await noteRepository.findAll();
+      expect(allNotes.some((n) => n.id === note1.id)).toBe(true);
+      expect(allNotes.some((n) => n.id === note2.id)).toBe(true);
+
+      const generalOnly = await noteRepository.findByEntity('general');
+      expect(generalOnly.some((n) => n.id === note1.id)).toBe(true);
+      expect(generalOnly.some((n) => n.id === note2.id)).toBe(false);
+    });
+  });
+
+  describe('14. Goal Tasks Link Persistence Across Backup & Restore', () => {
+    it('should serialize and restore goal_tasks links in backup', async () => {
+      const goal = await goalService.createGoal({
+        title: 'Backup Link Test Goal',
+      });
+      const task = await taskService.createTask({
+        title: 'Backup Link Test Task',
+        date: format(new Date(), 'yyyy-MM-dd'),
+      });
+
+      await goalService.linkTaskToGoal(goal.id, task.id);
+      const linksBefore = await goalRepository.getAllLinks();
+      expect(linksBefore.some((l) => l.goalId === goal.id && l.taskId === task.id)).toBe(true);
+
+      const backupJson = await backupService.exportBackup();
+      const parsed = JSON.parse(backupJson);
+      expect(parsed.goalTasks).toBeDefined();
+      expect(parsed.goalTasks.some((l: any) => l.goalId === goal.id && l.taskId === task.id)).toBe(true);
+
+      // Restore backup and verify link still exists
+      const importResult = await backupService.importBackup(backupJson);
+      expect(importResult.success).toBe(true);
+
+      const linksAfter = await goalRepository.getAllLinks();
+      expect(linksAfter.some((l) => l.goalId === goal.id && l.taskId === task.id)).toBe(true);
     });
   });
 });

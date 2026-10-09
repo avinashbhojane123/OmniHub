@@ -2,6 +2,20 @@ import { Note } from '../../types';
 import { getDatabase } from '../connection';
 
 export class NoteRepository {
+  async findAll(): Promise<Note[]> {
+    const db = await getDatabase();
+    const result = await db.execute('SELECT * FROM notes ORDER BY updatedAt DESC');
+    return result.rows.map((r) => ({
+      id: r.id,
+      entityType: r.entityType,
+      entityId: r.entityId ?? undefined,
+      title: r.title ?? undefined,
+      content: r.content,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
   async findByEntity(entityType: string, entityId?: string): Promise<Note[]> {
     const db = await getDatabase();
     let query = 'SELECT * FROM notes WHERE entityType = ?';
