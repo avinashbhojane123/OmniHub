@@ -3,6 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import { Task, HabitWithStreak, CalendarEvent } from '../types';
 import { taskService } from '../services/tasks/TaskService';
 import { habitService } from '../services/habits/HabitService';
+import { calendarService } from '../services/calendar/CalendarService';
 
 export function useToday() {
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
@@ -18,26 +19,27 @@ export function useToday() {
     try {
       setLoading(true);
 
-      const [tasks, overdue, upcoming, habitList] = await Promise.all([
+      const [tasks, overdue, upcoming, habitList, calEvents] = await Promise.all([
         taskService.getTodayTasks(),
         taskService.getOverdueTasks(),
         taskService.getUpcomingTask(),
         habitService.getHabitsWithStreaks(),
+        calendarService.getAllEvents(),
       ]);
 
       setTodayTasks(tasks);
       setOverdueTasks(overdue);
       setUpcomingTask(upcoming);
       setHabits(habitList);
-      setCalendarEvents([]);
+      setCalendarEvents(calEvents);
 
       // Calculate completion %
       const total = tasks.length;
       const completed = tasks.filter((t) => t.status === 'completed').length;
       setCompletionPercentage(total > 0 ? Math.round((completed / total) * 100) : 0);
 
-      // Detect schedule conflicts among today's tasks
-      const conflictResult = taskService.detectConflicts(tasks, []);
+      // Detect schedule conflicts among today's tasks and calendar events
+      const conflictResult = taskService.detectConflicts(tasks, calEvents);
       setConflicts(conflictResult.conflicts);
     } catch (e) {
       console.error('Failed to load today data:', e);

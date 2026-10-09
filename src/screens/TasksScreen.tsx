@@ -16,6 +16,7 @@ import { useAppTheme } from '../hooks/useTheme';
 import { TaskCard } from '../components/TaskCard';
 import { ProgressBar } from '../components/ProgressBar';
 import { BellIllustration } from '../components/BellIllustration';
+import { NotepadModal } from '../components/NotepadModal';
 import { radius, spacing, typography } from '../theme';
 
 interface TasksScreenProps {
@@ -43,6 +44,7 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'high'>('all');
+  const [notepadVisible, setNotepadVisible] = useState(false);
 
   const filteredTasks = tasks.filter((t) => {
     if (filter === 'pending') return t.status !== 'completed' && t.status !== 'cancelled';
@@ -81,12 +83,22 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={[styles.headerTitle, typography.headerLarge, { color: colors.text }]}>
-            All Tasks
-          </Text>
-          <Text style={[styles.counter, typography.caption, { color: colors.textSecondary }]}>
-            {filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}
-          </Text>
+          <View>
+            <Text style={[styles.headerTitle, typography.headerLarge, { color: colors.text }]}>
+              All Tasks
+            </Text>
+            <Text style={[styles.counter, typography.caption, { color: colors.textSecondary }]}>
+              {filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setNotepadVisible(true)}
+            style={[styles.notesBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
+            accessibilityRole="button"
+            accessibilityLabel="Open Standalone Notes"
+          >
+            <Text style={[styles.notesBtnText, { color: colors.primary }]}>📝 Notes</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Search Bar */}
@@ -101,7 +113,7 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => handleSearch('')} style={styles.clearBtn}>
-              <Text style={{ color: colors.textMuted }}>✕</Text>
+              <Text style={[styles.clearBtnText, { color: colors.textMuted }]}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -198,6 +210,8 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
       >
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
+
+      <NotepadModal visible={notepadVisible} onClose={() => setNotepadVisible(false)} />
     </View>
   );
 };
@@ -211,8 +225,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginTop: spacing.md,
     marginBottom: spacing.md,
+  },
+  notesBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
+  notesBtnText: {
+    fontWeight: '700',
+    fontSize: 13,
   },
   headerTitle: {},
   counter: {
@@ -237,6 +264,9 @@ const styles = StyleSheet.create({
   },
   clearBtn: {
     padding: spacing.xs,
+  },
+  clearBtnText: {
+    fontSize: 14,
   },
   filtersRow: {
     flexDirection: 'row',

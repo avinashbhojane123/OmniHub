@@ -4,6 +4,7 @@ import { Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TodayScreen } from '../screens/TodayScreen';
 import { TasksScreen } from '../screens/TasksScreen';
+import { GoalsScreen } from '../screens/GoalsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { useAppTheme } from '../hooks/useTheme';
 
@@ -15,6 +16,10 @@ const renderTodayIcon = ({ focused }: { focused: boolean }) => (
 
 const renderTasksIcon = ({ focused }: { focused: boolean }) => (
   <Text style={styles.tabIcon}>{focused ? '✅' : '☑️'}</Text>
+);
+
+const renderGoalsIcon = ({ focused }: { focused: boolean }) => (
+  <Text style={styles.tabIcon}>{focused ? '🎯' : '⭕'}</Text>
 );
 
 const renderSettingsIcon = ({ focused }: { focused: boolean }) => (
@@ -59,6 +64,14 @@ export const BottomTabNavigator = () => {
         options={{
           tabBarLabel: 'Tasks',
           tabBarIcon: renderTasksIcon,
+        }}
+      />
+      <Tab.Screen
+        name="Goals"
+        component={GoalsScreen}
+        options={{
+          tabBarLabel: 'Goals',
+          tabBarIcon: renderGoalsIcon,
         }}
       />
       <Tab.Screen

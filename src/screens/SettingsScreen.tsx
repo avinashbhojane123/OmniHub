@@ -39,6 +39,7 @@ export const SettingsScreen: React.FC = () => {
 
   // Companion Server State
   const [serverUrl, setServerUrl] = useState('http://10.0.2.2:3030');
+  const [apiKey, setApiKey] = useState('');
   const [syncingServer, setSyncingServer] = useState(false);
 
   useEffect(() => {
@@ -51,12 +52,14 @@ export const SettingsScreen: React.FC = () => {
     const vib = (await settingsRepository.get('notificationVibration', 'true')) === 'true';
     const snooze = await settingsRepository.get('defaultSnoozeMinutes', '10');
     const savedServerUrl = await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030');
+    const savedApiKey = await settingsRepository.get('companionApiKey', '');
 
     setNotificationsEnabled(notifs);
     setSoundEnabled(sound);
     setVibrationEnabled(vib);
     setSnoozeMinutes(snooze);
     setServerUrl(savedServerUrl);
+    setApiKey(savedApiKey);
   };
 
   const toggleNotifs = async (val: boolean) => {
@@ -100,6 +103,7 @@ export const SettingsScreen: React.FC = () => {
 
   const handleSyncToServer = async () => {
     const trimmedUrl = serverUrl.trim();
+    const trimmedKey = apiKey.trim();
     if (!trimmedUrl) {
       Alert.alert('Server URL Required', 'Please enter a valid companion server address.');
       return;
@@ -107,7 +111,8 @@ export const SettingsScreen: React.FC = () => {
     try {
       setSyncingServer(true);
       await settingsRepository.set('companionServerUrl', trimmedUrl);
-      const res = await backupService.syncToCompanionServer(trimmedUrl);
+      await settingsRepository.set('companionApiKey', trimmedKey);
+      const res = await backupService.syncToCompanionServer(trimmedUrl, trimmedKey);
       if (res.success) {
         Alert.alert('Sync Successful', res.message);
       } else {
@@ -122,6 +127,7 @@ export const SettingsScreen: React.FC = () => {
 
   const handleRestoreFromServer = async () => {
     const trimmedUrl = serverUrl.trim();
+    const trimmedKey = apiKey.trim();
     if (!trimmedUrl) {
       Alert.alert('Server URL Required', 'Please enter a valid companion server address.');
       return;
@@ -138,7 +144,8 @@ export const SettingsScreen: React.FC = () => {
             try {
               setSyncingServer(true);
               await settingsRepository.set('companionServerUrl', trimmedUrl);
-              const res = await backupService.restoreFromCompanionServer(trimmedUrl);
+              await settingsRepository.set('companionApiKey', trimmedKey);
+              const res = await backupService.restoreFromCompanionServer(trimmedUrl, trimmedKey);
               if (res.success) {
                 Alert.alert('Restore Successful', res.message);
               } else {
@@ -461,6 +468,29 @@ export const SettingsScreen: React.FC = () => {
                 placeholderTextColor={colors.textMuted}
                 value={serverUrl}
                 onChangeText={setServerUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                API Secret Key (Optional)
+              </Text>
+              <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                Authorization token matching BACKUP_API_KEY on your companion server
+              </Text>
+              <TextInput
+                style={[
+                  styles.serverInput,
+                  {
+                    backgroundColor: colors.surfaceElevated,
+                    borderColor: colors.borderSubtle,
+                    color: colors.text,
+                  },
+                ]}
+                placeholder="X-API-Key token"
+                placeholderTextColor={colors.textMuted}
+                value={apiKey}
+                onChangeText={setApiKey}
+                secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
               />

@@ -1,7 +1,7 @@
 import { Task, CreateTaskDTO, UpdateTaskDTO, CalendarEvent, SnoozeDurationOption } from '../../types';
 import { taskRepository } from '../../database/repositories/TaskRepository';
 import { notificationService } from '../notifications/NotificationService';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addDays, addMonths, isValid } from 'date-fns';
 
 export class TaskService {
   private parseTimeToMinutes(timeStr: string): number | null {
@@ -102,7 +102,66 @@ export class TaskService {
       completedAt: now,
     });
     await notificationService.cancelTaskReminder(id);
+
+    // If task is recurring, auto-spawn the next occurrence
+    if (updated && updated.recurrenceRule && updated.recurrenceRule.type !== 'none') {
+      try {
+        await this.spawnNextRecurrence(updated);
+      } catch (err) {
+        console.warn('Failed to auto-spawn recurring task:', err);
+      }
+    }
+
     return updated;
+  }
+
+  private async spawnNextRecurrence(task: Task): Promise<Task | null> {
+    const rule = task.recurrenceRule;
+    if (!rule || rule.type === 'none') return null;
+
+    const baseDate = parseISO(task.date);
+    if (!isValid(baseDate)) return null;
+
+    let nextDate: Date;
+    switch (rule.type) {
+      case 'daily':
+        nextDate = addDays(baseDate, rule.interval || 1);
+        break;
+      case 'weekdays': {
+        let temp = addDays(baseDate, 1);
+        while (temp.getDay() === 0 || temp.getDay() === 6) {
+          temp = addDays(temp, 1);
+        }
+        nextDate = temp;
+        break;
+      }
+      case 'weekly':
+        nextDate = addDays(baseDate, (rule.interval || 1) * 7);
+        break;
+      case 'monthly':
+        nextDate = addMonths(baseDate, rule.interval || 1);
+        break;
+      default:
+        nextDate = addDays(baseDate, 1);
+    }
+
+    const nextDateStr = format(nextDate, 'yyyy-MM-dd');
+    if (rule.endDate && nextDateStr > rule.endDate) {
+      return null;
+    }
+
+    return await this.createTask({
+      title: task.title,
+      description: task.description,
+      date: nextDateStr,
+      startTime: task.startTime,
+      endTime: task.endTime,
+      priority: task.priority,
+      categoryId: task.categoryId,
+      recurrenceRule: task.recurrenceRule,
+      reminderMinutes: task.reminderMinutes,
+      notes: task.notes,
+    });
   }
 
   async uncompleteTask(id: string): Promise<Task | null> {

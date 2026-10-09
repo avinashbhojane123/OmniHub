@@ -141,14 +141,19 @@ export class BackupService {
     }
   }
 
-  async syncToCompanionServer(serverUrl?: string): Promise<{ success: boolean; message: string }> {
+  async syncToCompanionServer(serverUrl?: string, apiKey?: string): Promise<{ success: boolean; message: string }> {
     try {
       const targetUrl = serverUrl || (await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030'));
+      const key = apiKey ?? (await settingsRepository.get('companionApiKey', ''));
       const jsonStr = await this.exportBackup();
       const payload = JSON.parse(jsonStr);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (key) {
+        headers['x-api-key'] = key;
+      }
       const res = await fetch(`${targetUrl.replace(/\/+$/, '')}/backup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
@@ -160,10 +165,15 @@ export class BackupService {
     }
   }
 
-  async restoreFromCompanionServer(serverUrl?: string): Promise<{ success: boolean; message: string }> {
+  async restoreFromCompanionServer(serverUrl?: string, apiKey?: string): Promise<{ success: boolean; message: string }> {
     try {
       const targetUrl = serverUrl || (await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030'));
-      const res = await fetch(`${targetUrl.replace(/\/+$/, '')}/backup/latest`);
+      const key = apiKey ?? (await settingsRepository.get('companionApiKey', ''));
+      const headers: Record<string, string> = {};
+      if (key) {
+        headers['x-api-key'] = key;
+      }
+      const res = await fetch(`${targetUrl.replace(/\/+$/, '')}/backup/latest`, { headers });
       if (!res.ok) {
         throw new Error(`Companion server returned status ${res.status}`);
       }

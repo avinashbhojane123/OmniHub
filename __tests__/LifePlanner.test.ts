@@ -7,7 +7,9 @@ import { backupService } from '../src/services/backup/BackupService';
 import { notificationService } from '../src/services/notifications/NotificationService';
 import { getDatabase } from '../src/database/connection';
 import { computeAgeStats } from '../src/components/ProfileModal';
-import { format, subDays } from 'date-fns';
+import { goalService } from '../src/services/goals/GoalService';
+import { goalRepository } from '../src/database/repositories/GoalRepository';
+import { format, subDays, addDays } from 'date-fns';
 
 describe('LifePlanner Local-First Core Test Suite', () => {
   beforeAll(async () => {
@@ -269,4 +271,83 @@ describe('LifePlanner Local-First Core Test Suite', () => {
       expect(result.conflicts[0].itemB).toBe('Meeting B');
     });
   });
+
+  describe('10. Auto-Spawning Recurring Tasks', () => {
+    it('should automatically spawn next daily recurrence on completion', async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+
+      const recurringTask = await taskService.createTask({
+        title: 'Daily Standup Meeting',
+        date: today,
+        recurrenceRule: {
+          type: 'daily',
+          interval: 1,
+        },
+      });
+
+      expect(recurringTask.recurrenceRule?.type).toBe('daily');
+
+      // Complete the task
+      const completed = await taskService.completeTask(recurringTask.id);
+      expect(completed?.status).toBe('completed');
+
+      // Check that a new pending task was spawned for tomorrow
+      const tomorrowTasks = await taskRepository.findByDate(tomorrow);
+      const nextSpawned = tomorrowTasks.find(
+        (t) => t.title === 'Daily Standup Meeting' && t.status === 'pending'
+      );
+      expect(nextSpawned).toBeDefined();
+      expect(nextSpawned?.date).toBe(tomorrow);
+      expect(nextSpawned?.recurrenceRule?.type).toBe('daily');
+    });
+  });
+
+  describe('11. Goal Management & Linking', () => {
+    it('should create goal, link task, and compute progress correctly', async () => {
+      const goal = await goalService.createGoal({
+        title: 'Master React Native Architecture',
+        category: 'Learning',
+      });
+      expect(goal).toBeDefined();
+      expect(goal.title).toBe('Master React Native Architecture');
+      expect(goal.progress).toBe(0);
+
+      const task = await taskService.createTask({
+        title: 'Complete DB transactions lesson',
+        date: format(new Date(), 'yyyy-MM-dd'),
+      });
+
+      // Link task to goal
+      await goalService.linkTaskToGoal(goal.id, task.id);
+      const linkedTasks = await goalService.getGoalTasks(goal.id);
+      expect(linkedTasks.length).toBe(1);
+      expect(linkedTasks[0].id).toBe(task.id);
+
+      // Verify goal progress updates to 100% when task is completed
+      await taskService.completeTask(task.id);
+      const updatedGoal = await goalRepository.findById(goal.id);
+      expect(updatedGoal?.progress).toBe(100);
+
+      // Clean up goal
+      const deleted = await goalService.deleteGoal(goal.id);
+      expect(deleted).toBe(true);
+    });
+  });
+
+  describe('12. Multi-Field Task Search', () => {
+    it('should find tasks by notes, description, or title using keyword search', async () => {
+      const uniqueKeyword = `kw_${Date.now()}`;
+      const taskWithNotes = await taskService.createTask({
+        title: 'Review Documentation',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        notes: `Contains unique secret info: ${uniqueKeyword}`,
+      });
+
+      const results = await taskRepository.search(uniqueKeyword);
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      expect(results.some((t) => t.id === taskWithNotes.id)).toBe(true);
+    });
+  });
 });
+

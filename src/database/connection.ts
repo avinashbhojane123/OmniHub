@@ -105,6 +105,14 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       } else if (trimmed.includes('WHERE key = ?')) {
         const k = params[0];
         rows = rows.filter((r) => r.key === k);
+      } else if (trimmed.includes('LIKE ?')) {
+        const rawTerm = (params[0] || '').replace(/%/g, '').toLowerCase();
+        rows = rows.filter((r) => {
+          const t = (r.title || '').toLowerCase();
+          const d = (r.description || '').toLowerCase();
+          const n = (r.notes || '').toLowerCase();
+          return t.includes(rawTerm) || d.includes(rawTerm) || n.includes(rawTerm);
+        });
       } else if (trimmed.includes('OVERDUE') || trimmed.includes('status NOT IN')) {
         // Overdue query: (t.status NOT IN ('completed', 'cancelled')) AND (t.date < ? OR (t.date = ? AND t.startTime < ?))
         const today = params[0];
@@ -115,6 +123,28 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
           if (r.date === today && r.startTime && r.startTime < currentTime) return true;
           return false;
         });
+      }
+
+      // Handle goal_tasks JOIN tasks query
+      if (tableName === 'goal_tasks' && trimmed.includes('JOIN tasks')) {
+        const goalId = params[0];
+        const goalTasks = (this.tables.get('goal_tasks') || []).filter((gt) => gt.goalId === goalId);
+        const tasks = this.tables.get('tasks') || [];
+        const categories = this.tables.get('categories') || [];
+        rows = goalTasks
+          .map((gt) => {
+            const t = tasks.find((task) => task.id === gt.taskId);
+            if (!t) return null;
+            const cat = categories.find((c) => c.id === t.categoryId);
+            return {
+              ...t,
+              categoryName: cat?.name,
+              categoryColor: cat?.color,
+              categoryIcon: cat?.icon,
+            };
+          })
+          .filter(Boolean) as any[];
+        return { rows, rowsAffected: 0 };
       }
 
       // Add joined fields for categories if querying tasks
@@ -167,6 +197,13 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
           }
         }
 
+        if (tableName === 'goal_tasks') {
+          const existing = table.find((r) => r.goalId === newRow.goalId && r.taskId === newRow.taskId);
+          if (existing) {
+            return { rows: [], rowsAffected: 0 };
+          }
+        }
+
         table.push(newRow);
         this.tables.set(tableName, table);
       }
@@ -198,6 +235,14 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       const match = trimmed.match(/FROM\s+([a-zA-Z_]+)/i);
       const tableName = match ? match[1].toLowerCase() : '';
       const table = this.tables.get(tableName) || [];
+
+      if (trimmed.includes('WHERE goalId = ? AND taskId = ?')) {
+        const gid = params[0];
+        const tid = params[1];
+        const filtered = table.filter((r) => !(r.goalId === gid && r.taskId === tid));
+        this.tables.set(tableName, filtered);
+        return { rows: [], rowsAffected: table.length - filtered.length };
+      }
 
       if (params.length > 0) {
         const idParam = params[0];
@@ -262,8 +307,9 @@ class OPSQLiteAdapter implements DatabaseAdapter {
         rowsAffected: result?.rowsAffected ?? 0,
         insertId: result?.insertId,
       };
-    } catch {
-      return { rows: [], rowsAffected: 0 };
+    } catch (err) {
+      console.warn(`SQLite execute error for query "${query}":`, err);
+      throw err;
     }
   }
 
