@@ -56,75 +56,77 @@ export class BackupService {
 
       const db = await getDatabase();
 
-      // Clear existing records safely
-      await db.execute('DELETE FROM goal_tasks');
-      await db.execute('DELETE FROM goals');
-      await db.execute('DELETE FROM habit_logs');
-      await db.execute('DELETE FROM habits');
-      await db.execute('DELETE FROM calendar_events');
-      await db.execute('DELETE FROM tasks');
-      await db.execute('DELETE FROM categories');
-      await db.execute('DELETE FROM notes');
+      return await db.transaction(async (tx) => {
+        // Clear existing records safely within transaction
+        await tx.execute('DELETE FROM goal_tasks');
+        await tx.execute('DELETE FROM goals');
+        await tx.execute('DELETE FROM habit_logs');
+        await tx.execute('DELETE FROM habits');
+        await tx.execute('DELETE FROM calendar_events');
+        await tx.execute('DELETE FROM tasks');
+        await tx.execute('DELETE FROM categories');
+        await tx.execute('DELETE FROM notes');
 
-      // Restore categories
-      if (data.categories) {
-        for (const cat of data.categories) {
-          await categoryRepository.create(cat);
-        }
-      }
-
-      // Restore tasks
-      if (data.tasks) {
-        for (const task of data.tasks) {
-          await taskRepository.create(task);
-        }
-      }
-
-      // Restore calendar events
-      if (data.calendarEvents) {
-        for (const ev of data.calendarEvents) {
-          await calendarRepository.create(ev);
-        }
-      }
-
-      // Restore habits
-      if (data.habits) {
-        for (const h of data.habits) {
-          await habitRepository.create(h);
-        }
-      }
-
-      // Restore habit logs
-      if (data.habitLogs) {
-        for (const l of data.habitLogs) {
-          await habitRepository.logHabit(l.habitId, l.date, Boolean(l.completed), l.notes);
-        }
-      }
-
-      // Restore goals
-      if (data.goals) {
-        for (const g of data.goals) {
-          await goalRepository.create(g);
-        }
-      }
-
-      // Restore notes
-      if (data.notes) {
-        for (const n of data.notes) {
-          await noteRepository.create(n);
-        }
-      }
-
-      // Restore settings
-      if (data.settings && typeof data.settings === 'object') {
-        for (const [k, v] of Object.entries(data.settings)) {
-          if (typeof v === 'string') {
-            await settingsRepository.set(k, v);
+        // Restore categories
+        if (data.categories) {
+          for (const cat of data.categories) {
+            await categoryRepository.create(cat);
           }
         }
-      }
 
-      return { success: true, message: `Successfully restored ${data.tasks.length} tasks and productivity data.` };
+        // Restore tasks
+        if (data.tasks) {
+          for (const task of data.tasks) {
+            await taskRepository.create(task);
+          }
+        }
+
+        // Restore calendar events
+        if (data.calendarEvents) {
+          for (const ev of data.calendarEvents) {
+            await calendarRepository.create(ev);
+          }
+        }
+
+        // Restore habits
+        if (data.habits) {
+          for (const h of data.habits) {
+            await habitRepository.create(h);
+          }
+        }
+
+        // Restore habit logs
+        if (data.habitLogs) {
+          for (const l of data.habitLogs) {
+            await habitRepository.logHabit(l.habitId, l.date, Boolean(l.completed), l.notes);
+          }
+        }
+
+        // Restore goals
+        if (data.goals) {
+          for (const g of data.goals) {
+            await goalRepository.create(g);
+          }
+        }
+
+        // Restore notes
+        if (data.notes) {
+          for (const n of data.notes) {
+            await noteRepository.create(n);
+          }
+        }
+
+        // Restore settings
+        if (data.settings && typeof data.settings === 'object') {
+          for (const [k, v] of Object.entries(data.settings)) {
+            if (typeof v === 'string') {
+              await settingsRepository.set(k, v);
+            }
+          }
+        }
+
+        return { success: true, message: `Successfully restored ${data.tasks.length} tasks and productivity data.` };
+      });
     } catch (e: any) {
       // If a failure occurred and we took a rollback snapshot, attempt to re-restore the snapshot
       if (rollbackBackup) {
@@ -139,11 +141,12 @@ export class BackupService {
     }
   }
 
-  async syncToCompanionServer(serverUrl = 'http://localhost:3030'): Promise<{ success: boolean; message: string }> {
+  async syncToCompanionServer(serverUrl?: string): Promise<{ success: boolean; message: string }> {
     try {
+      const targetUrl = serverUrl || (await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030'));
       const jsonStr = await this.exportBackup();
       const payload = JSON.parse(jsonStr);
-      const res = await fetch(`${serverUrl}/backup`, {
+      const res = await fetch(`${targetUrl.replace(/\/+$/, '')}/backup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -157,9 +160,10 @@ export class BackupService {
     }
   }
 
-  async restoreFromCompanionServer(serverUrl = 'http://localhost:3030'): Promise<{ success: boolean; message: string }> {
+  async restoreFromCompanionServer(serverUrl?: string): Promise<{ success: boolean; message: string }> {
     try {
-      const res = await fetch(`${serverUrl}/backup/latest`);
+      const targetUrl = serverUrl || (await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030'));
+      const res = await fetch(`${targetUrl.replace(/\/+$/, '')}/backup/latest`);
       if (!res.ok) {
         throw new Error(`Companion server returned status ${res.status}`);
       }

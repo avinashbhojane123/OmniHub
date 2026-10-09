@@ -89,9 +89,11 @@ export class HabitRepository {
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
-    await db.execute('DELETE FROM habit_logs WHERE habitId = ?', [id]);
-    const result = await db.execute('DELETE FROM habits WHERE id = ?', [id]);
-    return result.rowsAffected > 0;
+    return await db.transaction(async (tx) => {
+      await tx.execute('DELETE FROM habit_logs WHERE habitId = ?', [id]);
+      const result = await tx.execute('DELETE FROM habits WHERE id = ?', [id]);
+      return result.rowsAffected > 0;
+    });
   }
 
   async logHabit(habitId: string, date: string, completed: boolean, notes?: string): Promise<HabitLog> {

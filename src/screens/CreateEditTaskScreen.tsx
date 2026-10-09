@@ -43,6 +43,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   const [notes, setNotes] = useState('');
   const [taskDate, setTaskDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [startTime, setStartTime] = useState<string | undefined>(undefined);
+  const [endTime, setEndTime] = useState<string | undefined>(undefined);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   useEffect(() => {
@@ -53,10 +54,26 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
       setNotes(existingTask.notes || existingTask.description || '');
       setTaskDate(existingTask.date || format(new Date(), 'yyyy-MM-dd'));
       setStartTime(existingTask.startTime);
+      setEndTime(existingTask.endTime);
     } else if (categories.length > 0 && !categoryId) {
       setCategoryId(categories[0].id);
     }
   }, [existingTask, categories, categoryId]);
+
+  const addMinutesToTime = (timeStr?: string, minutesToAdd = 30): string | undefined => {
+    if (!timeStr) return undefined;
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+    if (!match) return undefined;
+    let hours = parseInt(match[1], 10);
+    const mins = parseInt(match[2], 10);
+    const period = match[3]?.toLowerCase();
+    if (period === 'pm' && hours < 12) hours += 12;
+    if (period === 'am' && hours === 12) hours = 0;
+    const totalMin = hours * 60 + mins + minutesToAdd;
+    const newHours = Math.floor(totalMin / 60) % 24;
+    const newMins = totalMin % 60;
+    return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
+  };
 
   const validate = (): boolean => {
     const errs: { [key: string]: string } = {};
@@ -81,6 +98,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
           title: title.trim(),
           date: taskDate,
           startTime,
+          endTime,
           priority,
           categoryId,
           notes: notes.trim() || undefined,
@@ -90,6 +108,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
           title: title.trim(),
           date: taskDate,
           startTime,
+          endTime,
           priority,
           categoryId,
           notes: notes.trim() || undefined,
@@ -383,6 +402,69 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
             placeholderTextColor={colors.textMuted}
             value={startTime || ''}
             onChangeText={(val) => setStartTime(val.trim() || undefined)}
+          />
+        </View>
+
+        {/* End Time / Duration Selector */}
+        <View style={styles.formGroup}>
+          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+            END TIME / DURATION (FOR CONFLICT DETECTION)
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
+            {[
+              { label: 'None', mins: 0, time: undefined },
+              { label: '+30m', mins: 30, time: addMinutesToTime(startTime, 30) },
+              { label: '+45m', mins: 45, time: addMinutesToTime(startTime, 45) },
+              { label: '+1h', mins: 60, time: addMinutesToTime(startTime, 60) },
+              { label: '+2h', mins: 120, time: addMinutesToTime(startTime, 120) },
+            ].map((p) => {
+              const isSelected = p.mins === 0 ? !endTime : (endTime !== undefined && p.time === endTime);
+              return (
+                <TouchableOpacity
+                  key={p.label}
+                  onPress={() => {
+                    if (p.mins === 0) {
+                      setEndTime(undefined);
+                    } else {
+                      const calculated = addMinutesToTime(startTime || '09:00', p.mins);
+                      setEndTime(calculated);
+                    }
+                  }}
+                  style={[
+                    styles.categoryPill,
+                    {
+                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
+                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
+                    },
+                  ]}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.categoryPillText,
+                      isSelected ? styles.chipTextSelected : { color: colors.textSecondary },
+                    ]}
+                  >
+                    {p.mins === 0 ? '🏁 None' : `⏳ ${p.label}`}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <TextInput
+            style={[
+              styles.input,
+              styles.marginTopSm,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.borderSubtle,
+                color: colors.text,
+              },
+            ]}
+            placeholder="Custom end time e.g. 11:30 or 08:00 PM"
+            placeholderTextColor={colors.textMuted}
+            value={endTime || ''}
+            onChangeText={(val) => setEndTime(val.trim() || undefined)}
           />
         </View>
 

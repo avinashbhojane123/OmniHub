@@ -11,6 +11,7 @@ export interface QueryResultRow {
 export interface DatabaseAdapter {
   execute(query: string, params?: any[]): Promise<{ rows: QueryResultRow[]; rowsAffected: number; insertId?: number }>;
   executeSync?(query: string, params?: any[]): { rows: QueryResultRow[]; rowsAffected: number; insertId?: number };
+  transaction<T>(fn: (adapter: DatabaseAdapter) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -213,6 +214,19 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
     return { rows: [], rowsAffected: 0 };
   }
 
+  async transaction<T>(fn: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    const snapshot = new Map<string, any[]>();
+    for (const [key, val] of this.tables.entries()) {
+      snapshot.set(key, val.map((row) => ({ ...row })));
+    }
+    try {
+      return await fn(this);
+    } catch (err) {
+      this.tables = snapshot;
+      throw err;
+    }
+  }
+
   async close(): Promise<void> {}
 }
 
@@ -250,6 +264,20 @@ class OPSQLiteAdapter implements DatabaseAdapter {
       };
     } catch {
       return { rows: [], rowsAffected: 0 };
+    }
+  }
+
+  async transaction<T>(fn: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    await this.execute('BEGIN TRANSACTION;');
+    try {
+      const result = await fn(this);
+      await this.execute('COMMIT;');
+      return result;
+    } catch (err) {
+      try {
+        await this.execute('ROLLBACK;');
+      } catch {}
+      throw err;
     }
   }
 

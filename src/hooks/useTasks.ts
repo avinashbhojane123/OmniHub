@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { Task, CreateTaskDTO, UpdateTaskDTO, Category } from '../types';
 import { taskService } from '../services/tasks/TaskService';
 import { taskRepository } from '../database/repositories/TaskRepository';
@@ -31,6 +32,16 @@ export function useTasks() {
 
   useEffect(() => {
     refresh();
+
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        refresh();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, [refresh]);
 
   const createTask = async (dto: CreateTaskDTO) => {

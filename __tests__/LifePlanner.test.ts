@@ -6,6 +6,7 @@ import { statisticsService } from '../src/services/statistics/StatisticsService'
 import { backupService } from '../src/services/backup/BackupService';
 import { notificationService } from '../src/services/notifications/NotificationService';
 import { getDatabase } from '../src/database/connection';
+import { computeAgeStats } from '../src/components/ProfileModal';
 import { format, subDays } from 'date-fns';
 
 describe('LifePlanner Local-First Core Test Suite', () => {
@@ -202,6 +203,70 @@ describe('LifePlanner Local-First Core Test Suite', () => {
   describe('6. Reboot Recovery', () => {
     it('should execute restoreAllReminders without error', async () => {
       await expect(notificationService.restoreAllReminders()).resolves.not.toThrow();
+    });
+  });
+
+  describe('7. Atomic Transactions & Rollback Protection', () => {
+    it('should rollback in-memory state on transaction error', async () => {
+      const db = await getDatabase();
+      const initialCountRes = await db.execute('SELECT COUNT(*) as count FROM tasks');
+      const countBefore = initialCountRes.rows[0].count;
+
+      await expect(
+        db.transaction(async (tx) => {
+          await tx.execute(
+            'INSERT INTO tasks (id, title, date, status, priority, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            ['temp_task_tx', 'Tx Test Task', '2026-10-10', 'pending', 'medium', new Date().toISOString(), new Date().toISOString()]
+          );
+          throw new Error('Simulated failure during transaction');
+        })
+      ).rejects.toThrow('Simulated failure during transaction');
+
+      const countAfterRes = await db.execute('SELECT COUNT(*) as count FROM tasks');
+      expect(countAfterRes.rows[0].count).toBe(countBefore);
+    });
+  });
+
+  describe('8. Profile Age Validation', () => {
+    it('should reject future birth dates and return null for stats', () => {
+      const futureStats = computeAgeStats('2099-01-01');
+      expect(futureStats).toBeNull();
+
+      const validStats = computeAgeStats('2000-01-01');
+      expect(validStats).not.toBeNull();
+      expect(validStats?.years).toBeGreaterThan(0);
+    });
+  });
+
+  describe('9. Schedule Conflict Detection with End Time', () => {
+    it('should accurately detect overlapping tasks with explicit end times', () => {
+      const taskA: any = {
+        id: 't_a',
+        title: 'Meeting A',
+        startTime: '10:00',
+        endTime: '11:00',
+        status: 'pending',
+      };
+      const taskB: any = {
+        id: 't_b',
+        title: 'Meeting B',
+        startTime: '10:30',
+        endTime: '11:30',
+        status: 'pending',
+      };
+      const taskC: any = {
+        id: 't_c',
+        title: 'Meeting C',
+        startTime: '12:00',
+        endTime: '13:00',
+        status: 'pending',
+      };
+
+      const result = taskService.detectConflicts([taskA, taskB, taskC], []);
+      expect(result.hasConflict).toBe(true);
+      expect(result.conflicts.length).toBe(1);
+      expect(result.conflicts[0].itemA).toBe('Meeting A');
+      expect(result.conflicts[0].itemB).toBe('Meeting B');
     });
   });
 });

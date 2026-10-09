@@ -12,7 +12,10 @@ import {
   Modal,
   TextInput,
   Linking,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
+import notifee from '@notifee/react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../hooks/useTheme';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
@@ -34,6 +37,10 @@ export const SettingsScreen: React.FC = () => {
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
 
+  // Companion Server State
+  const [serverUrl, setServerUrl] = useState('http://10.0.2.2:3030');
+  const [syncingServer, setSyncingServer] = useState(false);
+
   useEffect(() => {
     loadSettings();
   }, []);
@@ -43,11 +50,13 @@ export const SettingsScreen: React.FC = () => {
     const sound = (await settingsRepository.get('notificationSound', 'true')) === 'true';
     const vib = (await settingsRepository.get('notificationVibration', 'true')) === 'true';
     const snooze = await settingsRepository.get('defaultSnoozeMinutes', '10');
+    const savedServerUrl = await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030');
 
     setNotificationsEnabled(notifs);
     setSoundEnabled(sound);
     setVibrationEnabled(vib);
     setSnoozeMinutes(snooze);
+    setServerUrl(savedServerUrl);
   };
 
   const toggleNotifs = async (val: boolean) => {
@@ -63,6 +72,87 @@ export const SettingsScreen: React.FC = () => {
   const toggleVib = async (val: boolean) => {
     setVibrationEnabled(val);
     await settingsRepository.set('notificationVibration', String(val));
+  };
+
+  const handleOpenBatterySettings = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        await notifee.openBatteryOptimizationSettings();
+      } catch {
+        Linking.openSettings();
+      }
+    } else {
+      Linking.openSettings();
+    }
+  };
+
+  const handleOpenPowerManager = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        await notifee.openPowerManagerSettings();
+      } catch {
+        Linking.openSettings();
+      }
+    } else {
+      Linking.openSettings();
+    }
+  };
+
+  const handleSyncToServer = async () => {
+    const trimmedUrl = serverUrl.trim();
+    if (!trimmedUrl) {
+      Alert.alert('Server URL Required', 'Please enter a valid companion server address.');
+      return;
+    }
+    try {
+      setSyncingServer(true);
+      await settingsRepository.set('companionServerUrl', trimmedUrl);
+      const res = await backupService.syncToCompanionServer(trimmedUrl);
+      if (res.success) {
+        Alert.alert('Sync Successful', res.message);
+      } else {
+        Alert.alert('Sync Failed', res.message);
+      }
+    } catch (e: any) {
+      Alert.alert('Sync Error', e.message || 'Could not reach companion server.');
+    } finally {
+      setSyncingServer(false);
+    }
+  };
+
+  const handleRestoreFromServer = async () => {
+    const trimmedUrl = serverUrl.trim();
+    if (!trimmedUrl) {
+      Alert.alert('Server URL Required', 'Please enter a valid companion server address.');
+      return;
+    }
+    Alert.alert(
+      'Restore From Server',
+      'This will replace current local data with the latest backup from the companion server. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSyncingServer(true);
+              await settingsRepository.set('companionServerUrl', trimmedUrl);
+              const res = await backupService.restoreFromCompanionServer(trimmedUrl);
+              if (res.success) {
+                Alert.alert('Restore Successful', res.message);
+              } else {
+                Alert.alert('Restore Failed', res.message);
+              }
+            } catch (e: any) {
+              Alert.alert('Restore Error', e.message || 'Could not restore from companion server.');
+            } finally {
+              setSyncingServer(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleExportBackup = async () => {
@@ -270,21 +360,44 @@ export const SettingsScreen: React.FC = () => {
             <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
 
             <TouchableOpacity
-              onPress={() => Linking.openSettings()}
+              onPress={handleOpenBatterySettings}
               style={styles.actionRow}
               accessibilityRole="button"
-              accessibilityLabel="Open System Battery & App Settings"
+              accessibilityLabel="Open System Battery Optimization Settings"
             >
               <View style={styles.settingTextCol}>
                 <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
-                  ⚡ Background & Battery Saver
+                  ⚡ Battery Optimization Whitelist
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
-                  Set "No restrictions" & enable "Autostart" for 100% reliable alarms on MIUI/HyperOS
+                  Set "No restrictions" for 100% reliable alarms and notifications
                 </Text>
               </View>
               <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
             </TouchableOpacity>
+
+            {Platform.OS === 'android' && (
+              <>
+                <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+
+                <TouchableOpacity
+                  onPress={handleOpenPowerManager}
+                  style={styles.actionRow}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Device Power Manager and Autostart Settings"
+                >
+                  <View style={styles.settingTextCol}>
+                    <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                      🚀 Autostart & Power Manager
+                    </Text>
+                    <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                      Enable autostart for MIUI/HyperOS, ColorOS, EMUI & OneUI
+                    </Text>
+                  </View>
+                  <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
 
@@ -319,6 +432,68 @@ export const SettingsScreen: React.FC = () => {
               </Text>
               <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Section: Companion Server Sync */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, typography.caption, { color: colors.textSecondary }]}>
+            LOCAL COMPANION SYNC (NESTJS SERVER)
+          </Text>
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.serverCardContent}>
+              <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                Companion Server Endpoint
+              </Text>
+              <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                NestJS server address (e.g. 10.0.2.2:3030 on Android Emulator or LAN IP)
+              </Text>
+              <TextInput
+                style={[
+                  styles.serverInput,
+                  {
+                    backgroundColor: colors.surfaceElevated,
+                    borderColor: colors.borderSubtle,
+                    color: colors.text,
+                  },
+                ]}
+                placeholder="http://10.0.2.2:3030"
+                placeholderTextColor={colors.textMuted}
+                value={serverUrl}
+                onChangeText={setServerUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <View style={styles.serverBtnRow}>
+                <TouchableOpacity
+                  onPress={handleSyncToServer}
+                  disabled={syncingServer}
+                  style={[styles.serverBtn, { backgroundColor: colors.primary }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sync To Companion Server"
+                >
+                  {syncingServer ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.serverBtnText}>☁️ Sync To Server</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleRestoreFromServer}
+                  disabled={syncingServer}
+                  style={[
+                    styles.serverBtn,
+                    styles.serverBtnOutline,
+                    { borderColor: colors.primary, backgroundColor: colors.surfaceElevated },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Restore From Companion Server"
+                >
+                  <Text style={[styles.serverBtnText, { color: colors.primary }]}>📥 Restore From Server</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
 
@@ -555,5 +730,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
     alignItems: 'center',
+  },
+  serverCardContent: {
+    padding: spacing.md,
+  },
+  serverInput: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 14,
+    marginBottom: spacing.md,
+  },
+  serverBtnRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  serverBtn: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  serverBtnOutline: {
+    borderWidth: 1,
+  },
+  serverBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });

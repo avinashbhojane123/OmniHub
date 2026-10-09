@@ -24,6 +24,7 @@ import {
   addYears,
   addMonths,
   isValid,
+  isAfter,
   setYear,
 } from 'date-fns';
 
@@ -47,9 +48,9 @@ export interface AgeCalculation {
 export function computeAgeStats(birthDateStr: string): AgeCalculation | null {
   try {
     const birthDate = parseISO(birthDateStr);
-    if (!isValid(birthDate)) return null;
-
     const now = new Date();
+    if (!isValid(birthDate) || isAfter(birthDate, now)) return null;
+
     const totalYears = differenceInYears(now, birthDate);
     const dateAfterYears = addYears(birthDate, totalYears);
     const months = differenceInMonths(now, dateAfterYears);
@@ -122,6 +123,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     const parsedDate = parseISO(trimmedDate);
     if (!isValid(parsedDate)) {
       Alert.alert('Invalid Date', 'Please enter a valid date in YYYY-MM-DD format (e.g. 2002-08-15).');
+      return;
+    }
+
+    if (isAfter(parsedDate, new Date())) {
+      Alert.alert('Invalid Date', 'Birth date cannot be in the future.');
       return;
     }
 

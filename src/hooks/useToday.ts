@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { Task, HabitWithStreak, CalendarEvent } from '../types';
 import { taskService } from '../services/tasks/TaskService';
 import { habitService } from '../services/habits/HabitService';
@@ -47,6 +48,16 @@ export function useToday() {
 
   useEffect(() => {
     refreshToday();
+
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        refreshToday();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, [refreshToday]);
 
   const toggleTask = async (task: Task) => {

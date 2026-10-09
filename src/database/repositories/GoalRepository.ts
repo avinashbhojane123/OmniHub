@@ -97,9 +97,11 @@ export class GoalRepository {
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
-    await db.execute('DELETE FROM goal_tasks WHERE goalId = ?', [id]);
-    const result = await db.execute('DELETE FROM goals WHERE id = ?', [id]);
-    return result.rowsAffected > 0;
+    return await db.transaction(async (tx) => {
+      await tx.execute('DELETE FROM goal_tasks WHERE goalId = ?', [id]);
+      const result = await tx.execute('DELETE FROM goals WHERE id = ?', [id]);
+      return result.rowsAffected > 0;
+    });
   }
 
   async linkTask(goalId: string, taskId: string): Promise<void> {
