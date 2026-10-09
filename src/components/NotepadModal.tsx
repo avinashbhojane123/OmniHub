@@ -15,7 +15,7 @@ import { useAppTheme } from '../hooks/useTheme';
 import { noteRepository } from '../database/repositories/NoteRepository';
 import { Note } from '../types';
 import { radius, spacing, typography } from '../theme';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 
 interface NotepadModalProps {
   visible: boolean;
@@ -220,7 +220,10 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
                           {n.content}
                         </Text>
                         <Text style={[styles.noteCardDate, typography.caption, { color: colors.textMuted }]}>
-                          Updated {format(new Date(n.updatedAt), 'MMM d, h:mm a')}
+                          Updated {(() => {
+                            const d = new Date(n.updatedAt);
+                            return isValid(d) ? format(d, 'MMM d, h:mm a') : 'Recently';
+                          })()}
                         </Text>
                       </View>
                       <TouchableOpacity

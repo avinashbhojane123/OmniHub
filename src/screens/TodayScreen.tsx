@@ -8,6 +8,10 @@ import {
   RefreshControl,
   StatusBar,
   Alert,
+  TextInput,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,10 +25,11 @@ import { BellIllustration } from '../components/BellIllustration';
 import { ProgressBar } from '../components/ProgressBar';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
 import { statisticsService } from '../services/statistics/StatisticsService';
+import { calendarService } from '../services/calendar/CalendarService';
 import { HabitWithStreak, ProductivityStats } from '../types';
 import { radius, spacing } from '../theme';
 import { parseBulletNotes } from '../utils/bulletNotes';
-import { format, subDays } from 'date-fns';
+import { format, subDays, isValid } from 'date-fns';
 
 interface TodayScreenProps {
   navigation: any;
@@ -36,6 +41,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
   const {
     todayTasks,
     habits,
+    calendarEvents,
     conflicts,
     loading,
     refreshToday,
@@ -54,6 +60,59 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
   const [stats, setStats] = useState<ProductivityStats | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'compact'>('cards');
+
+  // Calendar Event Modal State
+  const [calendarModalVisible, setCalendarModalVisible] = useState(false);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventDesc, setEventDesc] = useState('');
+  const [eventStartTime, setEventStartTime] = useState('10:00');
+  const [eventEndTime, setEventEndTime] = useState('11:00');
+  const [eventLocation, setEventLocation] = useState('');
+
+  const handleCreateEvent = async () => {
+    if (!eventTitle.trim()) {
+      Alert.alert('Validation Error', 'Please enter an event title.');
+      return;
+    }
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const startIso = `${today}T${eventStartTime.trim() || '10:00'}:00.000Z`;
+    const endIso = `${today}T${eventEndTime.trim() || '11:00'}:00.000Z`;
+
+    try {
+      await calendarService.createEvent({
+        title: eventTitle.trim(),
+        description: eventDesc.trim() || undefined,
+        startTime: startIso,
+        endTime: endIso,
+        location: eventLocation.trim() || undefined,
+        source: 'local',
+        isAllDay: false,
+      });
+      setCalendarModalVisible(false);
+      setEventTitle('');
+      setEventDesc('');
+      setEventStartTime('10:00');
+      setEventEndTime('11:00');
+      setEventLocation('');
+      await refreshToday();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Could not save event.');
+    }
+  };
+
+  const handleDeleteEvent = (eventId: string, title: string) => {
+    Alert.alert('Delete Event', `Are you sure you want to delete "${title}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await calendarService.deleteEvent(eventId);
+          await refreshToday();
+        },
+      },
+    ]);
+  };
 
   const loadStats = useCallback(async () => {
     try {
@@ -695,6 +754,81 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
             })}
           </View>
         )}
+
+        {/* Calendar Events Section */}
+        <View style={styles.tasksSection}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              Calendar & Events ({calendarEvents.length})
+            </Text>
+            <TouchableOpacity onPress={() => setCalendarModalVisible(true)}>
+              <Text style={[styles.seeAllText, { color: colors.primary }]}>
+                + Add Event
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {calendarEvents.length === 0 ? (
+            <View style={[styles.calEmptyBox, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+              <Text style={[styles.calEmptyTitle, { color: colors.textSecondary }]}>
+                No calendar events for today
+              </Text>
+              <TouchableOpacity
+                onPress={() => setCalendarModalVisible(true)}
+                style={[styles.calAddBtn, { borderColor: colors.primary }]}
+              >
+                <Text style={[styles.calAddBtnText, { color: colors.primary }]}>+ Schedule Event</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            calendarEvents.map((ev) => (
+              <View
+                key={ev.id}
+                style={[
+                  styles.eventCard,
+                  { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
+                ]}
+              >
+                <View style={styles.eventIconBadge}>
+                  <Text style={styles.eventIconEmoji}>📅</Text>
+                </View>
+                <View style={styles.eventInfoCol}>
+                  <Text style={[styles.eventTitle, { color: colors.text }]} numberOfLines={1}>
+                    {ev.title}
+                  </Text>
+                  <Text style={[styles.eventTime, { color: colors.textMuted }]}>
+                    {ev.startTime
+                      ? `${(() => {
+                          const d = new Date(ev.startTime);
+                          return isValid(d) ? format(d, 'h:mm a') : ev.startTime;
+                        })()}${
+                          ev.endTime
+                            ? ` – ${(() => {
+                                const d = new Date(ev.endTime);
+                                return isValid(d) ? format(d, 'h:mm a') : ev.endTime;
+                              })()}`
+                            : ''
+                        }`
+                      : 'All Day'}
+                    {ev.location ? ` • 📍 ${ev.location}` : ''}
+                  </Text>
+                  {ev.description ? (
+                    <Text style={[styles.eventDesc, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {ev.description}
+                    </Text>
+                  ) : null}
+                </View>
+                <TouchableOpacity
+                  onPress={() => handleDeleteEvent(ev.id, ev.title)}
+                  style={styles.eventDeleteBtn}
+                  accessibilityLabel="Delete event"
+                >
+                  <Text style={[styles.eventDeleteIcon, { color: colors.danger }]}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
+        </View>
       </ScrollView>
 
       {/* Floating Action Button (+) */}
@@ -719,6 +853,12 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
               text: '📝 Scheduled Task',
               onPress: () => {
                 navigation.navigate('CreateEditTask');
+              },
+            },
+            {
+              text: '📅 Calendar Event',
+              onPress: () => {
+                setCalendarModalVisible(true);
               },
             },
             { text: 'Cancel', style: 'cancel' },
@@ -756,6 +896,132 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           refreshToday();
         }}
       />
+
+      {/* Calendar Event Modal */}
+      <Modal visible={calendarModalVisible} transparent animationType="fade">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Schedule Calendar Event
+            </Text>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              EVENT TITLE *
+            </Text>
+            <TextInput
+              style={[
+                styles.modalTextInput,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.borderSubtle,
+                  color: colors.text,
+                },
+              ]}
+              placeholder="e.g. Strategy Sync, Doctor Visit..."
+              placeholderTextColor={colors.textMuted}
+              value={eventTitle}
+              onChangeText={setEventTitle}
+            />
+
+            <View style={styles.timeInputsRow}>
+              <View style={styles.timeInputCol}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                  START TIME
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalTextInput,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.borderSubtle,
+                      color: colors.text,
+                    },
+                  ]}
+                  placeholder="10:00"
+                  placeholderTextColor={colors.textMuted}
+                  value={eventStartTime}
+                  onChangeText={setEventStartTime}
+                />
+              </View>
+              <View style={styles.timeInputCol}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                  END TIME
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalTextInput,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.borderSubtle,
+                      color: colors.text,
+                    },
+                  ]}
+                  placeholder="11:00"
+                  placeholderTextColor={colors.textMuted}
+                  value={eventEndTime}
+                  onChangeText={setEventEndTime}
+                />
+              </View>
+            </View>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              LOCATION (OPTIONAL)
+            </Text>
+            <TextInput
+              style={[
+                styles.modalTextInput,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.borderSubtle,
+                  color: colors.text,
+                },
+              ]}
+              placeholder="e.g. Conference Room A or Zoom link"
+              placeholderTextColor={colors.textMuted}
+              value={eventLocation}
+              onChangeText={setEventLocation}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              DESCRIPTION (OPTIONAL)
+            </Text>
+            <TextInput
+              style={[
+                styles.modalTextInput,
+                styles.modalTextArea,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.borderSubtle,
+                  color: colors.text,
+                },
+              ]}
+              placeholder="Agenda or notes..."
+              placeholderTextColor={colors.textMuted}
+              value={eventDesc}
+              onChangeText={setEventDesc}
+              multiline
+            />
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                onPress={() => setCalendarModalVisible(false)}
+                style={[styles.modalCancelBtn, { borderColor: colors.borderSubtle }]}
+              >
+                <Text style={[styles.modalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleCreateEvent}
+                style={[styles.modalSaveBtn, { backgroundColor: colors.primary }]}
+              >
+                <Text style={styles.modalSaveText}>Save Event</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -1257,5 +1523,137 @@ const styles = StyleSheet.create({
   },
   routineEditTxt: {
     fontSize: 12,
+  },
+  calEmptyBox: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  calEmptyTitle: {
+    fontSize: 13,
+  },
+  calAddBtn: {
+    borderWidth: 1,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  calAddBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  eventCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  eventIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#3B82F620',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  eventIconEmoji: {
+    fontSize: 18,
+  },
+  eventInfoCol: {
+    flex: 1,
+  },
+  eventTitle: {
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  eventTime: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  eventDesc: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  eventDeleteBtn: {
+    padding: spacing.xs,
+  },
+  eventDeleteIcon: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.lg,
+  },
+  modalTitle: {
+    fontWeight: '700',
+    fontSize: 18,
+    marginBottom: spacing.md,
+  },
+  inputLabel: {
+    fontWeight: '700',
+    fontSize: 11,
+    marginTop: spacing.sm,
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  modalTextInput: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    fontSize: 14,
+  },
+  modalTextArea: {
+    minHeight: 50,
+    textAlignVertical: 'top',
+  },
+  timeInputsRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  timeInputCol: {
+    flex: 1,
+  },
+  modalBtnRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+  },
+  modalCancelText: {
+    fontWeight: '600',
+  },
+  modalSaveBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  modalSaveText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 });

@@ -10,6 +10,7 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTasks } from '../hooks/useTasks';
@@ -17,7 +18,8 @@ import { useAppTheme } from '../hooks/useTheme';
 import { radius, spacing, typography } from '../theme';
 import { GoogleKeepNotesEditor } from '../components/GoogleKeepNotesEditor';
 import { format, addDays } from 'date-fns';
-import { TaskPriority } from '../types';
+import { TaskPriority, RecurrenceType } from '../types';
+import { categoryRepository } from '../database/repositories/CategoryRepository';
 
 interface CreateEditTaskScreenProps {
   route: any;
@@ -30,7 +32,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
-  const { tasks, categories, createTask, updateTask, deleteTask } = useTasks();
+  const { tasks, categories, refresh, createTask, updateTask, deleteTask } = useTasks();
 
   const taskId = route.params?.taskId;
   const isEditing = Boolean(taskId);
@@ -44,7 +46,15 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   const [taskDate, setTaskDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [startTime, setStartTime] = useState<string | undefined>(undefined);
   const [endTime, setEndTime] = useState<string | undefined>(undefined);
+  const [reminderMinutes, setReminderMinutes] = useState<number>(0);
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('none');
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+
+  // New Category Modal State
+  const [newCatModalVisible, setNewCatModalVisible] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatIcon, setNewCatIcon] = useState('⭐');
+  const [newCatColor, setNewCatColor] = useState('#FF6B00');
 
   useEffect(() => {
     if (existingTask) {
@@ -55,6 +65,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
       setTaskDate(existingTask.date || format(new Date(), 'yyyy-MM-dd'));
       setStartTime(existingTask.startTime);
       setEndTime(existingTask.endTime);
+      setReminderMinutes(existingTask.reminderMinutes ?? 0);
+      setRecurrenceType(existingTask.recurrenceRule?.type || 'none');
     } else if (categories.length > 0 && !categoryId) {
       setCategoryId(categories[0].id);
     }
@@ -75,6 +87,29 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
     return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
   };
 
+  const handleCreateCategory = async () => {
+    if (!newCatName.trim()) {
+      Alert.alert('Validation Error', 'Please enter a category name.');
+      return;
+    }
+    try {
+      const id = `cat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const created = await categoryRepository.create({
+        id,
+        name: newCatName.trim(),
+        color: newCatColor,
+        icon: newCatIcon,
+        createdAt: new Date().toISOString(),
+      });
+      await refresh();
+      setCategoryId(created.id);
+      setNewCatModalVisible(false);
+      setNewCatName('');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not create category.');
+    }
+  };
+
   const validate = (): boolean => {
     const errs: { [key: string]: string } = {};
 
@@ -93,6 +128,14 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
     }
 
     try {
+      const recurrenceRule =
+        recurrenceType !== 'none'
+          ? {
+              type: recurrenceType,
+              interval: 1,
+            }
+          : undefined;
+
       if (isEditing && taskId) {
         await updateTask(taskId, {
           title: title.trim(),
@@ -101,6 +144,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
           endTime,
           priority,
           categoryId,
+          reminderMinutes,
+          recurrenceRule,
           notes: notes.trim() || undefined,
         });
       } else {
@@ -111,6 +156,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
           endTime,
           priority,
           categoryId,
+          reminderMinutes,
+          recurrenceRule,
           notes: notes.trim() || undefined,
         });
       }
@@ -255,6 +302,23 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                 </TouchableOpacity>
               );
             })}
+            <TouchableOpacity
+              onPress={() => setNewCatModalVisible(true)}
+              style={[
+                styles.categoryPill,
+                styles.categoryPillDashed,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.primary,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Add New Category"
+            >
+              <Text style={[styles.categoryPillText, { color: colors.primary }]}>
+                + Add Category
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
 
@@ -468,6 +532,89 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
           />
         </View>
 
+        {/* Reminder Notification Offset Selector */}
+        <View style={styles.formGroup}>
+          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+            REMINDER NOTIFICATION OFFSET
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
+            {[
+              { label: 'At start (0m)', mins: 0 },
+              { label: '5m before', mins: 5 },
+              { label: '10m before', mins: 10 },
+              { label: '15m before', mins: 15 },
+              { label: '30m before', mins: 30 },
+              { label: '1h before', mins: 60 },
+            ].map((rm) => {
+              const isSelected = reminderMinutes === rm.mins;
+              return (
+                <TouchableOpacity
+                  key={rm.label}
+                  onPress={() => setReminderMinutes(rm.mins)}
+                  style={[
+                    styles.categoryPill,
+                    {
+                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
+                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
+                    },
+                  ]}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.categoryPillText,
+                      isSelected ? styles.chipTextSelected : { color: colors.textSecondary },
+                    ]}
+                  >
+                    🔔 {rm.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Recurrence Schedule Selector */}
+        <View style={styles.formGroup}>
+          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+            RECURRENCE SCHEDULE (AUTO-SPAWNS ON COMPLETION)
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
+            {[
+              { label: 'Does not repeat', type: 'none' as const },
+              { label: 'Daily', type: 'daily' as const },
+              { label: 'Mon-Fri (Weekdays)', type: 'weekdays' as const },
+              { label: 'Weekly', type: 'weekly' as const },
+              { label: 'Monthly', type: 'monthly' as const },
+            ].map((rc) => {
+              const isSelected = recurrenceType === rc.type;
+              return (
+                <TouchableOpacity
+                  key={rc.label}
+                  onPress={() => setRecurrenceType(rc.type)}
+                  style={[
+                    styles.categoryPill,
+                    {
+                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
+                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
+                    },
+                  ]}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.categoryPillText,
+                      isSelected ? styles.chipTextSelected : { color: colors.textSecondary },
+                    ]}
+                  >
+                    🔄 {rc.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
         {/* Delete Button (If editing) */}
         {isEditing && (
           <TouchableOpacity
@@ -481,6 +628,89 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
         )}
       </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Create Custom Category Modal */}
+      <Modal visible={newCatModalVisible} transparent animationType="fade">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <Text style={[styles.modalTitle, typography.title, { color: colors.text }]}>
+              Create New Category
+            </Text>
+
+            <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
+              CATEGORY NAME *
+            </Text>
+            <TextInput
+              style={[
+                styles.modalTextInput,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.borderSubtle,
+                  color: colors.text,
+                },
+              ]}
+              placeholder="e.g. Study, Finance, Side Project"
+              placeholderTextColor={colors.textMuted}
+              value={newCatName}
+              onChangeText={setNewCatName}
+            />
+
+            <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
+              CHOOSE ICON
+            </Text>
+            <View style={styles.iconPickerRow}>
+              {['💼', '👤', '🏃', '💰', '📚', '🎨', '⭐', '🍳', '🛒', '🧘'].map((ic) => (
+                <TouchableOpacity
+                  key={ic}
+                  onPress={() => setNewCatIcon(ic)}
+                  style={[
+                    styles.iconCircle,
+                    { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
+                    newCatIcon === ic && { borderColor: colors.primary, backgroundColor: `${colors.primary}25` },
+                  ]}
+                >
+                  <Text style={styles.iconEmoji}>{ic}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
+              CHOOSE THEME COLOR
+            </Text>
+            <View style={styles.colorPalette}>
+              {['#FF6B00', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#F59E0B'].map((col) => (
+                <TouchableOpacity
+                  key={col}
+                  onPress={() => setNewCatColor(col)}
+                  style={[
+                    styles.colorCircle,
+                    { backgroundColor: col },
+                    newCatColor === col && styles.colorCircleActive,
+                  ]}
+                />
+              ))}
+            </View>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                onPress={() => setNewCatModalVisible(false)}
+                style={[styles.modalCancelBtn, { borderColor: colors.borderSubtle }]}
+              >
+                <Text style={[styles.modalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleCreateCategory}
+                style={[styles.modalSaveBtn, { backgroundColor: colors.primary }]}
+              >
+                <Text style={styles.modalSaveText}>Save Category</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -578,6 +808,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
   },
+  categoryPillDashed: {
+    borderStyle: 'dashed',
+  },
   categoryPillText: {
     fontWeight: '700',
     fontSize: 12,
@@ -619,5 +852,92 @@ const styles = StyleSheet.create({
   },
   marginTopSm: {
     marginTop: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.lg,
+  },
+  modalTitle: {
+    fontWeight: '700',
+    marginBottom: spacing.md,
+  },
+  inputLabel: {
+    fontWeight: '700',
+    marginTop: spacing.md,
+    marginBottom: 6,
+  },
+  modalTextInput: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  iconPickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginVertical: 4,
+  },
+  iconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  iconEmoji: {
+    fontSize: 18,
+  },
+  colorPalette: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginVertical: spacing.xs,
+  },
+  colorCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  colorCircleActive: {
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    transform: [{ scale: 1.15 }],
+  },
+  modalBtnRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+  },
+  modalCancelText: {
+    fontWeight: '600',
+  },
+  modalSaveBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  modalSaveText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 });

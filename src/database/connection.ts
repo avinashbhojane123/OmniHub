@@ -400,6 +400,21 @@ class DatabaseManager {
       }
     }
 
+    try {
+      await this.adapter.execute(
+        'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, appliedAt TEXT NOT NULL);'
+      );
+      const now = new Date().toISOString();
+      await this.adapter.execute(
+        'INSERT OR IGNORE INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)',
+        [1, 'v1_initial_core_schema', now]
+      );
+      await this.adapter.execute(
+        'INSERT OR IGNORE INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)',
+        [2, 'v2_goals_notes_calendar_schema', now]
+      );
+    } catch {}
+
     // Ensure backwards compatibility for schema evolution across app updates
     try {
       const taskCols = await this.adapter.execute('PRAGMA table_info(tasks)');
