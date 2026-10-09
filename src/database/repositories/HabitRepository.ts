@@ -163,28 +163,21 @@ export class HabitRepository {
     if (habits.length === 0) return [];
 
     const db = await getDatabase();
-    const allLogsResult = await db.execute('SELECT * FROM habit_logs ORDER BY date DESC');
-    const logsByHabit = new Map<string, any[]>();
+    const allLogsResult = await db.execute(
+      'SELECT habitId, date FROM habit_logs WHERE completed = 1 ORDER BY date DESC'
+    );
+    const logsByHabit = new Map<string, string[]>();
     for (const r of allLogsResult.rows) {
       if (!logsByHabit.has(r.habitId)) {
         logsByHabit.set(r.habitId, []);
       }
-      logsByHabit.get(r.habitId)!.push(r);
+      logsByHabit.get(r.habitId)!.push(r.date);
     }
 
     const result: HabitWithStreak[] = [];
 
     for (const habit of habits) {
-      const logs = (logsByHabit.get(habit.id) || []).map((r) => ({
-        id: r.id,
-        habitId: r.habitId,
-        date: r.date,
-        completed: Boolean(r.completed),
-        value: Number(r.value),
-        notes: r.notes ?? undefined,
-        createdAt: r.createdAt,
-      }));
-      const completedDates = new Set(logs.filter((l) => l.completed).map((l) => l.date));
+      const completedDates = new Set(logsByHabit.get(habit.id) || []);
 
       const allowedDays =
         habit.recurrenceRule?.daysOfWeek && habit.recurrenceRule.daysOfWeek.length > 0

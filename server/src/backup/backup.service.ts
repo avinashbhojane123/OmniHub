@@ -25,6 +25,15 @@ export class BackupService {
     if (!payload.version || !Array.isArray(payload.tasks)) {
       throw new BadRequestException('Invalid backup schema. Required "version" and "tasks" array.');
     }
+    if (payload.categories && !Array.isArray(payload.categories)) {
+      throw new BadRequestException('Invalid backup schema. "categories" must be an array.');
+    }
+    if (payload.habits && !Array.isArray(payload.habits)) {
+      throw new BadRequestException('Invalid backup schema. "habits" must be an array.');
+    }
+    if (payload.goals && !Array.isArray(payload.goals)) {
+      throw new BadRequestException('Invalid backup schema. "goals" must be an array.');
+    }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `backup_${timestamp}.json`;
@@ -56,12 +65,15 @@ export class BackupService {
     const metaList: BackupMeta[] = [];
 
     for (const file of jsonFiles) {
-      const stats = await fs.promises.stat(path.join(this.backupDir, file));
-      metaList.push({
-        filename: file,
-        timestamp: stats.mtime.toISOString(),
-        sizeBytes: stats.size,
-      });
+      const filePath = path.join(this.backupDir, file);
+      const stats = await fs.promises.stat(filePath);
+      if (stats.isFile()) {
+        metaList.push({
+          filename: file,
+          timestamp: stats.mtime.toISOString(),
+          sizeBytes: stats.size,
+        });
+      }
     }
 
     return metaList;

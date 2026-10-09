@@ -111,6 +111,8 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
         if (trimmed.includes('AND entityId = ?') && params[1]) {
           rows = rows.filter((r) => r.entityId === params[1]);
         }
+      } else if (trimmed.includes('WHERE completed = 1')) {
+        rows = rows.filter((r) => Boolean(r.completed));
       } else if (trimmed.includes('LIKE ?')) {
         const rawTerm = (params[0] || '').replace(/%/g, '').toLowerCase();
         rows = rows.filter((r) => {
