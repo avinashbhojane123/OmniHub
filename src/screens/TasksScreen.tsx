@@ -69,6 +69,33 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
     );
   };
 
+  const handleClearCompleted = () => {
+    const completedTasks = tasks.filter((t) => t.status === 'completed');
+    if (completedTasks.length === 0) return;
+
+    Alert.alert(
+      'Clear Completed Tasks',
+      `Are you sure you want to delete ${completedTasks.length} completed ${
+        completedTasks.length === 1 ? 'task' : 'tasks'
+      }?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await Promise.all(completedTasks.map((t) => deleteTask(t.id)));
+              refresh();
+            } catch (err) {
+              console.warn('Failed to clear completed tasks:', err);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <View
       style={[
@@ -91,14 +118,29 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
               {filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={() => setNotepadVisible(true)}
-            style={[styles.notesBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-            accessibilityRole="button"
-            accessibilityLabel="Open Standalone Notes"
-          >
-            <Text style={[styles.notesBtnText, { color: colors.primary }]}>📝 Notes</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {tasks.some((t) => t.status === 'completed') && (
+              <TouchableOpacity
+                onPress={handleClearCompleted}
+                style={[
+                  styles.clearCompletedBtn,
+                  { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Clear All Completed Tasks"
+              >
+                <Text style={[styles.clearCompletedBtnText, { color: colors.danger }]}>🧹 Clear</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => setNotepadVisible(true)}
+              style={[styles.notesBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
+              accessibilityRole="button"
+              accessibilityLabel="Open Standalone Notes"
+            >
+              <Text style={[styles.notesBtnText, { color: colors.primary }]}>📝 Notes</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Search Bar */}
@@ -230,6 +272,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.md,
     marginBottom: spacing.md,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  clearCompletedBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
+  clearCompletedBtnText: {
+    fontWeight: '700',
+    fontSize: 13,
   },
   notesBtn: {
     paddingHorizontal: spacing.md,

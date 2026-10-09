@@ -29,6 +29,7 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadNotes = useCallback(async () => {
     try {
@@ -44,8 +45,17 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
       loadNotes();
       setIsEditing(false);
       setSelectedNote(null);
+      setSearchQuery('');
     }
   }, [visible, loadNotes]);
+
+  const filteredNotes = notes.filter((n) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const t = (n.title || '').toLowerCase();
+    const c = (n.content || '').toLowerCase();
+    return t.includes(q) || c.includes(q);
+  });
 
   const handleStartCreate = () => {
     setSelectedNote(null);
@@ -186,6 +196,36 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
                 <Text style={styles.newNoteBtnText}>+ Write New Note</Text>
               </TouchableOpacity>
 
+              {notes.length > 0 && (
+                <View
+                  style={[
+                    styles.searchBar,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.borderSubtle,
+                    },
+                  ]}
+                >
+                  <Text style={styles.searchIcon}>🔍</Text>
+                  <TextInput
+                    style={[styles.searchInput, typography.body, { color: colors.text }]}
+                    placeholder="Search notes..."
+                    placeholderTextColor={colors.textMuted}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                  />
+                  {searchQuery.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => setSearchQuery('')}
+                      style={styles.clearSearchBtn}
+                      accessibilityLabel="Clear Search"
+                    >
+                      <Text style={[styles.clearSearchText, { color: colors.textMuted }]}>✕</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
               <ScrollView style={styles.notesScroll} showsVerticalScrollIndicator={false}>
                 {notes.length === 0 ? (
                   <View style={styles.emptyContainer}>
@@ -194,8 +234,15 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
                       No notes yet. Tap "+ Write New Note" to capture your ideas.
                     </Text>
                   </View>
+                ) : filteredNotes.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyIcon}>🔍</Text>
+                    <Text style={[styles.emptyText, typography.body, { color: colors.textMuted }]}>
+                      No notes found matching "{searchQuery}".
+                    </Text>
+                  </View>
                 ) : (
-                  notes.map((n) => (
+                  filteredNotes.map((n) => (
                     <TouchableOpacity
                       key={n.id}
                       onPress={() => handleStartEdit(n)}
@@ -292,6 +339,31 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 14,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+    height: 38,
+  },
+  searchIcon: {
+    fontSize: 14,
+    marginRight: spacing.xs,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    paddingVertical: 0,
+  },
+  clearSearchBtn: {
+    padding: spacing.xs,
+  },
+  clearSearchText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   notesScroll: {
     maxHeight: 380,

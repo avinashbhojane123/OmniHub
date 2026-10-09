@@ -725,6 +725,11 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
                           ⏰ {task.startTime}
                         </Text>
                       )}
+                      {task.recurrenceRule && task.recurrenceRule.type !== 'none' && (
+                        <Text style={[styles.taskTime, { color: colors.primary }]}>
+                          🔄 {task.recurrenceRule.type}
+                        </Text>
+                      )}
                     </View>
 
                     {bullets.length > 0 && (

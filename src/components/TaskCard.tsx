@@ -216,6 +216,19 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 🔔 {task.reminderMinutes}m before
               </Text>
             ) : null}
+
+            {task.recurrenceRule && task.recurrenceRule.type !== 'none' ? (
+              <View
+                style={[
+                  styles.recurrenceBadge,
+                  { backgroundColor: `${colors.primary}25` },
+                ]}
+              >
+                <Text style={[styles.recurrenceText, { color: colors.primary }]}>
+                  🔄 {task.recurrenceRule.type.charAt(0).toUpperCase() + task.recurrenceRule.type.slice(1)}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -351,6 +364,15 @@ const styles = StyleSheet.create({
   },
   reminderText: {
     fontSize: 11,
+  },
+  recurrenceBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: radius.xs,
+  },
+  recurrenceText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   cardActionsCol: {
     flexDirection: 'row',

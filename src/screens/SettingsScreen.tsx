@@ -471,6 +471,17 @@ export const SettingsScreen: React.FC = () => {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+              <View
+                style={[
+                  styles.lanTipBox,
+                  { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
+                ]}
+              >
+                <Text style={styles.lanTipIcon}>💡</Text>
+                <Text style={[styles.lanTipText, typography.caption, { color: colors.textSecondary }]}>
+                  Physical device: use your PC's LAN IP (e.g. http://192.168.1.X:3030). Emulator: http://10.0.2.2:3030.
+                </Text>
+              </View>
               <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
                 API Secret Key (Optional)
               </Text>
@@ -770,7 +781,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     fontSize: 14,
+    marginBottom: spacing.sm,
+  },
+  lanTipBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
     marginBottom: spacing.md,
+    gap: spacing.xs,
+  },
+  lanTipIcon: {
+    fontSize: 14,
+  },
+  lanTipText: {
+    flex: 1,
+    lineHeight: 16,
   },
   serverBtnRow: {
     flexDirection: 'row',
