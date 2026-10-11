@@ -9,7 +9,6 @@ import { batteryService } from './src/services/battery/BatteryService';
 import { AlarmRingingModal } from './src/components/AlarmRingingModal';
 import { ThemeProvider, useAppTheme } from './src/hooks/useTheme';
 import { safeGuardStore } from './src/services/safeguard/SafeGuardStore';
-import { settingsRepository } from './src/database/repositories/SettingsRepository';
 
 function MainApp() {
   const [ready, setReady] = useState(false);
@@ -57,26 +56,10 @@ function MainApp() {
             setInitialRoute('WorkspaceSelect');
           }
         } else {
-          const remember = await settingsRepository.get('remember_workspace', 'false');
-          if (remember === 'true') {
-            const defaultWs = await settingsRepository.get('default_workspace', 'planner');
-            if (defaultWs === 'planner') {
-              setInitialRoute('MainTabs');
-            } else if (defaultWs === 'chat') {
-              setInitialRoute('Chat');
-            } else if (defaultWs === 'battery') {
-              setInitialRoute('BatteryAlarm');
-            } else if (defaultWs === 'safeguard') {
-              setInitialRoute('SafeGuard');
-            } else {
-              setInitialRoute('WorkspaceSelect');
-            }
-          } else {
-            setInitialRoute('WorkspaceSelect');
-          }
+          setInitialRoute('WorkspaceSelect');
         }
       } catch (wsErr) {
-        console.warn('Failed to load remembered workspace:', wsErr);
+        console.warn('Failed to resolve startup workspace:', wsErr);
         setInitialRoute('WorkspaceSelect');
       }
 

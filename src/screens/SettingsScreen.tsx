@@ -51,10 +51,6 @@ export const SettingsScreen: React.FC = () => {
   const [syncingCalendar, setSyncingCalendar] = useState(false);
   const [lastCalendarSync, setLastCalendarSync] = useState<string | null>(null);
 
-  // Workspace Startup Preference State
-  const [rememberWorkspace, setRememberWorkspace] = useState(false);
-  const [defaultWorkspace, setDefaultWorkspace] = useState('planner');
-
   useEffect(() => {
     loadSettings();
   }, []);
@@ -67,8 +63,6 @@ export const SettingsScreen: React.FC = () => {
     const savedServerUrl = await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030');
     const savedApiKey = await settingsRepository.get('companionApiKey', '');
     const lastSyncAt = await settingsRepository.get('lastCalendarSyncAt', '');
-    const savedRemember = (await settingsRepository.get('remember_workspace', 'false')) === 'true';
-    const savedDefaultWs = await settingsRepository.get('default_workspace', 'planner');
 
     setNotificationsEnabled(notifs);
     setSoundEnabled(sound);
@@ -76,26 +70,11 @@ export const SettingsScreen: React.FC = () => {
     setSnoozeMinutes(snooze);
     setServerUrl(savedServerUrl);
     setApiKey(savedApiKey);
-    setRememberWorkspace(savedRemember);
-    setDefaultWorkspace(savedDefaultWs);
     if (lastSyncAt) {
       try {
         setLastCalendarSync(new Date(lastSyncAt).toLocaleTimeString());
       } catch {}
     }
-  };
-
-  const toggleRememberWorkspace = async (val: boolean) => {
-    setRememberWorkspace(val);
-    await settingsRepository.set('remember_workspace', String(val));
-    if (val) {
-      await settingsRepository.set('default_workspace', defaultWorkspace);
-    }
-  };
-
-  const handleSelectDefaultWorkspace = async (ws: string) => {
-    setDefaultWorkspace(ws);
-    await settingsRepository.set('default_workspace', ws);
   };
 
   const toggleNotifs = async (val: boolean) => {
@@ -414,71 +393,6 @@ export const SettingsScreen: React.FC = () => {
               </View>
               <Text style={{ fontSize: 14, color: '#EC4899', fontWeight: '800' }}>Open ➔</Text>
             </TouchableOpacity>
-
-            <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
-
-            <View style={styles.settingRow}>
-              <View style={styles.settingTextCol}>
-                <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
-                  Remember Default Workspace
-                </Text>
-                <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
-                  {rememberWorkspace
-                    ? 'Automatically launch chosen workspace on app startup'
-                    : 'Show OmniHub workspace chooser on app startup'}
-                </Text>
-              </View>
-              <Switch
-                value={rememberWorkspace}
-                onValueChange={toggleRememberWorkspace}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-
-            {rememberWorkspace && (
-              <View style={{ paddingTop: 8, paddingBottom: 6 }}>
-                <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: 8 }]}>
-                  STARTUP DEFAULT:
-                </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {[
-                    { id: 'planner', label: '✓ Planner', color: '#8B5CF6' },
-                    { id: 'chat', label: '💬 Chat', color: '#06B6D4' },
-                    { id: 'battery', label: '⚡ Battery', color: '#10B981' },
-                    { id: 'safeguard', label: '🛡️ SafeGuard', color: '#EC4899' },
-                  ].map((ws) => {
-                    const isSelected = defaultWorkspace === ws.id;
-                    return (
-                      <TouchableOpacity
-                        key={ws.id}
-                        onPress={() => handleSelectDefaultWorkspace(ws.id)}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          paddingHorizontal: 12,
-                          paddingVertical: 7,
-                          borderRadius: 8,
-                          backgroundColor: isSelected ? `${ws.color}25` : colors.surface,
-                          borderColor: isSelected ? ws.color : colors.borderSubtle,
-                          borderWidth: 1,
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 12,
-                            fontWeight: isSelected ? '800' : '600',
-                            color: isSelected ? ws.color : colors.textSecondary,
-                          }}
-                        >
-                          {ws.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
 
             <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
 

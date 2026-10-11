@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Switch,
   StatusBar,
   ScrollView,
   Modal,
@@ -109,8 +108,6 @@ export const WorkspaceSelectScreen: React.FC = () => {
   const carouselSnapStep = carouselCardWidth + carouselSpacing;
 
   const [selectedMode, setSelectedMode] = useState<WorkspaceMode>('planner');
-  const [rememberChoice, setRememberChoice] = useState(false);
-  const [savedDefaultWorkspace, setSavedDefaultWorkspace] = useState<WorkspaceMode>('planner');
   const [viewMode, setViewMode] = useState<'grid' | 'carousel'>('grid');
 
   // Live Telemetry states
@@ -151,36 +148,11 @@ export const WorkspaceSelectScreen: React.FC = () => {
   // Load preferences concurrently on mount
   useEffect(() => {
     let isMounted = true;
-    Promise.all([
-      settingsRepository.get('remember_workspace', 'false'),
-      settingsRepository.get('default_workspace', 'planner'),
-      settingsRepository.get('workspace_view_mode', 'grid'),
-    ])
-      .then(([rememberVal, defaultVal, viewModeVal]) => {
+    settingsRepository.get('workspace_view_mode', 'grid')
+      .then((viewModeVal) => {
         if (!isMounted) return;
-        setRememberChoice(rememberVal === 'true');
-        const validWs =
-          defaultVal === 'planner' ||
-          defaultVal === 'chat' ||
-          defaultVal === 'battery' ||
-          defaultVal === 'safeguard'
-            ? (defaultVal as WorkspaceMode)
-            : 'planner';
-        setSelectedMode(validWs);
-        setSavedDefaultWorkspace(validWs);
         if (viewModeVal === 'grid' || viewModeVal === 'carousel') {
           setViewMode(viewModeVal as 'grid' | 'carousel');
-          if (viewModeVal === 'carousel') {
-            const targetIndex = WORKSPACES.findIndex((w) => w.id === validWs);
-            if (targetIndex >= 0) {
-              setTimeout(() => {
-                carouselScrollRef.current?.scrollTo({
-                  x: targetIndex * carouselSnapStep,
-                  animated: false,
-                });
-              }, 120);
-            }
-          }
         }
       })
       .catch(() => {});
@@ -188,7 +160,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [carouselSnapStep]);
+  }, []);
 
   // Fresh Telemetry on Every Screen Focus (fixes stale counts)
   useFocusEffect(
@@ -290,12 +262,8 @@ export const WorkspaceSelectScreen: React.FC = () => {
     }
   };
 
-  const handleSelectMode = async (mode: WorkspaceMode, scrollIndex?: number) => {
+  const handleSelectMode = (mode: WorkspaceMode, scrollIndex?: number) => {
     setSelectedMode(mode);
-    if (rememberChoice) {
-      setSavedDefaultWorkspace(mode);
-      await settingsRepository.set('default_workspace', mode);
-    }
     if (viewMode === 'carousel' && carouselScrollRef.current) {
       const targetIndex =
         scrollIndex !== undefined
@@ -310,15 +278,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
     }
   };
 
-  const executeLaunch = async (modeToEnter: WorkspaceMode) => {
-    if (rememberChoice) {
-      await settingsRepository.set('remember_workspace', 'true');
-      await settingsRepository.set('default_workspace', modeToEnter);
-      setSavedDefaultWorkspace(modeToEnter);
-    } else {
-      await settingsRepository.set('remember_workspace', 'false');
-    }
-
+  const executeLaunch = (modeToEnter: WorkspaceMode) => {
     const targetConfig = WORKSPACES.find((w) => w.id === modeToEnter);
     const targetRoute = targetConfig?.route || 'MainTabs';
 
@@ -396,15 +356,6 @@ export const WorkspaceSelectScreen: React.FC = () => {
         setPinError(false);
         setIsVerifyingPin(false);
       }, 700);
-    }
-  };
-
-  const handleToggleRemember = async (val: boolean) => {
-    setRememberChoice(val);
-    await settingsRepository.set('remember_workspace', val ? 'true' : 'false');
-    if (val) {
-      await settingsRepository.set('default_workspace', selectedMode);
-      setSavedDefaultWorkspace(selectedMode);
     }
   };
 
@@ -614,33 +565,6 @@ export const WorkspaceSelectScreen: React.FC = () => {
           >
             4 standalone power suites. Tap to select or launch directly.
           </Text>
-
-          {/* Current Default Startup Badge */}
-          {rememberChoice && (
-            <View
-              style={[
-                styles.startupBadge,
-                {
-                  backgroundColor: isDark
-                    ? 'rgba(255, 255, 255, 0.06)'
-                    : 'rgba(15, 23, 42, 0.05)',
-                  borderColor: colors.borderSubtle,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.startupBadgeText,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                ⭐ Startup Default:{' '}
-                <Text style={{ fontWeight: '800', color: colors.text }}>
-                  {WORKSPACES.find((w) => w.id === savedDefaultWorkspace)?.name || 'Planner'}
-                </Text>
-              </Text>
-            </View>
-          )}
         </View>
 
         {/* Main Content Area: 2x2 Bento Grid vs. Detailed Carousel */}
@@ -1026,57 +950,6 @@ export const WorkspaceSelectScreen: React.FC = () => {
 
         {/* Bottom Controls Section */}
         <View style={styles.bottomSection}>
-          <View
-            style={[
-              styles.rememberCard,
-              {
-                backgroundColor: isDark
-                  ? 'rgba(255, 255, 255, 0.04)'
-                  : 'rgba(15, 23, 42, 0.03)',
-                borderColor: colors.borderSubtle,
-              },
-            ]}
-          >
-            <View style={styles.rememberRow}>
-              <Switch
-                value={rememberChoice}
-                onValueChange={handleToggleRemember}
-                accessibilityRole="switch"
-                accessibilityLabel="Remember choice for startup"
-                accessibilityState={{ checked: rememberChoice }}
-                trackColor={{
-                  false: isDark ? '#334155' : '#CBD5E1',
-                  true: activeWorkspace.color,
-                }}
-                thumbColor={rememberChoice ? '#FFFFFF' : '#94A3B8'}
-              />
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => handleToggleRemember(!rememberChoice)}
-                style={styles.rememberLabelCol}
-              >
-                <Text
-                  style={[
-                    styles.rememberLabel,
-                    { color: colors.text },
-                  ]}
-                >
-                  Remember choice for startup
-                </Text>
-                <Text
-                  style={[
-                    styles.rememberSubtext,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  {rememberChoice
-                    ? `Auto-opens ${activeWorkspace.name} on launch`
-                    : 'Show this workspace selector each time app starts'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
           {/* Prominent Launch Button */}
           <TouchableOpacity
             style={[
@@ -1327,17 +1200,6 @@ const styles = StyleSheet.create({
     maxWidth: 320,
     marginBottom: 6,
   },
-  startupBadge: {
-    marginTop: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  startupBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
 
   // 2x2 Bento Grid Styles (Guaranteed Equal-Height Row Alignment)
   gridContainer: {
@@ -1553,31 +1415,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     marginTop: 8,
-  },
-  rememberCard: {
-    width: '100%',
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 10,
-    marginBottom: 12,
-  },
-  rememberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-  },
-  rememberLabelCol: {
-    marginLeft: 10,
-    flex: 1,
-  },
-  rememberLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  rememberSubtext: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 1.5,
   },
   continueButton: {
     width: '100%',
