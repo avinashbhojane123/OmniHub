@@ -17,14 +17,18 @@ import {
 } from 'react-native';
 import notifee from '@notifee/react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { useAppTheme } from '../hooks/useTheme';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
 import { backupService } from '../services/backup/BackupService';
 import { radius, spacing, typography } from '../theme';
 import { alarmService } from '../services/alarm/AlarmService';
+import { notificationService } from '../services/notifications/NotificationService';
+import { calendarService } from '../services/calendar/CalendarService';
 
 export const SettingsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const { colors, themeMode, changeTheme } = useAppTheme();
 
   // Notification Settings State
@@ -41,6 +45,15 @@ export const SettingsScreen: React.FC = () => {
   const [serverUrl, setServerUrl] = useState('http://10.0.2.2:3030');
   const [apiKey, setApiKey] = useState('');
   const [syncingServer, setSyncingServer] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+
+  // Calendar Sync State
+  const [syncingCalendar, setSyncingCalendar] = useState(false);
+  const [lastCalendarSync, setLastCalendarSync] = useState<string | null>(null);
+
+  // Workspace Startup Preference State
+  const [rememberWorkspace, setRememberWorkspace] = useState(false);
+  const [defaultWorkspace, setDefaultWorkspace] = useState('planner');
 
   useEffect(() => {
     loadSettings();
@@ -53,6 +66,9 @@ export const SettingsScreen: React.FC = () => {
     const snooze = await settingsRepository.get('defaultSnoozeMinutes', '10');
     const savedServerUrl = await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030');
     const savedApiKey = await settingsRepository.get('companionApiKey', '');
+    const lastSyncAt = await settingsRepository.get('lastCalendarSyncAt', '');
+    const savedRemember = (await settingsRepository.get('remember_workspace', 'false')) === 'true';
+    const savedDefaultWs = await settingsRepository.get('default_workspace', 'planner');
 
     setNotificationsEnabled(notifs);
     setSoundEnabled(sound);
@@ -60,6 +76,26 @@ export const SettingsScreen: React.FC = () => {
     setSnoozeMinutes(snooze);
     setServerUrl(savedServerUrl);
     setApiKey(savedApiKey);
+    setRememberWorkspace(savedRemember);
+    setDefaultWorkspace(savedDefaultWs);
+    if (lastSyncAt) {
+      try {
+        setLastCalendarSync(new Date(lastSyncAt).toLocaleTimeString());
+      } catch {}
+    }
+  };
+
+  const toggleRememberWorkspace = async (val: boolean) => {
+    setRememberWorkspace(val);
+    await settingsRepository.set('remember_workspace', String(val));
+    if (val) {
+      await settingsRepository.set('default_workspace', defaultWorkspace);
+    }
+  };
+
+  const handleSelectDefaultWorkspace = async (ws: string) => {
+    setDefaultWorkspace(ws);
+    await settingsRepository.set('default_workspace', ws);
   };
 
   const toggleNotifs = async (val: boolean) => {
@@ -81,6 +117,18 @@ export const SettingsScreen: React.FC = () => {
     if (Platform.OS === 'android') {
       try {
         await notifee.openBatteryOptimizationSettings();
+      } catch {
+        Linking.openSettings();
+      }
+    } else {
+      Linking.openSettings();
+    }
+  };
+
+  const handleOpenExactAlarmSettings = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        await alarmService.openExactAlarmSettings();
       } catch {
         Linking.openSettings();
       }
@@ -125,6 +173,45 @@ export const SettingsScreen: React.FC = () => {
     }
   };
 
+  const handleTestConnection = async () => {
+    const trimmedUrl = serverUrl.trim();
+    const trimmedKey = apiKey.trim();
+    if (!trimmedUrl) {
+      Alert.alert('Server URL Required', 'Please enter a valid companion server address.');
+      return;
+    }
+    try {
+      setTestingConnection(true);
+      const res = await backupService.pingCompanionServer(trimmedUrl, trimmedKey);
+      if (res.success) {
+        Alert.alert('Connection Successful 🟢', res.message);
+      } else {
+        Alert.alert('Connection Issue ⚠️', res.message);
+      }
+    } catch (e: any) {
+      Alert.alert('Connection Failed 🔴', e.message);
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSyncDeviceCalendar = async () => {
+    try {
+      setSyncingCalendar(true);
+      const res = await calendarService.syncDeviceCalendar();
+      const updatedTime = new Date().toLocaleTimeString();
+      setLastCalendarSync(updatedTime);
+      Alert.alert(
+        'Calendar Sync Complete',
+        `Successfully synced device events (${res.imported} imported, ${res.updated} updated).`
+      );
+    } catch (e: any) {
+      Alert.alert('Calendar Sync Failed', e.message || 'Could not sync device calendar.');
+    } finally {
+      setSyncingCalendar(false);
+    }
+  };
+
   const handleRestoreFromServer = async () => {
     const trimmedUrl = serverUrl.trim();
     const trimmedKey = apiKey.trim();
@@ -132,21 +219,46 @@ export const SettingsScreen: React.FC = () => {
       Alert.alert('Server URL Required', 'Please enter a valid companion server address.');
       return;
     }
+
     Alert.alert(
       'Restore From Server',
-      'This will replace current local data with the latest backup from the companion server. Continue?',
+      'Choose restore mode:',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Restore',
+          text: 'Merge (Keep New Local Data)',
+          onPress: async () => {
+            try {
+              setSyncingServer(true);
+              await settingsRepository.set('companionServerUrl', trimmedUrl);
+              await settingsRepository.set('companionApiKey', trimmedKey);
+              const res = await backupService.restoreFromCompanionServer(trimmedUrl, trimmedKey, 'merge');
+              if (res.success) {
+                await notificationService.restoreAllReminders();
+                await alarmService.restoreAllHabitAlarms();
+                Alert.alert('Merge Successful', res.message);
+              } else {
+                Alert.alert('Restore Failed', res.message);
+              }
+            } catch (e: any) {
+              Alert.alert('Restore Error', e.message || 'Could not restore from companion server.');
+            } finally {
+              setSyncingServer(false);
+            }
+          },
+        },
+        {
+          text: 'Replace All (Clean Restore)',
           style: 'destructive',
           onPress: async () => {
             try {
               setSyncingServer(true);
               await settingsRepository.set('companionServerUrl', trimmedUrl);
               await settingsRepository.set('companionApiKey', trimmedKey);
-              const res = await backupService.restoreFromCompanionServer(trimmedUrl, trimmedKey);
+              const res = await backupService.restoreFromCompanionServer(trimmedUrl, trimmedKey, 'replace');
               if (res.success) {
+                await notificationService.restoreAllReminders();
+                await alarmService.restoreAllHabitAlarms();
                 Alert.alert('Restore Successful', res.message);
               } else {
                 Alert.alert('Restore Failed', res.message);
@@ -165,6 +277,37 @@ export const SettingsScreen: React.FC = () => {
   const handleExportBackup = async () => {
     try {
       const json = await backupService.exportBackup();
+      const kbSize = (json.length / 1024).toFixed(1);
+      if (json.length > 300000) {
+        Alert.alert(
+          'Large Backup Detected',
+          `Your backup data is ${kbSize} KB. Sharing large text directly via Android system intents may exceed the Android Binder IPC transaction limit. You can load it into the Restore text box below to inspect/copy it, or attempt system sharing.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Load into Box',
+              onPress: () => {
+                setImportJsonText(json);
+                Alert.alert('Loaded', 'Backup JSON has been populated in the Restore box below.');
+              },
+            },
+            {
+              text: 'Share Anyway',
+              onPress: async () => {
+                try {
+                  await Share.share({
+                    title: 'OmniHub SQLite Backup',
+                    message: json,
+                  });
+                } catch (err: any) {
+                  Alert.alert('Share Failed', err.message || 'System intent too large to share text.');
+                }
+              },
+            },
+          ]
+        );
+        return;
+      }
       await Share.share({
         title: 'Life Planner SQLite Backup',
         message: json,
@@ -179,14 +322,53 @@ export const SettingsScreen: React.FC = () => {
       Alert.alert('Empty Input', 'Please paste valid backup JSON data.');
       return;
     }
-    try {
-      const res = await backupService.importBackup(importJsonText.trim());
-      setImportModalVisible(false);
-      setImportJsonText('');
-      Alert.alert('Restore Success', res.message || 'All records restored successfully!');
-    } catch (e: any) {
-      Alert.alert('Restore Failed', e.message || 'Invalid backup format.');
-    }
+
+    Alert.alert(
+      'Import Backup',
+      'Choose how to restore your data:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Merge with Existing',
+          onPress: async () => {
+            try {
+              const res = await backupService.importBackup(importJsonText.trim(), 'merge');
+              setImportModalVisible(false);
+              setImportJsonText('');
+              if (res.success) {
+                await notificationService.restoreAllReminders();
+                await alarmService.restoreAllHabitAlarms();
+                Alert.alert('Merge Success', res.message);
+              } else {
+                Alert.alert('Restore Failed', res.message);
+              }
+            } catch (e: any) {
+              Alert.alert('Restore Failed', e.message || 'Invalid backup format.');
+            }
+          },
+        },
+        {
+          text: 'Replace All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await backupService.importBackup(importJsonText.trim(), 'replace');
+              setImportModalVisible(false);
+              setImportJsonText('');
+              if (res.success) {
+                await notificationService.restoreAllReminders();
+                await alarmService.restoreAllHabitAlarms();
+                Alert.alert('Restore Success', res.message);
+              } else {
+                Alert.alert('Restore Failed', res.message);
+              }
+            } catch (e: any) {
+              Alert.alert('Restore Failed', e.message || 'Invalid backup format.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -209,6 +391,113 @@ export const SettingsScreen: React.FC = () => {
           <Text style={[styles.sub, typography.caption, { color: colors.textSecondary }]}>
             Personalization & Local Data Storage
           </Text>
+        </View>
+
+        {/* Section: Workspace Switcher */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, typography.caption, { color: colors.textSecondary }]}>
+            OMNIHUB WORKSPACE SWITCHER
+          </Text>
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={() => navigation.navigate('SafeGuard')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingTextCol}>
+                <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                  🛡️ SafeGuard Family Platform
+                </Text>
+                <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                  Parental Control Dashboard & Child Safety Agent
+                </Text>
+              </View>
+              <Text style={{ fontSize: 14, color: '#EC4899', fontWeight: '800' }}>Open ➔</Text>
+            </TouchableOpacity>
+
+            <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingTextCol}>
+                <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                  Remember Default Workspace
+                </Text>
+                <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                  {rememberWorkspace
+                    ? 'Automatically launch chosen workspace on app startup'
+                    : 'Show OmniHub workspace chooser on app startup'}
+                </Text>
+              </View>
+              <Switch
+                value={rememberWorkspace}
+                onValueChange={toggleRememberWorkspace}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            {rememberWorkspace && (
+              <View style={{ paddingTop: 8, paddingBottom: 6 }}>
+                <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: 8 }]}>
+                  STARTUP DEFAULT:
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {[
+                    { id: 'planner', label: '✓ Planner', color: '#8B5CF6' },
+                    { id: 'chat', label: '💬 Chat', color: '#06B6D4' },
+                    { id: 'battery', label: '⚡ Battery', color: '#10B981' },
+                    { id: 'safeguard', label: '🛡️ SafeGuard', color: '#EC4899' },
+                  ].map((ws) => {
+                    const isSelected = defaultWorkspace === ws.id;
+                    return (
+                      <TouchableOpacity
+                        key={ws.id}
+                        onPress={() => handleSelectDefaultWorkspace(ws.id)}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingHorizontal: 12,
+                          paddingVertical: 7,
+                          borderRadius: 8,
+                          backgroundColor: isSelected ? `${ws.color}25` : colors.surface,
+                          borderColor: isSelected ? ws.color : colors.borderSubtle,
+                          borderWidth: 1,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: isSelected ? '800' : '600',
+                            color: isSelected ? ws.color : colors.textSecondary,
+                          }}
+                        >
+                          {ws.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={() => navigation.navigate('WorkspaceSelect')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingTextCol}>
+                <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                  💎 Choose Workspace
+                </Text>
+                <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                  Switch between Planner, Chat, Battery Guard & SafeGuard
+                </Text>
+              </View>
+              <Text style={{ fontSize: 14, color: colors.primary, fontWeight: '800' }}>Hub ➔</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Section: Appearance */}
@@ -367,6 +656,25 @@ export const SettingsScreen: React.FC = () => {
             <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
 
             <TouchableOpacity
+              onPress={() => navigation.navigate('BatteryAlarm')}
+              style={styles.actionRow}
+              accessibilityRole="button"
+              accessibilityLabel="Open Battery Charge Alarm App"
+            >
+              <View style={styles.settingTextCol}>
+                <Text style={[styles.settingLabel, typography.title, { color: '#10B981' }]}>
+                  ⚡ Battery Charge Alarm & Health
+                </Text>
+                <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                  Configure 80% full charge alarms, anti-overcharge guard, and temperature alerts
+                </Text>
+              </View>
+              <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+            </TouchableOpacity>
+
+            <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+
+            <TouchableOpacity
               onPress={handleOpenBatterySettings}
               style={styles.actionRow}
               accessibilityRole="button"
@@ -374,7 +682,7 @@ export const SettingsScreen: React.FC = () => {
             >
               <View style={styles.settingTextCol}>
                 <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
-                  ⚡ Battery Optimization Whitelist
+                  🔋 Battery Optimization Whitelist
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
                   Set "No restrictions" for 100% reliable alarms and notifications
@@ -385,6 +693,25 @@ export const SettingsScreen: React.FC = () => {
 
             {Platform.OS === 'android' && (
               <>
+                <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+
+                <TouchableOpacity
+                  onPress={handleOpenExactAlarmSettings}
+                  style={styles.actionRow}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Alarms and Reminders Permission Settings"
+                >
+                  <View style={styles.settingTextCol}>
+                    <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                      ⏰ Exact Alarms & Reminders (Android 12+)
+                    </Text>
+                    <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                      Grant exact alarm scheduling to ensure daily alarms ring precisely on time
+                    </Text>
+                  </View>
+                  <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
+                </TouchableOpacity>
+
                 <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
 
                 <TouchableOpacity
@@ -439,6 +766,47 @@ export const SettingsScreen: React.FC = () => {
               </Text>
               <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Section: Device Calendar Integration */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, typography.caption, { color: colors.textSecondary }]}>
+            DEVICE CALENDAR INTEGRATION
+          </Text>
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.actionRow}>
+              <View style={styles.settingTextCol}>
+                <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
+                  📅 Device Calendar Sync
+                </Text>
+                <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                  {lastCalendarSync
+                    ? `Last synced at ${lastCalendarSync} • Read-only import`
+                    : 'Import events from Android calendar provider into your daily timeline'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleSyncDeviceCalendar}
+                disabled={syncingCalendar}
+                style={[
+                  styles.snoozeBtn,
+                  {
+                    backgroundColor: colors.primary,
+                    borderColor: colors.primary,
+                    paddingHorizontal: spacing.md,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Sync Device Calendar Now"
+              >
+                {syncingCalendar ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={[styles.snoozeBtnText, styles.snoozeBtnTextActive]}>Sync Now</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -505,6 +873,32 @@ export const SettingsScreen: React.FC = () => {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+
+              {/* Test Connection Button */}
+              <TouchableOpacity
+                onPress={handleTestConnection}
+                disabled={testingConnection}
+                style={[
+                  styles.serverBtn,
+                  styles.serverBtnOutline,
+                  styles.serverBtnFullWidth,
+                  {
+                    borderColor: colors.warning,
+                    backgroundColor: colors.surfaceElevated,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Test Server Connection"
+              >
+                {testingConnection ? (
+                  <ActivityIndicator size="small" color={colors.warning} />
+                ) : (
+                  <Text style={[styles.serverBtnText, { color: colors.warning }]}>
+                    ⚡ Test Server Connection / Ping
+                  </Text>
+                )}
+              </TouchableOpacity>
+
               <View style={styles.serverBtnRow}>
                 <TouchableOpacity
                   onPress={handleSyncToServer}
@@ -554,7 +948,7 @@ export const SettingsScreen: React.FC = () => {
               100% Private & Offline
             </Text>
             <Text style={[styles.privacyDesc, typography.body, { color: colors.textSecondary }]}>
-              Life Planner does not send your tasks, notes, or schedules to any remote cloud servers.
+              OmniHub does not send your tasks, notes, or schedules to any remote cloud servers.
               All data lives strictly inside your device's persistent SQLite database. It remains fully
               operational even in airplane mode.
             </Text>
@@ -812,6 +1206,10 @@ const styles = StyleSheet.create({
   },
   serverBtnOutline: {
     borderWidth: 1,
+  },
+  serverBtnFullWidth: {
+    width: '100%',
+    marginBottom: spacing.xs,
   },
   serverBtnText: {
     color: '#FFFFFF',

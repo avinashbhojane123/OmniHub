@@ -25,7 +25,6 @@ import {
   addMonths,
   isValid,
   isAfter,
-  setYear,
 } from 'date-fns';
 
 interface ProfileModalProps {
@@ -62,12 +61,13 @@ export function computeAgeStats(birthDateStr: string): AgeCalculation | null {
     const dayOfWeek = format(birthDate, 'EEEE');
     const birthDateFormatted = format(birthDate, 'd MMMM yyyy');
 
-    // Next birthday calculation
-    let nextBday = setYear(birthDate, now.getFullYear());
-    if (nextBday < now) {
-      nextBday = setYear(birthDate, now.getFullYear() + 1);
+    // Next birthday calculation (normalize to midnight to avoid hour-level false next-year offset)
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let nextBday = new Date(now.getFullYear(), birthDate.getMonth(), birthDate.getDate());
+    if (nextBday < todayMidnight) {
+      nextBday = new Date(now.getFullYear() + 1, birthDate.getMonth(), birthDate.getDate());
     }
-    const nextBirthdayDays = Math.max(0, differenceInDays(nextBday, now));
+    const nextBirthdayDays = Math.max(0, differenceInDays(nextBday, todayMidnight));
 
     return {
       years: Math.max(0, totalYears),

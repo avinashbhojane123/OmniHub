@@ -2,17 +2,11 @@ import { Task, CreateTaskDTO, UpdateTaskDTO, CalendarEvent, SnoozeDurationOption
 import { taskRepository } from '../../database/repositories/TaskRepository';
 import { notificationService } from '../notifications/NotificationService';
 import { format, parseISO, addDays, addMonths, isValid } from 'date-fns';
+import { normalizeTimeTo24H, parseTimeToMinutes } from '../../utils/time';
 
 export class TaskService {
   private parseTimeToMinutes(timeStr: string): number | null {
-    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
-    if (!match) return null;
-    let hours = parseInt(match[1], 10);
-    const minutes = parseInt(match[2], 10);
-    const period = match[3]?.toLowerCase();
-    if (period === 'pm' && hours < 12) hours += 12;
-    if (period === 'am' && hours === 12) hours = 0;
-    return hours * 60 + minutes;
+    return parseTimeToMinutes(timeStr);
   }
 
   async createTask(dto: CreateTaskDTO): Promise<Task> {
@@ -21,9 +15,11 @@ export class TaskService {
       throw new Error('Task title cannot be empty.');
     }
 
-    if (dto.startTime && dto.endTime) {
-      const startMin = this.parseTimeToMinutes(dto.startTime);
-      const endMin = this.parseTimeToMinutes(dto.endTime);
+    const normStart = normalizeTimeTo24H(dto.startTime);
+    const normEnd = normalizeTimeTo24H(dto.endTime);
+    if (normStart && normEnd) {
+      const startMin = parseTimeToMinutes(normStart);
+      const endMin = parseTimeToMinutes(normEnd);
       if (startMin !== null && endMin !== null && endMin < startMin) {
         throw new Error('End time cannot be earlier than start time.');
       }
@@ -31,14 +27,18 @@ export class TaskService {
 
     const now = new Date().toISOString();
     const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const seriesId = dto.recurrenceRule && dto.recurrenceRule.type !== 'none'
+      ? dto.seriesId || `series_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      : dto.seriesId;
 
     const newTask: Task = {
       id,
+      seriesId,
       title: dto.title.trim(),
       description: dto.description?.trim() || undefined,
       date: dto.date,
-      startTime: dto.startTime || undefined,
-      endTime: dto.endTime || undefined,
+      startTime: normStart || undefined,
+      endTime: normEnd || undefined,
       priority: dto.priority || 'medium',
       categoryId: dto.categoryId || undefined,
       status: 'pending',
@@ -67,17 +67,25 @@ export class TaskService {
     const existing = await taskRepository.findById(id);
     if (!existing) return null;
 
-    const startStr = dto.startTime !== undefined ? dto.startTime : existing.startTime;
-    const endStr = dto.endTime !== undefined ? dto.endTime : existing.endTime;
-    if (startStr && endStr) {
-      const startMin = this.parseTimeToMinutes(startStr);
-      const endMin = this.parseTimeToMinutes(endStr);
+    const rawStart = dto.startTime !== undefined ? dto.startTime : existing.startTime;
+    const rawEnd = dto.endTime !== undefined ? dto.endTime : existing.endTime;
+    const normStart = normalizeTimeTo24H(rawStart);
+    const normEnd = normalizeTimeTo24H(rawEnd);
+    if (normStart && normEnd) {
+      const startMin = parseTimeToMinutes(normStart);
+      const endMin = parseTimeToMinutes(normEnd);
       if (startMin !== null && endMin !== null && endMin < startMin) {
         throw new Error('End time cannot be earlier than start time.');
       }
     }
 
-    const updated = await taskRepository.update(id, dto);
+    const updatePayload: UpdateTaskDTO = {
+      ...dto,
+      ...(dto.startTime !== undefined ? { startTime: normStart } : {}),
+      ...(dto.endTime !== undefined ? { endTime: normEnd } : {}),
+    };
+
+    const updated = await taskRepository.update(id, updatePayload);
     if (!updated) return null;
 
     // Reschedule or cancel notification
@@ -90,9 +98,41 @@ export class TaskService {
     return updated;
   }
 
-  async deleteTask(id: string): Promise<boolean> {
+  async deleteTask(id: string, deleteEntireSeries = false): Promise<boolean> {
+    const task = await taskRepository.findById(id);
+    if (!task) return false;
+
     await notificationService.cancelTaskReminder(id);
+
+    if (deleteEntireSeries && task.seriesId) {
+      const seriesTasks = await taskRepository.findBySeriesId(task.seriesId);
+      for (const t of seriesTasks) {
+        await notificationService.cancelTaskReminder(t.id);
+      }
+      return await taskRepository.deleteBySeriesId(task.seriesId);
+    }
+
     return await taskRepository.delete(id);
+  }
+
+  async skipRecurringTask(id: string): Promise<Task | null> {
+    const task = await taskRepository.findById(id);
+    if (!task) return null;
+
+    await notificationService.cancelTaskReminder(id);
+    const cancelled = await taskRepository.update(id, {
+      status: 'cancelled',
+    });
+
+    if (task.recurrenceRule && task.recurrenceRule.type !== 'none') {
+      try {
+        await this.spawnNextRecurrence(task);
+      } catch (err) {
+        console.warn('Failed to auto-spawn skipped recurrence:', err);
+      }
+    }
+
+    return cancelled;
   }
 
   async completeTask(id: string): Promise<Task | null> {
@@ -122,27 +162,34 @@ export class TaskService {
     const baseDate = parseISO(task.date);
     if (!isValid(baseDate)) return null;
 
-    let nextDate: Date;
-    switch (rule.type) {
-      case 'daily':
-        nextDate = addDays(baseDate, rule.interval || 1);
-        break;
-      case 'weekdays': {
-        let temp = addDays(baseDate, 1);
-        while (temp.getDay() === 0 || temp.getDay() === 6) {
-          temp = addDays(temp, 1);
+    const advanceStep = (d: Date): Date => {
+      switch (rule.type) {
+        case 'daily':
+          return addDays(d, rule.interval || 1);
+        case 'weekdays': {
+          let temp = addDays(d, 1);
+          while (temp.getDay() === 0 || temp.getDay() === 6) {
+            temp = addDays(temp, 1);
+          }
+          return temp;
         }
-        nextDate = temp;
-        break;
+        case 'weekly':
+          return addDays(d, (rule.interval || 1) * 7);
+        case 'monthly':
+          return addMonths(d, rule.interval || 1);
+        default:
+          return addDays(d, 1);
       }
-      case 'weekly':
-        nextDate = addDays(baseDate, (rule.interval || 1) * 7);
-        break;
-      case 'monthly':
-        nextDate = addMonths(baseDate, rule.interval || 1);
-        break;
-      default:
-        nextDate = addDays(baseDate, 1);
+    };
+
+    let nextDate = advanceStep(baseDate);
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+    // If base date was overdue in the past, advance nextDate forward until today or future
+    let advanceLimit = 0;
+    while (format(nextDate, 'yyyy-MM-dd') < todayStr && advanceLimit < 365) {
+      nextDate = advanceStep(nextDate);
+      advanceLimit++;
     }
 
     const nextDateStr = format(nextDate, 'yyyy-MM-dd');
@@ -150,7 +197,19 @@ export class TaskService {
       return null;
     }
 
+    // Prevent duplicate spawning if an active task with the same title already exists on nextDateStr
+    const existingOnDate = await taskRepository.findByDate(nextDateStr);
+    const alreadyExists = existingOnDate.some(
+      (t) => t.title.toLowerCase().trim() === task.title.toLowerCase().trim() && t.status !== 'cancelled'
+    );
+    if (alreadyExists) {
+      return null;
+    }
+
+    const seriesId = task.seriesId || `series_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
     return await this.createTask({
+      seriesId,
       title: task.title,
       description: task.description,
       date: nextDateStr,
@@ -208,16 +267,20 @@ export class TaskService {
   async getUpcomingTask(): Promise<Task | null> {
     const now = new Date();
     const todayStr = format(now, 'yyyy-MM-dd');
-    const currentTimeStr = format(now, 'HH:mm');
+    const nowMin = now.getHours() * 60 + now.getMinutes();
 
     const todayTasks = await taskRepository.findByDate(todayStr);
-    const pendingUpcoming = todayTasks.filter(
-      (t) =>
-        t.status !== 'completed' &&
-        t.status !== 'cancelled' &&
-        t.startTime &&
-        t.startTime >= currentTimeStr
-    );
+    const pendingUpcoming = todayTasks.filter((t) => {
+      if (t.status === 'completed' || t.status === 'cancelled' || !t.startTime) return false;
+      const tMin = parseTimeToMinutes(t.startTime);
+      return tMin !== null && tMin >= nowMin;
+    });
+
+    pendingUpcoming.sort((a, b) => {
+      const aMin = parseTimeToMinutes(a.startTime) ?? 9999;
+      const bMin = parseTimeToMinutes(b.startTime) ?? 9999;
+      return aMin - bMin;
+    });
 
     return pendingUpcoming.length > 0 ? pendingUpcoming[0] : null;
   }
@@ -226,26 +289,26 @@ export class TaskService {
     return await taskRepository.findByDate(date);
   }
 
-  detectConflicts(tasks: Task[], events: CalendarEvent[]): { hasConflict: boolean; conflicts: { itemA: string; itemB: string; time: string }[] } {
+  detectConflicts(tasks: Task[], events: CalendarEvent[], targetDate?: string): { hasConflict: boolean; conflicts: { itemA: string; itemB: string; time: string }[] } {
     const conflicts: { itemA: string; itemB: string; time: string }[] = [];
+    const dateStr = targetDate || format(new Date(), 'yyyy-MM-dd');
 
-    const toMinutes = (timeStr: string): number => {
-      const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
-      if (!match) return 0;
-      let hours = parseInt(match[1], 10);
-      const minutes = parseInt(match[2], 10);
-      const period = match[3]?.toLowerCase();
-      if (period === 'pm' && hours < 12) hours += 12;
-      if (period === 'am' && hours === 12) hours = 0;
-      return hours * 60 + minutes;
-    };
+    // Only consider events scheduled for the specified date
+    const todayEvents = events.filter((e) => {
+      try {
+        const startD = parseISO(e.startTime);
+        return isValid(startD) && format(startD, 'yyyy-MM-dd') === dateStr;
+      } catch {
+        return false;
+      }
+    });
 
     const scheduledItems = [
       ...tasks
         .filter((t) => t.startTime && t.status !== 'completed' && t.status !== 'cancelled')
         .map((t) => {
-          const startMin = toMinutes(t.startTime!);
-          const endMin = t.endTime ? Math.max(toMinutes(t.endTime), startMin + 1) : startMin + 30;
+          const startMin = parseTimeToMinutes(t.startTime!) ?? 0;
+          const endMin = t.endTime ? Math.max(parseTimeToMinutes(t.endTime) ?? (startMin + 30), startMin + 1) : startMin + 30;
           return {
             title: t.title,
             start: t.startTime!,
@@ -254,11 +317,11 @@ export class TaskService {
             endMin,
           };
         }),
-      ...events.map((e) => {
+      ...todayEvents.map((e) => {
         const start = format(parseISO(e.startTime), 'HH:mm');
         const end = format(parseISO(e.endTime), 'HH:mm');
-        const startMin = toMinutes(start);
-        const endMin = Math.max(toMinutes(end), startMin + 1);
+        const startMin = parseTimeToMinutes(start) ?? 0;
+        const endMin = Math.max(parseTimeToMinutes(end) ?? (startMin + 30), startMin + 1);
         return {
           title: e.title,
           start,

@@ -163,8 +163,10 @@ export class HabitRepository {
     if (habits.length === 0) return [];
 
     const db = await getDatabase();
+    const minDateStr = format(subDays(parseISO(todayStr), 370), 'yyyy-MM-dd');
     const allLogsResult = await db.execute(
-      'SELECT habitId, date FROM habit_logs WHERE completed = 1 ORDER BY date DESC'
+      'SELECT habitId, date FROM habit_logs WHERE completed = 1 AND date >= ? ORDER BY date DESC',
+      [minDateStr]
     );
     const logsByHabit = new Map<string, string[]>();
     for (const r of allLogsResult.rows) {

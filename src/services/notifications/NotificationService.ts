@@ -33,6 +33,13 @@ export const CHANNELS = {
     importance: AndroidImportance.DEFAULT,
     visibility: AndroidVisibility.PUBLIC,
   },
+  SILENT: {
+    id: 'life_planner_silent',
+    name: 'Life Planner Silent Reminders',
+    description: 'Notifications without audio alerts',
+    importance: AndroidImportance.DEFAULT,
+    visibility: AndroidVisibility.PUBLIC,
+  },
 };
 
 export class NotificationService {
@@ -99,6 +106,16 @@ export class NotificationService {
       sound: 'default',
       vibration: false,
     });
+
+    await notifee.createChannel({
+      id: CHANNELS.SILENT.id,
+      name: CHANNELS.SILENT.name,
+      description: CHANNELS.SILENT.description,
+      importance: CHANNELS.SILENT.importance,
+      visibility: CHANNELS.SILENT.visibility,
+      sound: undefined,
+      vibration: false,
+    });
   }
 
   public async scheduleTaskReminder(task: Task): Promise<string | null> {
@@ -137,8 +154,11 @@ export class NotificationService {
       const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
       const vibrationEnabled = (await settingsRepository.get('notificationVibration', 'true')) === 'true';
 
-      const channelId =
-        task.priority === 'high' ? CHANNELS.HIGH_PRIORITY.id : CHANNELS.LIFE_PLANNER.id;
+      const channelId = !soundEnabled
+        ? CHANNELS.SILENT.id
+        : task.priority === 'high'
+        ? CHANNELS.HIGH_PRIORITY.id
+        : CHANNELS.LIFE_PLANNER.id;
 
       const notificationId = `task_${task.id}`;
 
@@ -159,44 +179,54 @@ export class NotificationService {
         ? `Starts in ${task.reminderMinutes} minutes`
         : "It's time to start your task.";
 
-      await notifee.createTriggerNotification(
-        {
-          id: notificationId,
-          title,
-          subtitle: 'Life Planner',
-          body: subtitle,
-          data: {
-            taskId: task.id,
-            actionType: 'task_reminder',
-          },
-          android: {
-            channelId,
-            importance: CHANNELS.LIFE_PLANNER.importance,
-            visibility: AndroidVisibility.PUBLIC, // Lock-screen visible
-            category: 'reminder' as any,
-            sound: soundEnabled ? 'default' : undefined,
-            vibrationPattern: vibrationEnabled ? [300, 500] : undefined,
-            pressAction: {
-              id: 'default',
-            },
-            actions: [
-              {
-                title: 'DONE',
-                pressAction: {
-                  id: 'done',
-                },
-              },
-              {
-                title: 'SNOOZE',
-                pressAction: {
-                  id: 'snooze',
-                },
-              },
-            ],
-          },
+      const reminderPayload = {
+        id: notificationId,
+        title,
+        subtitle: 'Life Planner',
+        body: subtitle,
+        data: {
+          taskId: task.id,
+          actionType: 'task_reminder',
         },
-        trigger
-      );
+        android: {
+          channelId,
+          smallIcon: 'ic_notification',
+          importance: CHANNELS.LIFE_PLANNER.importance,
+          visibility: AndroidVisibility.PUBLIC, // Lock-screen visible
+          category: 'reminder' as any,
+          sound: soundEnabled ? 'default' : undefined,
+          vibrationPattern: vibrationEnabled ? [300, 500] : undefined,
+          autoCancel: true,
+          pressAction: {
+            id: 'default',
+          },
+          actions: [
+            {
+              title: 'DONE',
+              pressAction: {
+                id: 'done',
+              },
+            },
+            {
+              title: 'SNOOZE',
+              pressAction: {
+                id: 'snooze',
+              },
+            },
+          ],
+        },
+      };
+
+      try {
+        await notifee.createTriggerNotification(reminderPayload, trigger);
+      } catch {
+        // Fallback for Android 13/14 if allowWhileIdle is restricted
+        const fallbackTrigger: TimestampTrigger = {
+          type: TriggerType.TIMESTAMP,
+          timestamp: targetDate.getTime(),
+        };
+        await notifee.createTriggerNotification(reminderPayload, fallbackTrigger);
+      }
 
       return notificationId;
     } catch (err) {
@@ -233,6 +263,9 @@ export class NotificationService {
       const notificationId = `task_${taskId}`;
       await notifee.cancelNotification(notificationId);
 
+      const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
+      const channelId = soundEnabled ? CHANNELS.LIFE_PLANNER.id : CHANNELS.SILENT.id;
+
       const trigger: TimestampTrigger = {
         type: TriggerType.TIMESTAMP,
         timestamp: snoozeTarget.getTime(),
@@ -241,35 +274,44 @@ export class NotificationService {
         },
       };
 
-      await notifee.createTriggerNotification(
-        {
-          id: notificationId,
-          title: task.title,
-          subtitle: 'Life Planner (Snoozed)',
-          body: `Snoozed reminder (${snoozeMinutes}m)`,
-          data: {
-            taskId: task.id,
-            actionType: 'task_reminder',
-          },
-          android: {
-            channelId: CHANNELS.LIFE_PLANNER.id,
-            importance: AndroidImportance.HIGH,
-            visibility: AndroidVisibility.PUBLIC,
-            pressAction: { id: 'default' },
-            actions: [
-              {
-                title: 'DONE',
-                pressAction: { id: 'done' },
-              },
-              {
-                title: 'SNOOZE',
-                pressAction: { id: 'snooze' },
-              },
-            ],
-          },
+      const snoozePayload = {
+        id: notificationId,
+        title: task.title,
+        subtitle: 'Life Planner (Snoozed)',
+        body: `Snoozed reminder (${snoozeMinutes}m)`,
+        data: {
+          taskId: task.id,
+          actionType: 'task_reminder',
         },
-        trigger
-      );
+        android: {
+          channelId,
+          smallIcon: 'ic_notification',
+          importance: AndroidImportance.HIGH,
+          visibility: AndroidVisibility.PUBLIC,
+          autoCancel: true,
+          pressAction: { id: 'default' },
+          actions: [
+            {
+              title: 'DONE',
+              pressAction: { id: 'done' },
+            },
+            {
+              title: 'SNOOZE',
+              pressAction: { id: 'snooze' },
+            },
+          ],
+        },
+      };
+
+      try {
+        await notifee.createTriggerNotification(snoozePayload, trigger);
+      } catch {
+        const fallbackTrigger: TimestampTrigger = {
+          type: TriggerType.TIMESTAMP,
+          timestamp: snoozeTarget.getTime(),
+        };
+        await notifee.createTriggerNotification(snoozePayload, fallbackTrigger);
+      }
     } catch (err) {
       console.error('Failed to snooze task reminder:', err);
     }
@@ -283,13 +325,22 @@ export class NotificationService {
 
     if (!taskId) return;
 
-    if (type === EventType.ACTION_PRESS) {
+    if (type === EventType.PRESS) {
+      if (notificationId) {
+        await notifee.cancelNotification(notificationId);
+      }
+    } else if (type === EventType.ACTION_PRESS) {
       if (actionId === 'done') {
-        const now = new Date().toISOString();
-        await taskRepository.update(taskId, {
-          status: 'completed',
-          completedAt: now,
-        });
+        try {
+          const { taskService } = await import('../tasks/TaskService');
+          await taskService.completeTask(taskId);
+        } catch {
+          const now = new Date().toISOString();
+          await taskRepository.update(taskId, {
+            status: 'completed',
+            completedAt: now,
+          });
+        }
         if (notificationId) {
           await notifee.cancelNotification(notificationId);
         }

@@ -24,7 +24,7 @@ export function useToday() {
         taskService.getOverdueTasks(),
         taskService.getUpcomingTask(),
         habitService.getHabitsWithStreaks(),
-        calendarService.getAllEvents(),
+        calendarService.getTodayEvents(),
       ]);
 
       setTodayTasks(tasks);

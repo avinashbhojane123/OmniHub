@@ -84,7 +84,7 @@ export const AlarmRingingModal: React.FC = () => {
 
         {/* Top Header */}
         <View style={styles.header}>
-          <Text style={styles.appName}>LIFE PLANNER ALARM</Text>
+          <Text style={styles.appName}>OMNIHUB ALARM</Text>
           <View style={styles.liveBadge}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>RINGING</Text>

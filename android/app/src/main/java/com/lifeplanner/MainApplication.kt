@@ -15,6 +15,9 @@ class MainApplication : Application(), ReactApplication {
       packageList =
         PackageList(this).packages.apply {
           add(AlarmRingtonePackage())
+          add(DeviceCalendarPackage())
+          add(DeviceBatteryPackage())
+          add(SafeGuardAgentPackage())
         },
     )
   }

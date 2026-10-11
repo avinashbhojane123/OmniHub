@@ -1,5 +1,6 @@
 import { Task, UpdateTaskDTO, TaskStatus, TaskPriority } from '../../types';
 import { getDatabase } from '../connection';
+import { normalizeTimeTo24H } from '../../utils/time';
 
 export class TaskRepository {
   async create(task: Task): Promise<Task> {
@@ -8,17 +9,18 @@ export class TaskRepository {
 
     await db.execute(
       `INSERT INTO tasks (
-        id, title, description, date, startTime, endTime,
+        id, seriesId, title, description, date, startTime, endTime,
         priority, categoryId, status, recurrenceRule,
         reminderMinutes, snoozeUntil, notes, createdAt, updatedAt, completedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
+        task.seriesId ?? null,
         task.title,
         task.description ?? null,
         task.date,
-        task.startTime ?? null,
-        task.endTime ?? null,
+        normalizeTimeTo24H(task.startTime) ?? null,
+        normalizeTimeTo24H(task.endTime) ?? null,
         task.priority,
         task.categoryId ?? null,
         task.status,
@@ -125,17 +127,21 @@ export class TaskRepository {
       fields.push('description = ?');
       values.push(updates.description);
     }
+    if (updates.seriesId !== undefined) {
+      fields.push('seriesId = ?');
+      values.push(updates.seriesId ?? null);
+    }
     if (updates.date !== undefined) {
       fields.push('date = ?');
       values.push(updates.date);
     }
     if (updates.startTime !== undefined) {
       fields.push('startTime = ?');
-      values.push(updates.startTime);
+      values.push(updates.startTime ? (normalizeTimeTo24H(updates.startTime) ?? null) : null);
     }
     if (updates.endTime !== undefined) {
       fields.push('endTime = ?');
-      values.push(updates.endTime);
+      values.push(updates.endTime ? (normalizeTimeTo24H(updates.endTime) ?? null) : null);
     }
     if (updates.priority !== undefined) {
       fields.push('priority = ?');
@@ -187,6 +193,25 @@ export class TaskRepository {
     return result.rowsAffected > 0;
   }
 
+  async findBySeriesId(seriesId: string): Promise<Task[]> {
+    const db = await getDatabase();
+    const result = await db.execute(
+      `SELECT t.*, c.name as categoryName, c.color as categoryColor, c.icon as categoryIcon
+       FROM tasks t
+       LEFT JOIN categories c ON t.categoryId = c.id
+       WHERE t.seriesId = ?
+       ORDER BY t.date ASC, t.startTime ASC`,
+      [seriesId]
+    );
+    return result.rows.map((r) => this.mapRowToTask(r));
+  }
+
+  async deleteBySeriesId(seriesId: string): Promise<boolean> {
+    const db = await getDatabase();
+    const result = await db.execute('DELETE FROM tasks WHERE seriesId = ?', [seriesId]);
+    return result.rowsAffected > 0;
+  }
+
   async search(query: string): Promise<Task[]> {
     const db = await getDatabase();
     const searchTerm = `%${query.trim().toLowerCase()}%`;
@@ -202,7 +227,7 @@ export class TaskRepository {
     return result.rows.map((r) => this.mapRowToTask(r));
   }
 
-  private mapRowToTask(row: any): Task {
+  public mapRowToTask(row: any): Task {
     let recurrenceRule;
     if (row.recurrenceRule) {
       try {
@@ -214,6 +239,7 @@ export class TaskRepository {
 
     return {
       id: row.id,
+      seriesId: row.seriesId ?? undefined,
       title: row.title,
       description: row.description ?? undefined,
       date: row.date,

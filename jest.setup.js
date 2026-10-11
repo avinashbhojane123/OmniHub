@@ -10,9 +10,11 @@ jest.mock('@notifee/react-native', () => {
       onForegroundEvent: jest.fn(),
       onBackgroundEvent: jest.fn(),
       createTriggerNotification: jest.fn().mockResolvedValue('notification_id'),
+      displayNotification: jest.fn().mockResolvedValue('notification_id'),
       cancelNotification: jest.fn().mockResolvedValue(undefined),
       cancelAllNotifications: jest.fn().mockResolvedValue(undefined),
       getTriggerNotificationIds: jest.fn().mockResolvedValue([]),
+      openBatteryOptimizationSettings: jest.fn().mockResolvedValue(undefined),
     },
     AndroidImportance: {
       HIGH: 4,

@@ -1,3 +1,11 @@
 <resources>
-    <string name="app_name">LifePlanner</string>
+    <string name="app_name">OmniHub</string>
+    <string name="shortcut_planner_short">Planner</string>
+    <string name="shortcut_planner_long">LifePlanner &amp; Tasks</string>
+    <string name="shortcut_chat_short">Chat</string>
+    <string name="shortcut_chat_long">Chat &amp; Connect</string>
+    <string name="shortcut_battery_short">Battery</string>
+    <string name="shortcut_battery_long">Battery Guard &amp; Alarm</string>
+    <string name="shortcut_safeguard_short">SafeGuard</string>
+    <string name="shortcut_safeguard_long">SafeGuard Family Safety</string>
 </resources>

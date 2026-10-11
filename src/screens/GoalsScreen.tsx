@@ -19,6 +19,7 @@ import { goalService } from '../services/goals/GoalService';
 import { goalRepository } from '../database/repositories/GoalRepository';
 import { useTasks } from '../hooks/useTasks';
 import { ProgressBar } from '../components/ProgressBar';
+import { DateTimePickerModal } from '../components/DateTimePickerModal';
 import { Goal, Task } from '../types';
 import { radius, spacing, typography } from '../theme';
 import { format } from 'date-fns';
@@ -38,6 +39,7 @@ export const GoalsScreen: React.FC = () => {
   const [goalTitle, setGoalTitle] = useState('');
   const [goalDescription, setGoalDescription] = useState('');
   const [goalDeadline, setGoalDeadline] = useState('');
+  const [deadlinePickerVisible, setDeadlinePickerVisible] = useState(false);
   const [goalColor, setGoalColor] = useState(PRESET_COLORS[0]);
   const [goalCategory, setGoalCategory] = useState('Personal');
 
@@ -107,6 +109,14 @@ export const GoalsScreen: React.FC = () => {
   };
 
   const handleUpdateProgress = async (goalId: string, newProgress: number) => {
+    const goal = goals.find((g) => g.id === goalId);
+    if (goal && (goal.tasksCount || 0) > 0) {
+      Alert.alert(
+        'Auto-Calculated Goal',
+        'This goal has linked tasks. Its progress is automatically tracked as you complete linked tasks.'
+      );
+      return;
+    }
     const clamped = Math.max(0, Math.min(100, Math.round(newProgress)));
     await goalRepository.update(goalId, { progress: clamped });
     await loadGoals();
@@ -300,26 +310,34 @@ export const GoalsScreen: React.FC = () => {
                       </Text>
                     </TouchableOpacity>
 
-                    <View style={styles.quickProgressRow}>
-                      <TouchableOpacity
-                        onPress={() => handleUpdateProgress(goal.id, p - 25)}
-                        style={[styles.stepBtn, { backgroundColor: colors.surfaceElevated }]}
-                      >
-                        <Text style={[styles.stepBtnText, { color: colors.text }]}>-25%</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => handleUpdateProgress(goal.id, p + 25)}
-                        style={[styles.stepBtn, { backgroundColor: colors.surfaceElevated }]}
-                      >
-                        <Text style={[styles.stepBtnText, { color: colors.text }]}>+25%</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => handleUpdateProgress(goal.id, 100)}
-                        style={[styles.stepBtn, { backgroundColor: `${colors.primary}20` }]}
-                      >
-                        <Text style={[styles.stepBtnText, { color: colors.primary }]}>✓ 100%</Text>
-                      </TouchableOpacity>
-                    </View>
+                    {(goal.tasksCount || 0) > 0 ? (
+                      <View style={[styles.autoBadge, { backgroundColor: `${colors.primary}18` }]}>
+                        <Text style={[styles.stepBtnText, { color: colors.primary }]}>
+                          Auto ({goal.completedTasksCount || 0}/{goal.tasksCount} done)
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.quickProgressRow}>
+                        <TouchableOpacity
+                          onPress={() => handleUpdateProgress(goal.id, p - 25)}
+                          style={[styles.stepBtn, { backgroundColor: colors.surfaceElevated }]}
+                        >
+                          <Text style={[styles.stepBtnText, { color: colors.text }]}>-25%</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleUpdateProgress(goal.id, p + 25)}
+                          style={[styles.stepBtn, { backgroundColor: colors.surfaceElevated }]}
+                        >
+                          <Text style={[styles.stepBtnText, { color: colors.text }]}>+25%</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleUpdateProgress(goal.id, 100)}
+                          style={[styles.stepBtn, { backgroundColor: `${colors.primary}20` }]}
+                        >
+                          <Text style={[styles.stepBtnText, { color: colors.primary }]}>✓ 100%</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                 </View>
               );
@@ -329,7 +347,12 @@ export const GoalsScreen: React.FC = () => {
       </View>
 
       {/* New Goal Modal */}
-      <Modal visible={modalVisible} transparent animationType="fade">
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalVisible(false)}
+      >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
@@ -380,20 +403,22 @@ export const GoalsScreen: React.FC = () => {
             <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
               TARGET DEADLINE (YYYY-MM-DD)
             </Text>
-            <TextInput
+            <TouchableOpacity
+              onPress={() => setDeadlinePickerVisible(true)}
               style={[
                 styles.textInput,
+                styles.dateCardRow,
                 {
                   backgroundColor: colors.surfaceElevated,
                   borderColor: colors.borderSubtle,
-                  color: colors.text,
                 },
               ]}
-              placeholder={format(new Date(), 'yyyy-MM-dd')}
-              placeholderTextColor={colors.textMuted}
-              value={goalDeadline}
-              onChangeText={setGoalDeadline}
-            />
+            >
+              <Text style={[typography.body, { color: goalDeadline ? colors.text : colors.textMuted }]}>
+                {goalDeadline ? `📅 ${goalDeadline}` : `📅 Set Target Date (${format(new Date(), 'yyyy-MM-dd')})`}
+              </Text>
+              <Text style={[typography.caption, { color: colors.primary }]}>Pick ▾</Text>
+            </TouchableOpacity>
 
             {/* Category Selector */}
             <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
@@ -463,7 +488,12 @@ export const GoalsScreen: React.FC = () => {
       </Modal>
 
       {/* Linked Tasks Modal */}
-      <Modal visible={taskModalVisible} transparent animationType="fade">
+      <Modal
+        visible={taskModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTaskModalVisible(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <Text style={[styles.modalTitle, typography.title, { color: colors.text }]}>
@@ -517,6 +547,17 @@ export const GoalsScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      <DateTimePickerModal
+        visible={deadlinePickerVisible}
+        onClose={() => setDeadlinePickerVisible(false)}
+        mode="date"
+        selectedDate={goalDeadline || undefined}
+        title="Set Goal Deadline"
+        onConfirm={(date) => {
+          setGoalDeadline(date);
+        }}
+      />
     </View>
   );
 };
@@ -684,6 +725,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
+  autoBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.xs,
+  },
   stepBtn: {
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -821,5 +867,10 @@ const styles = StyleSheet.create({
   taskCheckDate: {
     fontSize: 11,
     marginTop: 2,
+  },
+  dateCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
 });

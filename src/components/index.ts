@@ -9,3 +9,4 @@ export { ProfileModal } from './ProfileModal';
 export { NotepadModal } from './NotepadModal';
 export { ProgressBar } from './ProgressBar';
 export { TaskCard } from './TaskCard';
+export { DateTimePickerModal } from './DateTimePickerModal';

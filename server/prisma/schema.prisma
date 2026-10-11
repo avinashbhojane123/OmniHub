@@ -1,0 +1,292 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  PARENT
+  CHILD
+}
+
+enum ControlLevel {
+  LIGHT
+  BALANCED
+  STRICT
+}
+
+enum GeofenceType {
+  SAFE
+  UNSAFE
+}
+
+enum CommandType {
+  LOCK_DEVICE
+  UNLOCK_DEVICE
+  BLOCK_APP
+  UNBLOCK_APP
+  DISABLE_CAMERA
+  ENABLE_CAMERA
+  REFRESH_RULES
+  EMERGENCY_ALERT
+}
+
+enum CommandStatus {
+  PENDING
+  SENT
+  EXECUTED
+  FAILED
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskCategory {
+  CYBERBULLYING
+  SELF_HARM
+  GROOMING
+  SEXTORTION
+  DRUGS
+  ABUSIVE_LANGUAGE
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  fullName     String
+  role         Role          @default(PARENT)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  families     Family[]      @relation("FamilyParent")
+  memberships  FamilyMember[]
+
+  @@map("users")
+}
+
+model Family {
+  id            String         @id @default(uuid())
+  parentId      String
+  parent        User           @relation("FamilyParent", fields: [parentId], references: [id], onDelete: Cascade)
+  familyCode    String         @unique
+  codeExpiresAt DateTime
+  createdAt     DateTime       @default(now())
+  members       FamilyMember[]
+
+  @@map("families")
+}
+
+model FamilyMember {
+  id                 String           @id @default(uuid())
+  familyId           String
+  family             Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  userId             String?
+  user               User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  displayName        String
+  age                Int
+  controlLevel       ControlLevel     @default(BALANCED)
+  consentAccepted    Boolean          @default(false)
+  consentAcceptedAt  DateTime?
+  devices            Device[]
+  geofences          Geofence[]
+  blockedApps        BlockedApp[]
+  deviceCommands     DeviceCommand[]
+  riskAlerts         RiskAlert[]
+  settings           DeviceSettings?
+
+  @@map("family_members")
+}
+
+model Device {
+  id               String            @id @default(uuid())
+  familyMemberId   String
+  familyMember     FamilyMember      @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  deviceName       String
+  brand            String
+  model            String
+  androidVersion   String
+  fcmToken         String?
+  batteryLevel     Int               @default(100)
+  isOnline         Boolean           @default(false)
+  lastSeenAt       DateTime          @default(now())
+  appUsageLogs     AppUsageLog[]
+  callLogs         CallLog[]
+  smsLogs          SmsLog[]
+  notificationLogs NotificationLog[]
+  browsingLogs     BrowsingLog[]
+  locations        Location[]
+  deviceCommands   DeviceCommand[]
+  riskAlerts       RiskAlert[]
+
+  @@map("devices")
+}
+
+model AppUsageLog {
+  id              String   @id @default(uuid())
+  deviceId        String
+  device          Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  packageName     String
+  appName         String
+  durationSeconds Int
+  openCount       Int      @default(1)
+  logDate         DateTime @default(now())
+
+  @@index([deviceId, logDate])
+  @@map("app_usage_logs")
+}
+
+model CallLog {
+  id          String   @id @default(uuid())
+  deviceId    String
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  number      String
+  type        String // INCOMING | OUTGOING | MISSED
+  durationSec Int
+  calledAt    DateTime
+
+  @@map("call_logs")
+}
+
+model SmsLog {
+  id         String   @id @default(uuid())
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  sender     String
+  message    String
+  type       String // INCOMING | OUTGOING
+  receivedAt DateTime
+
+  @@map("sms_logs")
+}
+
+model NotificationLog {
+  id          String   @id @default(uuid())
+  deviceId    String
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  appPackage  String
+  appName     String
+  title       String
+  content     String
+  receivedAt  DateTime @default(now())
+
+  @@map("notification_logs")
+}
+
+model BrowsingLog {
+  id             String   @id @default(uuid())
+  deviceId       String
+  device         Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  browserPackage String
+  url            String
+  title          String
+  visitedAt      DateTime @default(now())
+
+  @@map("browsing_logs")
+}
+
+model Location {
+  id         String   @id @default(uuid())
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  latitude   Float
+  longitude  Float
+  accuracy   Float
+  address    String?
+  recordedAt DateTime @default(now())
+
+  @@index([deviceId, recordedAt])
+  @@map("locations")
+}
+
+model Geofence {
+  id             String          @id @default(uuid())
+  familyMemberId String
+  familyMember   FamilyMember    @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  name           String
+  latitude       Float
+  longitude      Float
+  radiusMeters   Int
+  type           GeofenceType    @default(SAFE)
+  isActive       Boolean         @default(true)
+  events         GeofenceEvent[]
+
+  @@map("geofences")
+}
+
+model GeofenceEvent {
+  id         String   @id @default(uuid())
+  geofenceId String
+  geofence   Geofence @relation(fields: [geofenceId], references: [id], onDelete: Cascade)
+  deviceId   String
+  event      String // ENTER | EXIT
+  triggeredAt DateTime @default(now())
+
+  @@map("geofence_events")
+}
+
+model BlockedApp {
+  id             String       @id @default(uuid())
+  familyMemberId String
+  familyMember   FamilyMember @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  packageName    String
+  appName        String
+  isBlocked      Boolean      @default(true)
+  blockedAt      DateTime     @default(now())
+
+  @@unique([familyMemberId, packageName])
+  @@map("blocked_apps")
+}
+
+model DeviceCommand {
+  id             String        @id @default(uuid())
+  familyMemberId String
+  familyMember   FamilyMember  @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  deviceId       String
+  device         Device        @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  commandType    CommandType
+  payload        Json?
+  status         CommandStatus @default(PENDING)
+  sentBy         String
+  executedAt     DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@map("device_commands")
+}
+
+model RiskAlert {
+  id             String       @id @default(uuid())
+  deviceId       String
+  device         Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  familyMemberId String
+  familyMember   FamilyMember @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  category       RiskCategory
+  severity       RiskSeverity
+  source         String
+  matchedKeywords Json
+  snippet        String
+  appName        String
+  alertedAt      DateTime     @default(now())
+  isRead         Boolean      @default(false)
+
+  @@index([familyMemberId, alertedAt])
+  @@map("risk_alerts")
+}
+
+model DeviceSettings {
+  id                     String       @id @default(uuid())
+  familyMemberId         String       @unique
+  familyMember           FamilyMember @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  controlLevel           ControlLevel @default(BALANCED)
+  keywordAlertsEnabled   Boolean      @default(true)
+  locationTrackingEnabled Boolean     @default(true)
+  appUsageEnabled        Boolean      @default(true)
+
+  @@map("device_settings")
+}

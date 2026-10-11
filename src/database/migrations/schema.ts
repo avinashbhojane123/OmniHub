@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS categories (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
+  seriesId TEXT,
   title TEXT NOT NULL,
   description TEXT,
   date TEXT NOT NULL,

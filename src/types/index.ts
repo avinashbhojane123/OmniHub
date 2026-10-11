@@ -20,6 +20,7 @@ export interface RecurrenceRule {
 
 export interface Task {
   id: string;
+  seriesId?: string;
   title: string;
   description?: string;
   date: string; // YYYY-MM-DD
@@ -41,6 +42,7 @@ export interface Task {
 }
 
 export interface CreateTaskDTO {
+  seriesId?: string;
   title: string;
   description?: string;
   date: string;
@@ -54,19 +56,20 @@ export interface CreateTaskDTO {
 }
 
 export interface UpdateTaskDTO {
+  seriesId?: string | null;
   title?: string;
-  description?: string;
+  description?: string | null;
   date?: string;
-  startTime?: string;
-  endTime?: string;
+  startTime?: string | null;
+  endTime?: string | null;
   priority?: TaskPriority;
-  categoryId?: string;
+  categoryId?: string | null;
   status?: TaskStatus;
-  recurrenceRule?: RecurrenceRule;
+  recurrenceRule?: RecurrenceRule | null;
   reminderMinutes?: number;
-  notes?: string;
-  completedAt?: string;
-  snoozeUntil?: string;
+  notes?: string | null;
+  completedAt?: string | null;
+  snoozeUntil?: string | null;
 }
 
 export interface Category {
@@ -77,7 +80,7 @@ export interface Category {
   createdAt: string;
 }
 
-export type CalendarSource = 'local' | 'android_calendar';
+export type CalendarSource = 'local' | 'android_calendar' | 'device';
 
 export interface CalendarEvent {
   id: string;

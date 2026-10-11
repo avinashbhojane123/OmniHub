@@ -74,8 +74,8 @@ describe('LifePlanner Local-First Core Test Suite', () => {
         endTime: '02:00 PM',
       });
       expect(task).toBeDefined();
-      expect(task.startTime).toBe('09:00 AM');
-      expect(task.endTime).toBe('02:00 PM');
+      expect(task.startTime).toBe('09:00');
+      expect(task.endTime).toBe('14:00');
     });
 
     it('should mark task completed and record completedAt timestamp', async () => {
@@ -119,6 +119,49 @@ describe('LifePlanner Local-First Core Test Suite', () => {
 
       const snoozed = await taskService.snoozeTask(task.id, 15);
       expect(snoozed?.snoozeUntil).toBeDefined();
+    });
+
+    it('should auto-spawn next occurrence for recurring task without creating duplicates on repeated toggles', async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+      const task = await taskService.createTask({
+        title: 'Morning Yoga Routine',
+        date: today,
+        startTime: '06:30',
+        recurrenceRule: { type: 'daily', interval: 1 },
+      });
+
+      // Complete for the first time -> spawns occurrence for tomorrow
+      await taskService.completeTask(task.id);
+      const tomorrowTasks1 = await taskRepository.findByDate(tomorrow);
+      const occurrences1 = tomorrowTasks1.filter((t) => t.title === 'Morning Yoga Routine');
+      expect(occurrences1.length).toBe(1);
+
+      // Uncomplete and re-complete -> should NOT spawn a duplicate for tomorrow
+      await taskService.uncompleteTask(task.id);
+      await taskService.completeTask(task.id);
+      const tomorrowTasks2 = await taskRepository.findByDate(tomorrow);
+      const occurrences2 = tomorrowTasks2.filter((t) => t.title === 'Morning Yoga Routine');
+      expect(occurrences2.length).toBe(1);
+    });
+
+    it('should clear task startTime and endTime when updated with null', async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const task = await taskService.createTask({
+        title: 'Task with Times',
+        date: today,
+        startTime: '10:00',
+        endTime: '11:00',
+      });
+      expect(task.startTime).toBe('10:00');
+      expect(task.endTime).toBe('11:00');
+
+      const updated = await taskRepository.update(task.id, {
+        startTime: null,
+        endTime: null,
+      });
+      expect(updated?.startTime).toBeUndefined();
+      expect(updated?.endTime).toBeUndefined();
     });
   });
 
@@ -408,6 +451,52 @@ describe('LifePlanner Local-First Core Test Suite', () => {
 
       const linksAfter = await goalRepository.getAllLinks();
       expect(linksAfter.some((l) => l.goalId === goal.id && l.taskId === task.id)).toBe(true);
+    });
+  });
+
+  describe('15. Recurring Task Series Management (seriesId)', () => {
+    it('should assign seriesId to recurring task and propagate to next recurrence', async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const recTask = await taskService.createTask({
+        title: 'Weekly Team Review',
+        date: today,
+        recurrenceRule: { type: 'weekly', interval: 1 },
+      });
+
+      expect(recTask.seriesId).toBeDefined();
+      expect(recTask.seriesId?.startsWith('series_')).toBe(true);
+
+      // Completing the task should spawn next occurrence with the same seriesId
+      await taskService.completeTask(recTask.id);
+
+      const seriesTasks = await taskRepository.findBySeriesId(recTask.seriesId!);
+      expect(seriesTasks.length).toBeGreaterThanOrEqual(1);
+
+      // Deleting the entire series should remove all occurrences
+      await taskService.deleteTask(recTask.id, true);
+      const remainingSeries = await taskRepository.findBySeriesId(recTask.seriesId!);
+      expect(remainingSeries.length).toBe(0);
+    });
+  });
+
+  describe('16. Non-Destructive Backup Merge Mode', () => {
+    it('should preserve locally added records when restoring in merge mode', async () => {
+      const backupJson = await backupService.exportBackup();
+
+      // Create a new task after backup
+      const newTask = await taskService.createTask({
+        title: 'Newly Added Local Task',
+        date: format(new Date(), 'yyyy-MM-dd'),
+      });
+
+      // Restore with merge mode
+      const res = await backupService.importBackup(backupJson, 'merge');
+      expect(res.success).toBe(true);
+
+      // Verify the new task was NOT wiped
+      const found = await taskRepository.findById(newTask.id);
+      expect(found).not.toBeNull();
+      expect(found?.title).toBe('Newly Added Local Task');
     });
   });
 });

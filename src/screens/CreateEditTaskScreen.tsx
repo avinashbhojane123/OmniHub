@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,9 +17,12 @@ import { useTasks } from '../hooks/useTasks';
 import { useAppTheme } from '../hooks/useTheme';
 import { radius, spacing, typography } from '../theme';
 import { GoogleKeepNotesEditor } from '../components/GoogleKeepNotesEditor';
+import { DateTimePickerModal } from '../components/DateTimePickerModal';
 import { format, addDays } from 'date-fns';
 import { TaskPriority, RecurrenceType } from '../types';
 import { categoryRepository } from '../database/repositories/CategoryRepository';
+import { taskRepository } from '../database/repositories/TaskRepository';
+import { normalizeTimeTo24H } from '../utils/time';
 
 interface CreateEditTaskScreenProps {
   route: any;
@@ -32,11 +35,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
-  const { tasks, categories, refresh, createTask, updateTask, deleteTask } = useTasks();
+  const { categories, refresh, createTask, updateTask, deleteTask } = useTasks();
 
   const taskId = route.params?.taskId;
   const isEditing = Boolean(taskId);
-  const existingTask = isEditing ? tasks.find((t) => t.id === taskId) : null;
 
   // Form State
   const [title, setTitle] = useState('');
@@ -50,6 +52,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('none');
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
+  // Date/Time Modal Picker State
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pickerMode, setPickerMode] = useState<'date' | 'time' | 'both'>('date');
+
   // New Category Modal State
   const [newCatModalVisible, setNewCatModalVisible] = useState(false);
   const [newCatName, setNewCatName] = useState('');
@@ -57,20 +63,63 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   const [newCatColor, setNewCatColor] = useState('#FF6B00');
 
   useEffect(() => {
-    if (existingTask) {
-      setTitle(existingTask.title);
-      setCategoryId(existingTask.categoryId);
-      setPriority(existingTask.priority || 'medium');
-      setNotes(existingTask.notes || existingTask.description || '');
-      setTaskDate(existingTask.date || format(new Date(), 'yyyy-MM-dd'));
-      setStartTime(existingTask.startTime);
-      setEndTime(existingTask.endTime);
-      setReminderMinutes(existingTask.reminderMinutes ?? 0);
-      setRecurrenceType(existingTask.recurrenceRule?.type || 'none');
-    } else if (categories.length > 0 && !categoryId) {
+    let isMounted = true;
+    async function loadTaskForEdit() {
+      if (taskId) {
+        try {
+          const directTask = await taskRepository.findById(taskId);
+          if (directTask && isMounted) {
+            setTitle(directTask.title);
+            setCategoryId(directTask.categoryId);
+            setPriority(directTask.priority || 'medium');
+            setNotes(directTask.notes || directTask.description || '');
+            setTaskDate(directTask.date || format(new Date(), 'yyyy-MM-dd'));
+            setStartTime(directTask.startTime);
+            setEndTime(directTask.endTime);
+            setReminderMinutes(directTask.reminderMinutes ?? 0);
+            setRecurrenceType(directTask.recurrenceRule?.type || 'none');
+          }
+        } catch (e) {
+          console.warn('Failed to load task directly:', e);
+        }
+      }
+    }
+    loadTaskForEdit();
+    return () => {
+      isMounted = false;
+    };
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!taskId && categories.length > 0 && !categoryId) {
       setCategoryId(categories[0].id);
     }
-  }, [existingTask, categories, categoryId]);
+  }, [taskId, categories, categoryId]);
+
+  const isSavedRef = useRef(false);
+  const isDirty = (title.trim().length > 0 || notes.trim().length > 0);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      if (!isDirty || isSavedRef.current) {
+        return;
+      }
+      e.preventDefault();
+      Alert.alert(
+        'Discard changes?',
+        'You have unsaved changes. Are you sure you want to discard them and leave?',
+        [
+          { text: 'Keep editing', style: 'cancel', onPress: () => {} },
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => navigation.dispatch(e.data.action),
+          },
+        ]
+      );
+    });
+    return unsubscribe;
+  }, [navigation, isDirty]);
 
   const addMinutesToTime = (timeStr?: string, minutesToAdd = 30): string | undefined => {
     if (!timeStr) return undefined;
@@ -136,24 +185,27 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
             }
           : undefined;
 
+      const normalizedStart = normalizeTimeTo24H(startTime);
+      const normalizedEnd = normalizeTimeTo24H(endTime);
+
       if (isEditing && taskId) {
         await updateTask(taskId, {
           title: title.trim(),
           date: taskDate,
-          startTime,
-          endTime,
+          startTime: normalizedStart || null,
+          endTime: normalizedEnd || null,
           priority,
-          categoryId,
+          categoryId: categoryId || null,
           reminderMinutes,
-          recurrenceRule,
-          notes: notes.trim() || undefined,
+          recurrenceRule: recurrenceRule || null,
+          notes: notes.trim() || null,
         });
       } else {
         await createTask({
           title: title.trim(),
           date: taskDate,
-          startTime,
-          endTime,
+          startTime: normalizedStart,
+          endTime: normalizedEnd,
           priority,
           categoryId,
           reminderMinutes,
@@ -162,6 +214,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
         });
       }
 
+      isSavedRef.current = true;
       navigateBack();
     } catch (err: any) {
       Alert.alert('Save Failed', err.message || 'An error occurred while saving.');
@@ -184,6 +237,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          isSavedRef.current = true;
           await deleteTask(taskId);
           navigateBack();
         },
@@ -395,22 +449,44 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                 </TouchableOpacity>
               );
             })}
+            <TouchableOpacity
+              onPress={() => {
+                setPickerMode('date');
+                setPickerVisible(true);
+              }}
+              style={[
+                styles.dateChip,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.primary },
+              ]}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.dateChipText, { color: colors.primaryLight }]}>
+                🗓️ Calendar
+              </Text>
+            </TouchableOpacity>
           </View>
-          <TextInput
+
+          {/* Interactive Selected Date Banner */}
+          <TouchableOpacity
+            onPress={() => {
+              setPickerMode('date');
+              setPickerVisible(true);
+            }}
             style={[
               styles.input,
               styles.marginTopSm,
+              styles.dateCardRow,
               {
                 backgroundColor: colors.surfaceElevated,
                 borderColor: colors.borderSubtle,
-                color: colors.text,
               },
             ]}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textMuted}
-            value={taskDate}
-            onChangeText={setTaskDate}
-          />
+          >
+            <Text style={[typography.body, { color: colors.text }, styles.boldText]}>
+              📅 {taskDate}
+            </Text>
+            <Text style={[typography.caption, { color: colors.primary }]}>Tap to pick ▾</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Reminder Time Selector */}
@@ -451,22 +527,44 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                 </TouchableOpacity>
               );
             })}
+            <TouchableOpacity
+              onPress={() => {
+                setPickerMode('time');
+                setPickerVisible(true);
+              }}
+              style={[
+                styles.categoryPill,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.primary },
+              ]}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.categoryPillText, { color: colors.primaryLight }]}>
+                ⏰ Custom Time
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
-          <TextInput
+
+          {/* Interactive Selected Time Banner */}
+          <TouchableOpacity
+            onPress={() => {
+              setPickerMode('time');
+              setPickerVisible(true);
+            }}
             style={[
               styles.input,
               styles.marginTopSm,
+              styles.dateCardRow,
               {
                 backgroundColor: colors.surfaceElevated,
                 borderColor: colors.borderSubtle,
-                color: colors.text,
               },
             ]}
-            placeholder="Custom time e.g. 10:30 or 07:15 PM"
-            placeholderTextColor={colors.textMuted}
-            value={startTime || ''}
-            onChangeText={(val) => setStartTime(val.trim() || undefined)}
-          />
+          >
+            <Text style={[typography.body, { color: colors.text }, styles.boldText]}>
+              {startTime ? `⏰ ${startTime}` : '🔕 No specific reminder time'}
+            </Text>
+            <Text style={[typography.caption, { color: colors.primary }]}>Tap to pick ▾</Text>
+          </TouchableOpacity>
         </View>
 
         {/* End Time / Duration Selector */}
@@ -630,7 +728,12 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
       </KeyboardAvoidingView>
 
       {/* Create Custom Category Modal */}
-      <Modal visible={newCatModalVisible} transparent animationType="fade">
+      <Modal
+        visible={newCatModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNewCatModalVisible(false)}
+      >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
@@ -711,6 +814,22 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <DateTimePickerModal
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        mode={pickerMode}
+        selectedDate={taskDate}
+        selectedTime={startTime}
+        onConfirm={(date, time) => {
+          if (pickerMode === 'date' || pickerMode === 'both') {
+            setTaskDate(date);
+          }
+          if (pickerMode === 'time' || pickerMode === 'both') {
+            setStartTime(time);
+          }
+        }}
+      />
     </View>
   );
 };
@@ -939,5 +1058,13 @@ const styles = StyleSheet.create({
   modalSaveText: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  dateCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  boldText: {
+    fontWeight: '600',
   },
 });

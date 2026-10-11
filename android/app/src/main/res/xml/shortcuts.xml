@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="shortcut_planner"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_planner_short"
+        android:shortcutLongLabel="@string/shortcut_planner_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.lifeplanner"
+            android:targetClass="com.lifeplanner.MainActivity"
+            android:data="omnihub://workspace/planner" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_chat"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_chat_short"
+        android:shortcutLongLabel="@string/shortcut_chat_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.lifeplanner"
+            android:targetClass="com.lifeplanner.MainActivity"
+            android:data="omnihub://workspace/chat" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_battery"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_battery_short"
+        android:shortcutLongLabel="@string/shortcut_battery_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.lifeplanner"
+            android:targetClass="com.lifeplanner.MainActivity"
+            android:data="omnihub://workspace/battery" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_safeguard"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_safeguard_short"
+        android:shortcutLongLabel="@string/shortcut_safeguard_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.lifeplanner"
+            android:targetClass="com.lifeplanner.MainActivity"
+            android:data="omnihub://workspace/safeguard" />
+    </shortcut>
+</shortcuts>

@@ -105,6 +105,9 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       } else if (trimmed.includes('WHERE key = ?')) {
         const k = params[0];
         rows = rows.filter((r) => r.key === k);
+      } else if (trimmed.includes('seriesId = ?')) {
+        const sid = params[0];
+        rows = rows.filter((r) => r.seriesId === sid);
       } else if (trimmed.includes('WHERE entityType = ?')) {
         const et = params[0];
         rows = rows.filter((r) => r.entityType === et);
@@ -113,6 +116,9 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
         }
       } else if (trimmed.includes('WHERE completed = 1')) {
         rows = rows.filter((r) => Boolean(r.completed));
+        if (trimmed.includes('AND date >= ?') && params[0]) {
+          rows = rows.filter((r) => r.date >= params[0]);
+        }
       } else if (trimmed.includes('LIKE ?')) {
         const rawTerm = (params[0] || '').replace(/%/g, '').toLowerCase();
         rows = rows.filter((r) => {
@@ -121,6 +127,16 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
           const n = (r.notes || '').toLowerCase();
           return t.includes(rawTerm) || d.includes(rawTerm) || n.includes(rawTerm);
         });
+      } else if (tableName === 'calendar_events' && (trimmed.includes('startTime <= ?') || trimmed.includes('startTime >= ?'))) {
+        const endIso = trimmed.includes('startTime <= ?') ? params[0] : params[1];
+        const startIso = trimmed.includes('startTime <= ?') ? params[1] : params[0];
+        rows = rows.filter((r) => {
+          return r.startTime <= endIso && r.endTime >= startIso;
+        });
+      } else if (trimmed.includes('t.date >= ? AND t.date <= ?')) {
+        const startDate = params[0];
+        const endDate = params[1];
+        rows = rows.filter((r) => r.date >= startDate && r.date <= endDate);
       } else if (trimmed.includes('OVERDUE') || trimmed.includes('status NOT IN')) {
         // Overdue query: (t.status NOT IN ('completed', 'cancelled')) AND (t.date < ? OR (t.date = ? AND t.startTime < ?))
         const today = params[0];
@@ -136,7 +152,8 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       // Handle goal_tasks JOIN tasks query
       if (tableName === 'goal_tasks' && trimmed.includes('JOIN tasks')) {
         const goalId = params[0];
-        const goalTasks = (this.tables.get('goal_tasks') || []).filter((gt) => gt.goalId === goalId);
+        const allGoalTasks = this.tables.get('goal_tasks') || [];
+        const goalTasks = goalId ? allGoalTasks.filter((gt) => gt.goalId === goalId) : allGoalTasks;
         const tasks = this.tables.get('tasks') || [];
         const categories = this.tables.get('categories') || [];
         rows = goalTasks
@@ -146,6 +163,7 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
             const cat = categories.find((c) => c.id === t.categoryId);
             return {
               ...t,
+              goalId: gt.goalId,
               categoryName: cat?.name,
               categoryColor: cat?.color,
               categoryIcon: cat?.icon,
@@ -252,9 +270,33 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
         return { rows: [], rowsAffected: table.length - filtered.length };
       }
 
+      if (trimmed.includes('WHERE seriesId = ?')) {
+        const sid = params[0];
+        const filtered = table.filter((r) => r.seriesId !== sid);
+        this.tables.set(tableName, filtered);
+        return { rows: [], rowsAffected: table.length - filtered.length };
+      }
+
+      if (tableName === 'calendar_events' && trimmed.includes("source = 'device'")) {
+        const startIso = params[0];
+        const endIso = params[1];
+        const keepIds = new Set(params.slice(2));
+        const filtered = table.filter((r) => {
+          if (r.source === 'device' && r.startTime >= startIso && r.startTime <= endIso) {
+            if (keepIds.size > 0 && keepIds.has(r.externalId)) {
+              return true;
+            }
+            return false;
+          }
+          return true;
+        });
+        this.tables.set(tableName, filtered);
+        return { rows: [], rowsAffected: table.length - filtered.length };
+      }
+
       if (params.length > 0) {
         const idParam = params[0];
-        const filtered = table.filter((r) => r.id !== idParam && r.habitId !== idParam && r.goalId !== idParam);
+        const filtered = table.filter((r) => r.id !== idParam && r.habitId !== idParam && r.goalId !== idParam && r.seriesId !== idParam);
         this.tables.set(tableName, filtered);
         return { rows: [], rowsAffected: table.length - filtered.length };
       } else {
@@ -285,6 +327,8 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
 
 class OPSQLiteAdapter implements DatabaseAdapter {
   private db: any;
+  private transactionDepth = 0;
+  private txMutex: Promise<void> = Promise.resolve();
 
   constructor(dbInstance: any) {
     this.db = dbInstance;
@@ -322,16 +366,54 @@ class OPSQLiteAdapter implements DatabaseAdapter {
   }
 
   async transaction<T>(fn: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
-    await this.execute('BEGIN TRANSACTION;');
+    if (this.transactionDepth > 0) {
+      return this.runTransaction(fn);
+    }
+
+    let releaseMutex: () => void;
+    const prevMutex = this.txMutex;
+    this.txMutex = new Promise<void>((resolve) => {
+      releaseMutex = resolve;
+    });
+
+    await prevMutex;
+    try {
+      return await this.runTransaction(fn);
+    } finally {
+      releaseMutex!();
+    }
+  }
+
+  private async runTransaction<T>(fn: (adapter: DatabaseAdapter) => Promise<T>): Promise<T> {
+    const isRoot = this.transactionDepth === 0;
+    const savepointName = `sp_${this.transactionDepth}`;
+    this.transactionDepth++;
+
+    if (isRoot) {
+      await this.execute('BEGIN TRANSACTION;');
+    } else {
+      await this.execute(`SAVEPOINT ${savepointName};`);
+    }
+
     try {
       const result = await fn(this);
-      await this.execute('COMMIT;');
+      if (isRoot) {
+        await this.execute('COMMIT;');
+      } else {
+        await this.execute(`RELEASE SAVEPOINT ${savepointName};`);
+      }
       return result;
     } catch (err) {
       try {
-        await this.execute('ROLLBACK;');
+        if (isRoot) {
+          await this.execute('ROLLBACK;');
+        } else {
+          await this.execute(`ROLLBACK TO SAVEPOINT ${savepointName};`);
+        }
       } catch {}
       throw err;
+    } finally {
+      this.transactionDepth--;
     }
   }
 
@@ -396,6 +478,16 @@ class DatabaseManager {
       await this.adapter.execute('PRAGMA foreign_keys = ON;');
     } catch {}
 
+    try {
+      const vResult = await this.adapter.execute('SELECT MAX(version) as maxVer FROM schema_migrations');
+      const currentVersion = vResult.rows[0]?.maxVer || 0;
+      if (currentVersion >= 2) {
+        return;
+      }
+    } catch {
+      // schema_migrations does not exist yet; proceed with initial migration
+    }
+
     const statements = CREATE_TABLES_SQL.split(';')
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
@@ -427,6 +519,9 @@ class DatabaseManager {
     try {
       const taskCols = await this.adapter.execute('PRAGMA table_info(tasks)');
       const taskColNames = new Set(taskCols.rows.map((r: any) => r.name));
+      if (!taskColNames.has('seriesId')) {
+        await this.adapter.execute('ALTER TABLE tasks ADD COLUMN seriesId TEXT');
+      }
       if (!taskColNames.has('notes')) {
         await this.adapter.execute('ALTER TABLE tasks ADD COLUMN notes TEXT');
       }
@@ -465,13 +560,15 @@ class DatabaseManager {
     try {
       const existingCategories = await this.adapter.execute('SELECT COUNT(*) as count FROM categories');
       const count = existingCategories.rows[0]?.count ?? 0;
-      if (count === 0) {
-        for (const cat of DEFAULT_CATEGORIES) {
-          await this.adapter.execute(
-            'INSERT INTO categories (id, name, color, icon, createdAt) VALUES (?, ?, ?, ?, ?)',
-            [cat.id, cat.name, cat.color, cat.icon, cat.createdAt]
-          );
-        }
+      if (count > 0) {
+        // App is already seeded
+        return;
+      }
+      for (const cat of DEFAULT_CATEGORIES) {
+        await this.adapter.execute(
+          'INSERT INTO categories (id, name, color, icon, createdAt) VALUES (?, ?, ?, ?, ?)',
+          [cat.id, cat.name, cat.color, cat.icon, cat.createdAt]
+        );
       }
     } catch {
       // ignore

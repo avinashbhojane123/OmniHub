@@ -6,20 +6,36 @@ export class GoalRepository {
   async findAll(): Promise<Goal[]> {
     const db = await getDatabase();
     const result = await db.execute('SELECT * FROM goals ORDER BY createdAt DESC');
-    const goals: Goal[] = [];
+    if (result.rows.length === 0) return [];
 
-    for (const r of result.rows) {
+    const countsResult = await db.execute(
+      `SELECT gt.goalId, t.status
+       FROM goal_tasks gt
+       JOIN tasks t ON gt.taskId = t.id`
+    );
+
+    const countsByGoal = new Map<string, { total: number; completed: number }>();
+    for (const r of countsResult.rows) {
+      if (!countsByGoal.has(r.goalId)) {
+        countsByGoal.set(r.goalId, { total: 0, completed: 0 });
+      }
+      const item = countsByGoal.get(r.goalId)!;
+      item.total++;
+      if (r.status === 'completed') {
+        item.completed++;
+      }
+    }
+
+    return result.rows.map((r) => {
       const g = this.mapRow(r);
-      const counts = await this.getTaskCounts(g.id);
+      const counts = countsByGoal.get(g.id) || { total: 0, completed: 0 };
       g.tasksCount = counts.total;
       g.completedTasksCount = counts.completed;
       if (counts.total > 0) {
         g.progress = Math.round((counts.completed / counts.total) * 100);
       }
-      goals.push(g);
-    }
-
-    return goals;
+      return g;
+    });
   }
 
   async findById(id: string): Promise<Goal | null> {
@@ -138,7 +154,7 @@ export class GoalRepository {
        WHERE gt.goalId = ?`,
       [goalId]
     );
-    return result.rows.map((r) => (taskRepository as any).mapRowToTask(r));
+    return result.rows.map((r) => taskRepository.mapRowToTask(r));
   }
 
   private async getTaskCounts(goalId: string): Promise<{ total: number; completed: number }> {

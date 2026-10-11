@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -53,12 +53,41 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
     return true;
   });
 
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleSearch = (text: string) => {
     setSearchQuery(text);
-    searchTasks(text);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      searchTasks(text);
+    }, 250);
   };
 
   const confirmDelete = (taskId: string, taskTitle: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task && (task.seriesId || (task.recurrenceRule && task.recurrenceRule.type !== 'none'))) {
+      Alert.alert(
+        'Delete Recurring Task',
+        `"${taskTitle}" is part of a recurring series. What would you like to delete?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'This Task Only',
+            style: 'destructive',
+            onPress: () => deleteTask(taskId, false),
+          },
+          {
+            text: 'All in Series',
+            style: 'destructive',
+            onPress: () => deleteTask(taskId, true),
+          },
+        ]
+      );
+      return;
+    }
+
     Alert.alert(
       'Delete Task',
       `Are you sure you want to delete "${taskTitle}"?`,

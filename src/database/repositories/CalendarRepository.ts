@@ -12,9 +12,9 @@ export class CalendarRepository {
     const db = await getDatabase();
     const result = await db.execute(
       `SELECT * FROM calendar_events 
-       WHERE (startTime >= ? AND startTime <= ?) OR (endTime >= ? AND endTime <= ?)
+       WHERE startTime <= ? AND endTime >= ?
        ORDER BY startTime ASC`,
-      [startIso, endIso, startIso, endIso]
+      [endIso, startIso]
     );
     return result.rows.map((r) => this.mapRow(r));
   }
@@ -122,6 +122,26 @@ export class CalendarRepository {
     const db = await getDatabase();
     const result = await db.execute('DELETE FROM calendar_events WHERE id = ?', [id]);
     return result.rowsAffected > 0;
+  }
+
+  async deleteDeviceEventsNotInList(startIso: string, endIso: string, keepExternalIds: string[]): Promise<number> {
+    const db = await getDatabase();
+    if (keepExternalIds.length === 0) {
+      const res = await db.execute(
+        `DELETE FROM calendar_events 
+         WHERE source = 'device' AND startTime >= ? AND startTime <= ?`,
+        [startIso, endIso]
+      );
+      return res.rowsAffected;
+    }
+    const placeholders = keepExternalIds.map(() => '?').join(',');
+    const res = await db.execute(
+      `DELETE FROM calendar_events 
+       WHERE source = 'device' AND startTime >= ? AND startTime <= ? 
+       AND externalId NOT IN (${placeholders})`,
+      [startIso, endIso, ...keepExternalIds]
+    );
+    return res.rowsAffected;
   }
 
   private mapRow(row: any): CalendarEvent {

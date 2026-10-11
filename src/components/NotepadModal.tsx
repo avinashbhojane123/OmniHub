@@ -115,8 +115,37 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
     ]);
   };
 
+  const handleRequestClose = () => {
+    if (isEditing) {
+      if (noteTitle.trim() || noteContent.trim()) {
+        Alert.alert(
+          'Discard Note?',
+          'You have unsaved changes in your note. Are you sure you want to discard them?',
+          [
+            { text: 'Keep Editing', style: 'cancel' },
+            {
+              text: 'Discard',
+              style: 'destructive',
+              onPress: () => {
+                setIsEditing(false);
+                setSelectedNote(null);
+                setNoteTitle('');
+                setNoteContent('');
+              },
+            },
+          ]
+        );
+      } else {
+        setIsEditing(false);
+        setSelectedNote(null);
+      }
+    } else {
+      onClose();
+    }
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleRequestClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.modalOverlay}
@@ -132,7 +161,7 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
                 Quick thoughts, ideas, and offline notes
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={handleRequestClose} style={styles.closeBtn}>
               <Text style={[styles.closeBtnText, { color: colors.textSecondary }]}>✕</Text>
             </TouchableOpacity>
           </View>
@@ -173,7 +202,7 @@ export const NotepadModal: React.FC<NotepadModalProps> = ({ visible, onClose }) 
               />
               <View style={styles.editorBtnRow}>
                 <TouchableOpacity
-                  onPress={() => setIsEditing(false)}
+                  onPress={handleRequestClose}
                   style={[styles.cancelBtn, { borderColor: colors.borderSubtle }]}
                 >
                   <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>

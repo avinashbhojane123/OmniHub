@@ -1,10 +1,24 @@
-# Add project specific ProGuard rules here.
-# By default, the flags in this file are appended to flags specified
-# in /usr/local/Cellar/android-sdk/24.3.3/tools/proguard/proguard-android.txt
-# You can edit the include path and order by changing the proguardFiles
-# directive in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ProGuard / R8 Rules for LifePlanner Android
 
-# Add any project specific keep options here:
+# React Native & Hermes
+-keepclassmembers class * {
+    @com.facebook.react.bridge.ReactMethod *;
+}
+-keep class com.facebook.react.bridge.** { *; }
+
+# Custom Native Kotlin Modules
+-keep class com.lifeplanner.** { *; }
+-keepclassmembers class com.lifeplanner.** {
+    public <methods>;
+}
+
+# @op-engineering/op-sqlite JNI bindings
+-keep class com.op.sqlite.** { *; }
+-keep class com.opengineering.sqlite.** { *; }
+-keepclassmembers class * {
+    native <methods>;
+}
+
+# Notifee Core & Background Receivers
+-keep class app.notifee.** { *; }
+-keepclassmembers class app.notifee.** { *; }

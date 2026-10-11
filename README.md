@@ -1,97 +1,87 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# OmniHub Suite & SafeGuard Family Platform
 
-# Getting Started
+> **"Visible Protection. Responsible Parenting. Child Safety First."**
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+An enterprise-grade, ethical, transparent, and legally compliant Parental Control & Child Safety Platform unified directly into the OmniHub application suite.
 
-## Step 1: Start Metro
+---
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## 🌟 Key Innovation: Single-APK Unified Role Switching
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+**No need to develop, distribute, or sideload a separate APK for parent and child!**
 
-```sh
-# Using npm
-npm start
+Both roles operate seamlessly inside this single application package:
+- 👨‍👩‍👧 **Parent Dashboard Role**: Multi-child switcher, live GPS map & geofencing, screen time & app limits, 1-tap app blocking, call/SMS/notification activity feeds, AI keyword risk alert center, remote lock/unlock, and adaptive parental control levels.
+- 🧒 **Child Safety Agent Role**: Transparent monitoring agent with persistent status disclosure, mandatory informed consent, Android permissions wizard (Usage Access, Notification Listener, Accessibility App Blocker, GPS Location), live digital wellbeing telemetry, live AI safety scanner test station, and full-screen remote lockdown overlay with Emergency SOS.
+- 🔒 **PIN-Protected Mode Switching**: Switching from Child Agent back to Parent Dashboard requires the 4-digit Parent Security PIN (default `1234`), preventing unauthorized role tampering by children.
 
-# OR using Yarn
-yarn start
+---
+
+## 📂 System Architecture & Modules
+
+```text
+├── docs/
+│   ├── architecture.md          # End-to-end architecture & single-APK design
+│   ├── api-spec.md              # Complete REST API & WebSocket specifications
+│   ├── erd.md                   # Database Entity-Relationship diagram
+│   ├── compliance.md            # COPPA, GDPR-K, DPDP Act ethical compliance
+│   └── deployment.md            # Docker, Kubernetes & cloud deployment guide
+├── src/
+│   ├── screens/safeguard/       # Unified SafeGuard screens (Parent & Child views)
+│   │   ├── SafeGuardScreen.tsx       # Master role switcher & PIN modal container
+│   │   ├── ParentDashboardView.tsx   # Parent telemetry, app blocker, GPS & risk hub
+│   │   └── ChildAgentView.tsx        # Child agent, consent, permissions wizard & SOS
+│   ├── services/safeguard/
+│   │   ├── RiskDetectionEngine.ts    # AI Keyword Risk & Threat Scanner (6 categories)
+│   │   ├── SafeGuardStore.ts         # Unified reactive state repository & command bus
+│   │   └── SafeGuardNativeBridge.ts  # Native Android Kotlin module bridge & fallback
+│   └── types/safeguard.ts            # Type-safe schemas and domain entities
+├── android/app/src/main/java/com/lifeplanner/
+│   ├── SafeGuardAgentModule.kt               # Native usage stats & permissions bridge
+│   ├── SafeGuardAgentPackage.kt              # React Native package registration
+│   ├── SafeGuardNotificationListenerService.kt# Android notification safety listener
+│   └── SafeGuardAccessibilityService.kt      # Foreground app detector & blocker
+├── server/                                   # NestJS Companion Backend
+│   ├── prisma/schema.prisma                  # PostgreSQL schema with UUID keys
+│   ├── src/modules/safeguard/                # Controller, service & risk engine
+│   └── docker-compose.yml                    # Postgres + Redis + NestJS container stack
 ```
 
-## Step 2: Build and run your app
+---
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+## 🚀 Quick Start Guide
 
-### Android
+### 1. Launching SafeGuard in the Mobile App
+1. Start Metro:
+   ```bash
+   npm start
+   ```
+2. Run on Android:
+   ```bash
+   npm run android
+   ```
+3. Open the **OmniHub Workspace Switcher** on startup (or via Settings) and select **SafeGuard Family**.
+4. Use the top header switcher pill (👨‍👩‍👧 `Parent` ⇄ 🧒 `Child`) to switch roles anytime.
+   - Enter default PIN `1234` when switching from Child to Parent.
 
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+### 2. Running the Backend & Database (Docker)
+```bash
+docker-compose up -d postgres redis
+cd server
+npm install
+npm run start:dev
 ```
+The NestJS API will be available at `http://localhost:5000/api/v1`.
 
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+### 3. Running Unit Tests
+```bash
+npm test
 ```
+Runs 100% passing tests including the new `RiskDetectionEngine.test.ts`.
 
-Then, and every time you update your native dependencies, run:
+---
 
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+## ⚖️ Ethical & Legal Compliance
+- **Zero Hidden Surveillance**: Persistent foreground notification is mandatory.
+- **Informed Consent**: Explicit explanation of what is protected and what remains private.
+- **Data Minimization**: Raw personal conversation databases are never stored; only safety risk keywords generate alerts.

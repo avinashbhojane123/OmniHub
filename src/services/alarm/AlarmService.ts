@@ -29,6 +29,7 @@ class AlarmService {
   private ringTimer: any = null;
   private foregroundMonitorTimer: any = null;
   private lastTriggeredMinute: string = '';
+  private cachedHabits: Array<{ id: string; name: string; reminderTime: string; daysOfWeek: number[] }> = [];
 
   private currentState: AlarmState = {
     isRinging: false,
@@ -157,13 +158,16 @@ class AlarmService {
         body: `Ringing now! Tap to stop or snooze.`,
         android: {
           channelId: 'alarm_clock_channel_v3',
+          smallIcon: 'ic_notification',
           category: AndroidCategory.ALARM,
           importance: AndroidImportance.HIGH,
           visibility: AndroidVisibility.PUBLIC,
-          sound: soundEnabled ? 'default' : undefined,
+          sound: undefined, // Ringtone audio handled directly by AlarmRingtone module
+          asForegroundService: true,
           ongoing: true,
           autoCancel: false,
           pressAction: { id: 'default' },
+          fullScreenAction: { id: 'default' },
           actions: [
             {
               title: '🔕 STOP ALARM',
@@ -192,6 +196,11 @@ class AlarmService {
       this.ringTimer = null;
     }
 
+    // Auto-reschedule next occurrence for this habit so future daily alarms fire reliably
+    if (habitId) {
+      this.rescheduleNextHabitAlarm(habitId);
+    }
+
     // Countdown timer up to 60 seconds (1 minute auto-stop)
     this.ringTimer = setInterval(() => {
       const nextRemaining = this.currentState.secondsRemaining - 1;
@@ -202,6 +211,52 @@ class AlarmService {
         this.notify();
       }
     }, 1000);
+  }
+
+  /**
+   * Automatically reschedule the next occurrence of a habit alarm
+   */
+  public async rescheduleNextHabitAlarm(habitId: string): Promise<void> {
+    try {
+      const cached = this.cachedHabits.find((h) => h.id === habitId);
+      if (cached) {
+        await this.scheduleHabitAlarm(cached.id, cached.name, cached.reminderTime, cached.daysOfWeek);
+        return;
+      }
+      const habit = await habitRepository.findById(habitId);
+      if (habit && habit.reminderTime) {
+        const days = habit.recurrenceRule?.daysOfWeek || [0, 1, 2, 3, 4, 5, 6];
+        await this.scheduleHabitAlarm(habit.id, habit.name, habit.reminderTime, days);
+      }
+    } catch (e) {
+      console.warn('Failed to reschedule next habit alarm:', e);
+    }
+  }
+
+  /**
+   * Check if Android exact alarm permission is granted
+   */
+  public async checkExactAlarmPermission(): Promise<boolean> {
+    try {
+      const settings = await notifee.getNotificationSettings();
+      if (settings?.android?.alarm !== undefined) {
+        return settings.android.alarm === 1; // 1 = ENABLED
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Open Android system settings for Exact Alarms & Reminders
+   */
+  public async openExactAlarmSettings(): Promise<void> {
+    try {
+      await notifee.openAlarmPermissionSettings();
+    } catch (e) {
+      console.warn('Failed to open alarm permission settings:', e);
+    }
   }
 
   /**
@@ -227,6 +282,7 @@ class AlarmService {
       notifee.cancelNotification('active_ringing_alarm');
     } catch {}
 
+    const ringingHabitId = this.currentState.habitId;
     this.currentState = {
       isRinging: false,
       title: '',
@@ -235,6 +291,10 @@ class AlarmService {
       secondsRemaining: 60,
     };
     this.notify();
+
+    if (ringingHabitId) {
+      this.rescheduleNextHabitAlarm(ringingHabitId);
+    }
   }
 
   /**
@@ -269,12 +329,14 @@ class AlarmService {
           body: `Snoozed alarm ringing now!`,
           android: {
             channelId: 'alarm_clock_channel_v3',
+            smallIcon: 'ic_notification',
             category: AndroidCategory.ALARM,
             importance: AndroidImportance.HIGH,
             visibility: AndroidVisibility.PUBLIC,
             sound: soundEnabled ? 'default' : undefined,
             ongoing: true,
             pressAction: { id: 'default' },
+            fullScreenAction: { id: 'default' },
             actions: [
               { title: '🔕 STOP ALARM', pressAction: { id: 'stop_alarm' } },
               { title: '💤 SNOOZE (5m)', pressAction: { id: 'snooze_alarm' } },
@@ -328,33 +390,52 @@ class AlarmService {
         },
       };
 
-      await notifee.createTriggerNotification(
-        {
-          id: `alarm_${habitId}`,
-          title: `⏰ Alarm: ${habitName}`,
-          body: `Time for your routine: ${habitName}!`,
-          android: {
-            channelId: 'alarm_clock_channel_v3',
-            category: AndroidCategory.ALARM,
-            importance: AndroidImportance.HIGH,
-            visibility: AndroidVisibility.PUBLIC,
-            sound: soundEnabled ? 'default' : undefined,
-            ongoing: true,
-            pressAction: { id: 'default' },
-            actions: [
-              { title: '🔕 STOP ALARM', pressAction: { id: 'stop_alarm' } },
-              { title: '💤 SNOOZE (5m)', pressAction: { id: 'snooze_alarm' } },
-            ],
-          },
-          data: {
-            actionType: 'habit_alarm',
-            habitId: String(habitId || ''),
-            habitName: String(habitName || ''),
-            timeStr: String(timeStr || ''),
-          },
+      const notificationPayload = {
+        id: `alarm_${habitId}`,
+        title: `⏰ Alarm: ${habitName}`,
+        body: `Time for your routine: ${habitName}!`,
+        android: {
+          channelId: 'alarm_clock_channel_v3',
+          smallIcon: 'ic_notification',
+          category: AndroidCategory.ALARM,
+          importance: AndroidImportance.HIGH,
+          visibility: AndroidVisibility.PUBLIC,
+          sound: soundEnabled ? 'default' : undefined,
+          ongoing: true,
+          pressAction: { id: 'default' },
+          fullScreenAction: { id: 'default' },
+          actions: [
+            { title: '🔕 STOP ALARM', pressAction: { id: 'stop_alarm' } },
+            { title: '💤 SNOOZE (5m)', pressAction: { id: 'snooze_alarm' } },
+          ],
         },
-        trigger
-      );
+        data: {
+          actionType: 'habit_alarm',
+          habitId: String(habitId || ''),
+          habitName: String(habitName || ''),
+          timeStr: String(timeStr || ''),
+        },
+      };
+
+      try {
+        await notifee.createTriggerNotification(notificationPayload, trigger);
+      } catch {
+        // Fallback for Android 13/14 if exact alarm permission is restricted
+        const fallbackTrigger: TimestampTrigger = {
+          type: TriggerType.TIMESTAMP,
+          timestamp: triggerDate.getTime(),
+        };
+        await notifee.createTriggerNotification(notificationPayload, fallbackTrigger);
+      }
+
+      // Keep local cachedHabits synchronized so foreground monitor detects it immediately
+      const days = daysOfWeek && daysOfWeek.length > 0 ? daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
+      const existingIdx = this.cachedHabits.findIndex((h) => h.id === habitId);
+      if (existingIdx >= 0) {
+        this.cachedHabits[existingIdx] = { id: habitId, name: habitName, reminderTime: timeStr, daysOfWeek: days };
+      } else {
+        this.cachedHabits.push({ id: habitId, name: habitName, reminderTime: timeStr, daysOfWeek: days });
+      }
     } catch (err) {
       console.warn('Failed to schedule habit alarm:', err);
     }
@@ -363,12 +444,22 @@ class AlarmService {
   public async cancelHabitAlarm(habitId: string): Promise<void> {
     try {
       await notifee.cancelNotification(`alarm_${habitId}`);
+      this.cachedHabits = this.cachedHabits.filter((h) => h.id !== habitId);
     } catch {}
   }
 
   public async restoreAllHabitAlarms(): Promise<void> {
     try {
-      const habits = await habitRepository.findAll();
+      const habits = await habitRepository.findActive();
+      this.cachedHabits = habits
+        .filter((h) => Boolean(h.reminderTime))
+        .map((h) => ({
+          id: h.id,
+          name: h.name,
+          reminderTime: h.reminderTime!,
+          daysOfWeek: h.recurrenceRule?.daysOfWeek || [0, 1, 2, 3, 4, 5, 6],
+        }));
+
       for (const h of habits) {
         if (h.reminderTime) {
           const days = h.recurrenceRule?.daysOfWeek || [0, 1, 2, 3, 4, 5, 6];
@@ -405,15 +496,24 @@ class AlarmService {
 
       if (this.lastTriggeredMinute === currentKey) return;
 
+      if (this.cachedHabits.length === 0) {
+        try {
+          const habits = await habitRepository.findActive();
+          this.cachedHabits = habits
+            .filter((h) => Boolean(h.reminderTime))
+            .map((h) => ({
+              id: h.id,
+              name: h.name,
+              reminderTime: h.reminderTime!,
+              daysOfWeek: h.recurrenceRule?.daysOfWeek || [0, 1, 2, 3, 4, 5, 6],
+            }));
+        } catch {}
+      }
+
       try {
-        const habits = await habitRepository.findAll();
         const currentDayIndex = now.getDay();
-
-        for (const habit of habits) {
-          if (!habit.reminderTime) continue;
-
-          const days = habit.recurrenceRule?.daysOfWeek || [0, 1, 2, 3, 4, 5, 6];
-          if (!days.includes(currentDayIndex)) continue;
+        for (const habit of this.cachedHabits) {
+          if (!habit.daysOfWeek.includes(currentDayIndex)) continue;
 
           // Normalize habit time
           const parsed = this.parseTime(habit.reminderTime);

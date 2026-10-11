@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "connect:wifi": "node -e \"const ip = process.env.DEVICE_IP || '10.208.210.180'; require('child_process').execSync(`adb connect ${ip.includes(':') ? ip : ip + ':5555'}`, { stdio: 'inherit' });\"",
+    "connect:wifi": "node -e \"const ip = process.env.DEVICE_IP || process.argv[1]; if (!ip) { console.log('Specify device IP: npm run connect:wifi -- <IP:5555> or set DEVICE_IP env'); process.exit(1); } require('child_process').execSync(`adb connect ${ip.includes(':') ? ip : ip + ':5555'}`, { stdio: 'inherit' });\"",
     "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res/",
     "deploy": "node scripts/deploy.js",
     "deploy:wifi": "node scripts/deploy.js"
@@ -24,7 +24,8 @@
     "react": "19.2.3",
     "react-native": "0.87.1",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-screens": "^4.28.0"
+    "react-native-screens": "^4.28.0",
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

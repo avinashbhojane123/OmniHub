@@ -56,8 +56,8 @@ export function useTasks() {
     return updated;
   };
 
-  const deleteTask = async (id: string) => {
-    const success = await taskService.deleteTask(id);
+  const deleteTask = async (id: string, deleteEntireSeries = false) => {
+    const success = await taskService.deleteTask(id, deleteEntireSeries);
     await refresh();
     return success;
   };
@@ -86,15 +86,8 @@ export function useTasks() {
     return updated;
   };
 
-  const searchTasks = async (query: string) => {
+  const searchTasks = (query: string) => {
     setActiveQuery(query);
-    if (!query.trim()) {
-      const allTasks = await taskRepository.findAll();
-      setTasks(allTasks);
-      return;
-    }
-    const results = await taskRepository.search(query);
-    setTasks(results);
   };
 
   return {

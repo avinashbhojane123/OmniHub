@@ -26,6 +26,7 @@ import { ProgressBar } from '../components/ProgressBar';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
 import { statisticsService } from '../services/statistics/StatisticsService';
 import { calendarService } from '../services/calendar/CalendarService';
+import { alarmService } from '../services/alarm/AlarmService';
 import { HabitWithStreak, ProductivityStats } from '../types';
 import { radius, spacing } from '../theme';
 import { parseBulletNotes } from '../utils/bulletNotes';
@@ -51,6 +52,8 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     toggleTask,
   } = useToday();
 
+  const [exactAlarmPermitted, setExactAlarmPermitted] = useState<boolean>(true);
+  const [exactAlarmDismissed, setExactAlarmDismissed] = useState<boolean>(false);
   const [newHabitModalVisible, setNewHabitModalVisible] = useState(false);
   const [habitToEdit, setHabitToEdit] = useState<HabitWithStreak | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -60,6 +63,19 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
   const [stats, setStats] = useState<ProductivityStats | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'compact'>('cards');
+  const [filterQuery, setFilterQuery] = useState('');
+
+  const displayedHabits = habits.filter((h) => {
+    if (!filterQuery.trim()) return true;
+    const q = filterQuery.toLowerCase();
+    return h.name.toLowerCase().includes(q) || (h.description || '').toLowerCase().includes(q);
+  });
+
+  const displayedTasks = todayTasks.filter((t) => {
+    if (!filterQuery.trim()) return true;
+    const q = filterQuery.toLowerCase();
+    return t.title.toLowerCase().includes(q) || (t.notes || '').toLowerCase().includes(q);
+  });
 
   // Calendar Event Modal State
   const [calendarModalVisible, setCalendarModalVisible] = useState(false);
@@ -74,9 +90,13 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
       Alert.alert('Validation Error', 'Please enter an event title.');
       return;
     }
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const startIso = `${today}T${eventStartTime.trim() || '10:00'}:00.000Z`;
-    const endIso = `${today}T${eventEndTime.trim() || '11:00'}:00.000Z`;
+    const now = new Date();
+    const startParts = (eventStartTime.trim() || '10:00').split(':').map(Number);
+    const endParts = (eventEndTime.trim() || '11:00').split(':').map(Number);
+    const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), startParts[0] || 10, startParts[1] || 0, 0, 0);
+    const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), endParts[0] || 11, endParts[1] || 0, 0, 0);
+    const startIso = startDate.toISOString();
+    const endIso = endDate.toISOString();
 
     try {
       await calendarService.createEvent({
@@ -134,14 +154,20 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
 
   useFocusEffect(
     useCallback(() => {
-      refreshToday();
-      loadUser();
+      Promise.all([refreshToday(), loadUser()]).catch(() => {});
+      if (Platform.OS === 'android') {
+        alarmService.checkExactAlarmPermission().then((allowed) => {
+          setExactAlarmPermitted(allowed);
+        }).catch(() => {});
+      }
     }, [refreshToday, loadUser])
   );
 
   useEffect(() => {
-    loadStats();
-  }, [loadStats, habits, todayTasks]);
+    if (showStats) {
+      loadStats();
+    }
+  }, [loadStats, showStats, habits, todayTasks]);
 
   const ageStats = computeAgeStats(birthDate);
 
@@ -275,6 +301,24 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
             )}
           </View>
 
+          {/* OmniHub Workspace Switcher */}
+          <TouchableOpacity
+            style={[
+              styles.hubHeaderButton,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.primary,
+              },
+            ]}
+            onPress={() => navigation.navigate('WorkspaceSelect')}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Switch Workspace Suite"
+          >
+            <Text style={styles.hubHeaderIcon}>💎</Text>
+            <Text style={[styles.hubHeaderText, { color: colors.text }]}>Hub ▾</Text>
+          </TouchableOpacity>
+
           {/* Tiger Profile Avatar */}
           <TouchableOpacity
             style={styles.avatarButton}
@@ -292,7 +336,27 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
-
+        {/* Exact Alarm Permission Warning Banner for Android */}
+        {Platform.OS === 'android' && !exactAlarmPermitted && !exactAlarmDismissed && (
+          <View style={[styles.exactAlarmBanner, { backgroundColor: colors.warningBg, borderColor: colors.warning }]}>
+            <TouchableOpacity
+              style={styles.exactAlarmBannerContent}
+              onPress={() => alarmService.openExactAlarmSettings()}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.exactAlarmBannerText, { color: colors.warning }]}>
+                ⚠️ Exact Alarms Restricted: Tap here to allow on-time habit alarms in Settings.
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setExactAlarmDismissed(true)}
+              style={styles.exactAlarmBannerClose}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={[styles.exactAlarmBannerCloseText, { color: colors.warning }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Habit Streaks: Consistency creates destiny & Action Buttons */}
         <View style={styles.habitStreaksHeaderRow}>
@@ -462,6 +526,30 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           </View>
         )}
 
+        {/* Today Filter Bar */}
+        {(habits.length > 0 || todayTasks.length > 0) && (
+          <View
+            style={[
+              styles.todaySearchRow,
+              { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
+            ]}
+          >
+            <Text style={styles.todaySearchIcon}>🔍</Text>
+            <TextInput
+              placeholder="Filter today's habits & tasks..."
+              placeholderTextColor={colors.textMuted}
+              value={filterQuery}
+              onChangeText={setFilterQuery}
+              style={[styles.todaySearchInput, { color: colors.text }]}
+            />
+            {filterQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setFilterQuery('')} style={styles.todaySearchClear}>
+                <Text style={[styles.todaySearchClearText, { color: colors.textMuted }]}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* Daily Routine Items with Streaks and Dates Filled */}
         <View style={styles.routineListContainer}>
           {habits.length === 0 ? (
@@ -475,7 +563,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
               </Text>
             </View>
           ) : viewMode === 'compact' ? (
-            habits.map((habit) => (
+            displayedHabits.map((habit) => (
               <HabitRow
                 key={habit.id}
                 habit={habit}
@@ -483,21 +571,12 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
               />
             ))
           ) : (
-            habits.map((habit) => {
-              const { bg, icon, defaultMin } = getHabitIconDetails(habit);
-              let alarmTime = habit.reminderTime;
-              const nameMatch = habit.name.match(/(\d{1,2}:\d{2}\s*(am|pm)?)/i);
-              if (nameMatch) {
-                alarmTime = nameMatch[1].toUpperCase();
-              } else if (
-                !alarmTime &&
-                habit.description &&
-                !habit.description.includes('min') &&
-                !habit.description.includes('time')
-              ) {
-                alarmTime = habit.description.replace(/^⏰\s*/, '');
-              }
-              const displayAlarm = alarmTime || defaultMin;
+            displayedHabits.map((habit) => {
+              const { bg, icon } = getHabitIconDetails(habit);
+              const alarmTime = habit.reminderTime;
+              const displaySubtitle = alarmTime
+                ? `⏰ ${alarmTime}`
+                : (habit.description?.replace(/^⏰\s*/, '') || 'Daily routine');
               const accentColor = habit.color || '#FF6B00';
               const targetDaysCount =
                 habit.recurrenceRule?.daysOfWeek && habit.recurrenceRule.daysOfWeek.length > 0
@@ -528,7 +607,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
                           {habit.name}
                         </Text>
                         <Text style={[styles.habitDesc, { color: colors.textSecondary }]}>
-                          ⏰ {displayAlarm}
+                          {displaySubtitle}
                         </Text>
                       </View>
                     </View>
@@ -689,7 +768,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
               </TouchableOpacity>
             </View>
 
-            {todayTasks.map((task) => {
+            {displayedTasks.map((task) => {
               const bullets = parseBulletNotes(task.notes || task.description);
               const isTaskDone = task.status === 'completed';
               return (
@@ -903,7 +982,12 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
       />
 
       {/* Calendar Event Modal */}
-      <Modal visible={calendarModalVisible} transparent animationType="fade">
+      <Modal
+        visible={calendarModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCalendarModalVisible(false)}
+      >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
@@ -1058,8 +1142,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  hubHeaderButton: {
+    marginLeft: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+  },
+  hubHeaderIcon: {
+    fontSize: 13,
+    marginRight: 5,
+  },
+  hubHeaderText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
   avatarButton: {
-    marginLeft: 16,
+    marginLeft: 10,
     position: 'relative',
   },
   avatarBadge: {
@@ -1214,6 +1316,27 @@ const styles = StyleSheet.create({
   },
   conflictBannerWrapper: {
     marginBottom: 16,
+  },
+  todaySearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 12,
+  },
+  todaySearchIcon: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  todaySearchInput: {
+    flex: 1,
+    fontSize: 13,
+    paddingVertical: 6,
+  },
+  todaySearchClear: {
+    padding: 6,
   },
   routineListContainer: {
     marginBottom: 16,
@@ -1659,6 +1782,35 @@ const styles = StyleSheet.create({
   },
   modalSaveText: {
     color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  todaySearchClearText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  exactAlarmBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  exactAlarmBannerContent: {
+    flex: 1,
+  },
+  exactAlarmBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
+  },
+  exactAlarmBannerClose: {
+    paddingLeft: spacing.sm,
+  },
+  exactAlarmBannerCloseText: {
+    fontSize: 14,
     fontWeight: '700',
   },
 });
