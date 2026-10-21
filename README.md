@@ -1,87 +1,103 @@
-# OmniHub Suite & SafeGuard Family Platform
+# OmniHub (LifePlanner & Battery Guard)
 
-> **"Visible Protection. Responsible Parenting. Child Safety First."**
-
-An enterprise-grade, ethical, transparent, and legally compliant Parental Control & Child Safety Platform unified directly into the OmniHub application suite.
+An integrated productivity and device care suite for Android built with React Native, TypeScript, and SQLite.
 
 ---
 
-## 🌟 Key Innovation: Single-APK Unified Role Switching
+## 🚀 Workspaces
 
-**No need to develop, distribute, or sideload a separate APK for parent and child!**
+1. **LifePlanner & Tasks**:
+   - Comprehensive task management with recurring schedules, priority matrix, categories, and due dates.
+   - Habit tracking with streak analytics and daily habit logs.
+   - Google Keep-style rich notes with color labels, pinning, and archive support.
+   - Local Calendar timeline view and conflict detection.
+   - Automated local alarm triggers and notification scheduling.
+   - Encrypted local backup and restore (JSON export/import).
 
-Both roles operate seamlessly inside this single application package:
-- 👨‍👩‍👧 **Parent Dashboard Role**: Multi-child switcher, live GPS map & geofencing, screen time & app limits, 1-tap app blocking, call/SMS/notification activity feeds, AI keyword risk alert center, remote lock/unlock, and adaptive parental control levels.
-- 🧒 **Child Safety Agent Role**: Transparent monitoring agent with persistent status disclosure, mandatory informed consent, Android permissions wizard (Usage Access, Notification Listener, Accessibility App Blocker, GPS Location), live digital wellbeing telemetry, live AI safety scanner test station, and full-screen remote lockdown overlay with Emergency SOS.
-- 🔒 **PIN-Protected Mode Switching**: Switching from Child Agent back to Parent Dashboard requires the 4-digit Parent Security PIN (default `1234`), preventing unauthorized role tampering by children.
-
----
-
-## 📂 System Architecture & Modules
-
-```text
-├── docs/
-│   ├── architecture.md          # End-to-end architecture & single-APK design
-│   ├── api-spec.md              # Complete REST API & WebSocket specifications
-│   ├── erd.md                   # Database Entity-Relationship diagram
-│   ├── compliance.md            # COPPA, GDPR-K, DPDP Act ethical compliance
-│   └── deployment.md            # Docker, Kubernetes & cloud deployment guide
-├── src/
-│   ├── screens/safeguard/       # Unified SafeGuard screens (Parent & Child views)
-│   │   ├── SafeGuardScreen.tsx       # Master role switcher & PIN modal container
-│   │   ├── ParentDashboardView.tsx   # Parent telemetry, app blocker, GPS & risk hub
-│   │   └── ChildAgentView.tsx        # Child agent, consent, permissions wizard & SOS
-│   ├── services/safeguard/
-│   │   ├── RiskDetectionEngine.ts    # AI Keyword Risk & Threat Scanner (6 categories)
-│   │   ├── SafeGuardStore.ts         # Unified reactive state repository & command bus
-│   │   └── SafeGuardNativeBridge.ts  # Native Android Kotlin module bridge & fallback
-│   └── types/safeguard.ts            # Type-safe schemas and domain entities
-├── android/app/src/main/java/com/lifeplanner/
-│   ├── SafeGuardAgentModule.kt               # Native usage stats & permissions bridge
-│   ├── SafeGuardAgentPackage.kt              # React Native package registration
-│   ├── SafeGuardNotificationListenerService.kt# Android notification safety listener
-│   └── SafeGuardAccessibilityService.kt      # Foreground app detector & blocker
-├── server/                                   # NestJS Companion Backend
-│   ├── prisma/schema.prisma                  # PostgreSQL schema with UUID keys
-│   ├── src/modules/safeguard/                # Controller, service & risk engine
-│   └── docker-compose.yml                    # Postgres + Redis + NestJS container stack
-```
+2. **Battery Guard & Alarm**:
+   - Real-time battery telemetry (level, charging state, temperature, voltage, health).
+   - Eco-charge threshold alarm (80% battery protector).
+   - Anti-overcharge continuous alarm with foreground service.
+   - Low battery warning and overheating alerts.
+   - Custom ringtone player via native Android audio integration.
 
 ---
 
-## 🚀 Quick Start Guide
+## 🛠️ Technology Stack
 
-### 1. Launching SafeGuard in the Mobile App
-1. Start Metro:
-   ```bash
-   npm start
-   ```
-2. Run on Android:
-   ```bash
-   npm run android
-   ```
-3. Open the **OmniHub Workspace Switcher** on startup (or via Settings) and select **SafeGuard Family**.
-4. Use the top header switcher pill (👨‍👩‍👧 `Parent` ⇄ 🧒 `Child`) to switch roles anytime.
-   - Enter default PIN `1234` when switching from Child to Parent.
+- **Framework**: React Native 0.87.1 (Android)
+- **Language**: TypeScript 6.0
+- **Database**: SQLite via `@op-engineering/op-sqlite`
+- **Navigation**: React Navigation v7 (Native Stack & Bottom Tabs)
+- **Notifications & Alarms**: `@notifee/react-native` + Native Android AlarmManager & Foreground Service
+- **Testing**: Jest with 100% passing test suites
 
-### 2. Running the Backend & Database (Docker)
+---
+
+## 📦 Getting Started
+
+### Prerequisites
+- Node.js >= 22.11.0
+- Android SDK & Java 17+
+- Android device or emulator
+
+### Installation
 ```bash
-docker-compose up -d postgres redis
-cd server
 npm install
-npm run start:dev
 ```
-The NestJS API will be available at `http://localhost:5000/api/v1`.
 
-### 3. Running Unit Tests
+### Running Locally
 ```bash
-npm test
+# Start Metro bundler
+npm start
+
+# Run on connected Android device/emulator
+npm run android
 ```
-Runs 100% passing tests including the new `RiskDetectionEngine.test.ts`.
+
+### Running Unit Tests & Linter
+```bash
+# Run unit test suites
+npm test
+
+# Run ESLint static analysis
+npm run lint
+
+# TypeScript verification
+npx tsc --noEmit
+```
+
+### Building & Deploying to Physical Device
+```bash
+# Bundle production JS assets
+npm run bundle:android
+
+# Build and deploy over USB or Wi-Fi
+node scripts/deploy.js
+
+# Deploy specifically to a Wi-Fi ADB device IP:Port
+node scripts/deploy.js 10.220.190.164:5555
+```
 
 ---
 
-## ⚖️ Ethical & Legal Compliance
-- **Zero Hidden Surveillance**: Persistent foreground notification is mandatory.
-- **Informed Consent**: Explicit explanation of what is protected and what remains private.
-- **Data Minimization**: Raw personal conversation databases are never stored; only safety risk keywords generate alerts.
+## 🔄 Rollback Instructions
+
+If you need to roll back any changes:
+
+1. **Revert working directory changes to the last clean git commit**:
+   ```bash
+   git checkout HEAD -- .
+   ```
+2. **Re-install dependencies**:
+   ```bash
+   npm install
+   ```
+3. **Re-generate assets**:
+   ```bash
+   npm run bundle:android
+   ```
+4. **Re-run tests**:
+   ```bash
+   npm test
+   ```

@@ -1,13 +1,53 @@
-import React from 'react';
-import { NavigationContainer, LinkingOptions, getStateFromPath } from '@react-navigation/native';
+import React, { Suspense, lazy } from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import { NavigationContainer, LinkingOptions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { BottomTabNavigator } from './BottomTabNavigator';
-import { CreateEditTaskScreen } from '../screens/CreateEditTaskScreen';
 import { WorkspaceSelectScreen } from '../screens/WorkspaceSelectScreen';
-import { ChatScreen } from '../screens/ChatScreen';
-import { BatteryAlarmScreen } from '../screens/BatteryAlarmScreen';
-import { SafeGuardScreen } from '../screens/safeguard/SafeGuardScreen';
-import { safeGuardStore } from '../services/safeguard/SafeGuardStore';
+
+// Lazy-loaded auxiliary workspace screens
+const LazyMovieWorkspace = lazy(() =>
+  import('../screens/MovieWorkspaceScreen').then((m) => ({ default: m.MovieWorkspaceScreen }))
+);
+const LazyChatRoom = lazy(() =>
+  import('../screens/ChatRoomScreen').then((m) => ({ default: m.ChatRoomScreen }))
+);
+const LazyBatteryAlarm = lazy(() =>
+  import('../screens/BatteryAlarmScreen').then((m) => ({ default: m.BatteryAlarmScreen }))
+);
+const LazyCreateEditTask = lazy(() =>
+  import('../screens/CreateEditTaskScreen').then((m) => ({ default: m.CreateEditTaskScreen }))
+);
+
+const ScreenFallback = () => (
+  <View style={{ flex: 1, backgroundColor: '#090B10', justifyContent: 'center', alignItems: 'center' }}>
+    <ActivityIndicator size="large" color="#38BDF8" />
+  </View>
+);
+
+const MovieWorkspaceWrapper = (props: any) => (
+  <Suspense fallback={<ScreenFallback />}>
+    <LazyMovieWorkspace {...props} />
+  </Suspense>
+);
+
+const ChatRoomWrapper = (props: any) => (
+  <Suspense fallback={<ScreenFallback />}>
+    <LazyChatRoom {...props} />
+  </Suspense>
+);
+
+const BatteryAlarmWrapper = (props: any) => (
+  <Suspense fallback={<ScreenFallback />}>
+    <LazyBatteryAlarm {...props} />
+  </Suspense>
+);
+
+const CreateEditTaskWrapper = (props: any) => (
+  <Suspense fallback={<ScreenFallback />}>
+    <LazyCreateEditTask {...props} />
+  </Suspense>
+);
 
 const Stack = createNativeStackNavigator();
 
@@ -16,19 +56,11 @@ const linking: LinkingOptions<any> = {
   config: {
     screens: {
       MainTabs: 'planner',
-      Chat: 'chat',
       BatteryAlarm: 'battery',
-      SafeGuard: 'safeguard',
+      ChatRoom: 'chat',
+      MovieWorkspace: 'movies',
       WorkspaceSelect: 'select',
     },
-  },
-  getStateFromPath: (path, options) => {
-    if (safeGuardStore.getRole() === 'CHILD') {
-      return {
-        routes: [{ name: 'SafeGuard' }],
-      };
-    }
-    return getStateFromPath(path, options);
   },
 };
 
@@ -48,14 +80,17 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({
           animation: 'slide_from_right',
         }}
       >
-        <Stack.Screen name="WorkspaceSelect" component={WorkspaceSelectScreen} />
-        <Stack.Screen name="SafeGuard" component={SafeGuardScreen} />
+        <Stack.Screen
+          name="WorkspaceSelect"
+          component={WorkspaceSelectScreen}
+        />
         <Stack.Screen name="MainTabs" component={BottomTabNavigator} />
-        <Stack.Screen name="Chat" component={ChatScreen} />
-        <Stack.Screen name="BatteryAlarm" component={BatteryAlarmScreen} />
+        <Stack.Screen name="BatteryAlarm" component={BatteryAlarmWrapper} />
+        <Stack.Screen name="ChatRoom" component={ChatRoomWrapper} />
+        <Stack.Screen name="MovieWorkspace" component={MovieWorkspaceWrapper} />
         <Stack.Screen
           name="CreateEditTask"
-          component={CreateEditTaskScreen}
+          component={CreateEditTaskWrapper}
           options={{
             presentation: 'fullScreenModal',
             animation: 'slide_from_bottom',
@@ -65,3 +100,4 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({
     </NavigationContainer>
   );
 };
+

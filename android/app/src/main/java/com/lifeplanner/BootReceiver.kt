@@ -8,10 +8,12 @@ import android.util.Log
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
-        if (Intent.ACTION_BOOT_COMPLETED == action || "android.intent.action.QUICKBOOT_POWERON" == action) {
-            Log.d("LifePlannerBoot", "Device reboot detected: alarm triggers active.")
-        } else if (Intent.ACTION_TIMEZONE_CHANGED == action || Intent.ACTION_TIME_CHANGED == action) {
-            Log.d("LifePlannerBoot", "Device time or timezone changed.")
+        Log.d("LifePlannerBoot", "System broadcast received: $action. Restoring pending alarms...")
+        try {
+            AlarmRingtoneModule.restoreAlarms(context)
+            Log.d("LifePlannerBoot", "Successfully restored alarms for action: $action")
+        } catch (e: Exception) {
+            Log.e("LifePlannerBoot", "Failed to restore alarms on $action", e)
         }
     }
 }

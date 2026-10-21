@@ -1,18 +1,25 @@
 import { Task, UpdateTaskDTO, TaskStatus, TaskPriority } from '../../types';
 import { getDatabase } from '../connection';
 import { normalizeTimeTo24H } from '../../utils/time';
+import { tombstoneRepository } from './TombstoneRepository';
 
 export class TaskRepository {
   async create(task: Task): Promise<Task> {
     const db = await getDatabase();
     const recurrenceJson = task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null;
 
+    const isLoudAlarmVal = task.recurrenceRule?.isLoudAlarm ? 1 : 0;
+    const eisenhowerQuadrantVal = task.recurrenceRule?.eisenhowerQuadrant || null;
+    const accentColorVal = task.recurrenceRule?.accentColor || null;
+    const estimatedMinutesVal = task.recurrenceRule?.estimatedMinutes ?? null;
+
     await db.execute(
       `INSERT INTO tasks (
         id, seriesId, title, description, date, startTime, endTime,
         priority, categoryId, status, recurrenceRule,
-        reminderMinutes, snoozeUntil, notes, createdAt, updatedAt, completedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        reminderMinutes, snoozeUntil, notes, isLoudAlarm, eisenhowerQuadrant, accentColor, estimatedMinutes,
+        createdAt, updatedAt, completedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.seriesId ?? null,
@@ -28,6 +35,10 @@ export class TaskRepository {
         task.reminderMinutes ?? 0,
         task.snoozeUntil ?? null,
         task.notes ?? null,
+        isLoudAlarmVal,
+        eisenhowerQuadrantVal,
+        accentColorVal,
+        estimatedMinutesVal,
         task.createdAt,
         task.updatedAt,
         task.completedAt ?? null,
@@ -93,19 +104,21 @@ export class TaskRepository {
 
   async findOverdue(today: string, currentTime: string): Promise<Task[]> {
     const db = await getDatabase();
+    const nowIso = new Date().toISOString();
     // A task is overdue if:
-    // 1. Date is before today AND status NOT IN ('completed', 'cancelled')
-    // OR
-    // 2. Date is today AND startTime is before currentTime AND status NOT IN ('completed', 'cancelled')
+    // 1. Status NOT IN ('completed', 'cancelled')
+    // 2. Not currently snoozed in the future (snoozeUntil is null or past)
+    // 3. Date is before today, OR Date is today AND startTime is before currentTime
     const result = await db.execute(
       `SELECT t.*, c.name as categoryName, c.color as categoryColor, c.icon as categoryIcon
        FROM tasks t
        LEFT JOIN categories c ON t.categoryId = c.id
        WHERE (t.status NOT IN ('completed', 'cancelled'))
+         AND (t.snoozeUntil IS NULL OR t.snoozeUntil <= ?)
          AND t.date IS NOT NULL AND t.date != ''
          AND (t.date < ? OR (t.date = ? AND t.startTime IS NOT NULL AND t.startTime != '' AND t.startTime < ?))
        ORDER BY t.date ASC, t.startTime ASC`,
-      [today, today, currentTime]
+      [nowIso, today, today, currentTime]
     );
 
     return result.rows.map((r) => this.mapRowToTask(r));
@@ -158,6 +171,22 @@ export class TaskRepository {
     if (updates.recurrenceRule !== undefined) {
       fields.push('recurrenceRule = ?');
       values.push(updates.recurrenceRule ? JSON.stringify(updates.recurrenceRule) : null);
+      if (updates.recurrenceRule?.isLoudAlarm !== undefined) {
+        fields.push('isLoudAlarm = ?');
+        values.push(updates.recurrenceRule.isLoudAlarm ? 1 : 0);
+      }
+      if (updates.recurrenceRule?.eisenhowerQuadrant !== undefined) {
+        fields.push('eisenhowerQuadrant = ?');
+        values.push(updates.recurrenceRule.eisenhowerQuadrant || null);
+      }
+      if (updates.recurrenceRule?.accentColor !== undefined) {
+        fields.push('accentColor = ?');
+        values.push(updates.recurrenceRule.accentColor || null);
+      }
+      if (updates.recurrenceRule?.estimatedMinutes !== undefined) {
+        fields.push('estimatedMinutes = ?');
+        values.push(updates.recurrenceRule.estimatedMinutes ?? null);
+      }
     }
     if (updates.reminderMinutes !== undefined) {
       fields.push('reminderMinutes = ?');
@@ -189,6 +218,7 @@ export class TaskRepository {
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
+    await tombstoneRepository.recordDeleted(id, 'task');
     const result = await db.execute('DELETE FROM tasks WHERE id = ?', [id]);
     return result.rowsAffected > 0;
   }
@@ -208,6 +238,12 @@ export class TaskRepository {
 
   async deleteBySeriesId(seriesId: string): Promise<boolean> {
     const db = await getDatabase();
+    try {
+      const seriesTasks = await this.findBySeriesId(seriesId);
+      for (const t of seriesTasks) {
+        await tombstoneRepository.recordDeleted(t.id, 'task');
+      }
+    } catch {}
     const result = await db.execute('DELETE FROM tasks WHERE seriesId = ?', [seriesId]);
     return result.rowsAffected > 0;
   }
@@ -235,6 +271,32 @@ export class TaskRepository {
       } catch {
         // ignore parse error
       }
+    }
+
+    if (
+      row.isLoudAlarm !== undefined ||
+      row.eisenhowerQuadrant ||
+      row.accentColor ||
+      row.estimatedMinutes !== undefined
+    ) {
+      const isLoud =
+        row.isLoudAlarm !== undefined && row.isLoudAlarm !== null
+          ? Boolean(row.isLoudAlarm)
+          : recurrenceRule?.isLoudAlarm;
+      const quad = row.eisenhowerQuadrant || recurrenceRule?.eisenhowerQuadrant;
+      const accent = row.accentColor || recurrenceRule?.accentColor;
+      const estMin =
+        row.estimatedMinutes !== undefined && row.estimatedMinutes !== null
+          ? Number(row.estimatedMinutes)
+          : recurrenceRule?.estimatedMinutes;
+
+      recurrenceRule = {
+        ...(recurrenceRule || { type: 'none' }),
+        ...(isLoud !== undefined ? { isLoudAlarm: isLoud } : {}),
+        ...(quad ? { eisenhowerQuadrant: quad } : {}),
+        ...(accent ? { accentColor: accent } : {}),
+        ...(estMin !== undefined ? { estimatedMinutes: estMin } : {}),
+      };
     }
 
     return {

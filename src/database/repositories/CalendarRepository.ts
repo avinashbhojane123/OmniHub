@@ -1,164 +1,167 @@
-import { CalendarEvent } from '../../types';
 import { getDatabase } from '../connection';
+import { CalendarEvent, CreateCalendarEventDTO, UpdateCalendarEventDTO } from '../../types';
+import { parseISO, subDays, format } from 'date-fns';
+import { tombstoneRepository } from './TombstoneRepository';
 
 export class CalendarRepository {
   async findAll(): Promise<CalendarEvent[]> {
     const db = await getDatabase();
-    const result = await db.execute('SELECT * FROM calendar_events ORDER BY startTime ASC');
-    return result.rows.map((r) => this.mapRow(r));
+    const result = await db.execute(
+      'SELECT * FROM calendar_events ORDER BY date ASC, time ASC'
+    );
+    return result.rows.map((row) => this.mapRow(row));
   }
 
-  async findByDateRange(startIso: string, endIso: string): Promise<CalendarEvent[]> {
+  async findByDate(date: string): Promise<CalendarEvent[]> {
     const db = await getDatabase();
     const result = await db.execute(
-      `SELECT * FROM calendar_events 
-       WHERE startTime <= ? AND endTime >= ?
-       ORDER BY startTime ASC`,
-      [endIso, startIso]
+      'SELECT * FROM calendar_events WHERE date = ? ORDER BY time ASC',
+      [date]
     );
-    return result.rows.map((r) => this.mapRow(r));
+    return result.rows.map((row) => this.mapRow(row));
   }
 
-  async findByExternalId(externalId: string): Promise<CalendarEvent | null> {
+  async findRecentAndUpcoming(fromDate?: string, daysPast = 7): Promise<CalendarEvent[]> {
     const db = await getDatabase();
-    const result = await db.execute('SELECT * FROM calendar_events WHERE externalId = ?', [externalId]);
+    const baseDate = fromDate ? parseISO(fromDate) : new Date();
+    const pastLimit = format(subDays(baseDate, daysPast), 'yyyy-MM-dd');
+    const result = await db.execute(
+      'SELECT * FROM calendar_events WHERE date >= ? ORDER BY date ASC, time ASC',
+      [pastLimit]
+    );
+    return result.rows.map((row) => this.mapRow(row));
+  }
+
+  async findUpcomingActive(fromDate?: string): Promise<CalendarEvent[]> {
+    const db = await getDatabase();
+    const now = new Date();
+    const today = fromDate || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const result = await db.execute(
+      "SELECT * FROM calendar_events WHERE date >= ? AND status = 'active' AND ringAlarm = 1 ORDER BY date ASC, time ASC",
+      [today]
+    );
+    return result.rows.map((row) => this.mapRow(row));
+  }
+
+  async findById(id: string): Promise<CalendarEvent | null> {
+    const db = await getDatabase();
+    const result = await db.execute(
+      'SELECT * FROM calendar_events WHERE id = ?',
+      [id]
+    );
     if (result.rows.length === 0) return null;
     return this.mapRow(result.rows[0]);
   }
 
-  async create(event: CalendarEvent): Promise<CalendarEvent> {
+  async create(dto: CreateCalendarEventDTO): Promise<CalendarEvent> {
     const db = await getDatabase();
+    const id = `calev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const ringAlarmVal = dto.ringAlarm === undefined ? 1 : (dto.ringAlarm ? 1 : 0);
+    const statusVal = 'active';
+
     await db.execute(
       `INSERT INTO calendar_events (
-        id, externalId, calendarId, title, description,
-        startTime, endTime, location, source, isAllDay,
-        createdAt, updatedAt, syncedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, title, description, date, time, ringAlarm, status, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        event.id,
-        event.externalId ?? null,
-        event.calendarId ?? null,
-        event.title,
-        event.description ?? null,
-        event.startTime,
-        event.endTime,
-        event.location ?? null,
-        event.source,
-        event.isAllDay ? 1 : 0,
-        event.createdAt,
-        event.updatedAt,
-        event.syncedAt ?? null,
+        id,
+        dto.title.trim(),
+        dto.description?.trim() || null,
+        dto.date,
+        dto.time,
+        ringAlarmVal,
+        statusVal,
+        now,
+        now,
       ]
     );
-    return event;
+
+    return {
+      id,
+      title: dto.title.trim(),
+      description: dto.description?.trim() || undefined,
+      date: dto.date,
+      time: dto.time,
+      ringAlarm: Boolean(ringAlarmVal),
+      status: statusVal,
+      createdAt: now,
+      updatedAt: now,
+    };
   }
 
-  async upsertByExternalId(event: CalendarEvent): Promise<CalendarEvent> {
-    const existing = event.externalId ? await this.findByExternalId(event.externalId) : null;
-    if (existing) {
-      await this.update(existing.id, {
-        title: event.title,
-        description: event.description,
-        startTime: event.startTime,
-        endTime: event.endTime,
-        location: event.location,
-        isAllDay: event.isAllDay,
-        syncedAt: event.syncedAt,
-        updatedAt: new Date().toISOString(),
-      });
-      return { ...existing, ...event, id: existing.id };
-    } else {
-      return this.create(event);
-    }
-  }
-
-  async update(id: string, updates: Partial<CalendarEvent>): Promise<CalendarEvent | null> {
+  async update(id: string, updates: UpdateCalendarEventDTO): Promise<CalendarEvent | null> {
     const db = await getDatabase();
     const fields: string[] = [];
     const values: any[] = [];
 
     if (updates.title !== undefined) {
       fields.push('title = ?');
-      values.push(updates.title);
+      values.push(updates.title.trim());
     }
     if (updates.description !== undefined) {
       fields.push('description = ?');
-      values.push(updates.description);
+      values.push(updates.description?.trim() || null);
     }
-    if (updates.startTime !== undefined) {
-      fields.push('startTime = ?');
-      values.push(updates.startTime);
+    if (updates.date !== undefined) {
+      fields.push('date = ?');
+      values.push(updates.date);
     }
-    if (updates.endTime !== undefined) {
-      fields.push('endTime = ?');
-      values.push(updates.endTime);
+    if (updates.time !== undefined) {
+      fields.push('time = ?');
+      values.push(updates.time);
     }
-    if (updates.location !== undefined) {
-      fields.push('location = ?');
-      values.push(updates.location);
+    if (updates.ringAlarm !== undefined) {
+      fields.push('ringAlarm = ?');
+      values.push(updates.ringAlarm ? 1 : 0);
     }
-    if (updates.isAllDay !== undefined) {
-      fields.push('isAllDay = ?');
-      values.push(updates.isAllDay ? 1 : 0);
-    }
-    if (updates.syncedAt !== undefined) {
-      fields.push('syncedAt = ?');
-      values.push(updates.syncedAt);
+    if (updates.status !== undefined) {
+      fields.push('status = ?');
+      values.push(updates.status);
     }
 
-    const updatedAt = new Date().toISOString();
+    if (fields.length === 0) {
+      return this.findById(id);
+    }
+
+    const now = new Date().toISOString();
     fields.push('updatedAt = ?');
-    values.push(updatedAt);
+    values.push(now);
 
     values.push(id);
+    await db.execute(
+      `UPDATE calendar_events SET ${fields.join(', ')} WHERE id = ?`,
+      values
+    );
 
-    await db.execute(`UPDATE calendar_events SET ${fields.join(', ')} WHERE id = ?`, values);
-    const result = await db.execute('SELECT * FROM calendar_events WHERE id = ?', [id]);
-    if (result.rows.length === 0) return null;
-    return this.mapRow(result.rows[0]);
+    return this.findById(id);
   }
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
-    const result = await db.execute('DELETE FROM calendar_events WHERE id = ?', [id]);
-    return result.rowsAffected > 0;
-  }
-
-  async deleteDeviceEventsNotInList(startIso: string, endIso: string, keepExternalIds: string[]): Promise<number> {
-    const db = await getDatabase();
-    if (keepExternalIds.length === 0) {
-      const res = await db.execute(
-        `DELETE FROM calendar_events 
-         WHERE source = 'device' AND startTime >= ? AND startTime <= ?`,
-        [startIso, endIso]
-      );
-      return res.rowsAffected;
-    }
-    const placeholders = keepExternalIds.map(() => '?').join(',');
-    const res = await db.execute(
-      `DELETE FROM calendar_events 
-       WHERE source = 'device' AND startTime >= ? AND startTime <= ? 
-       AND externalId NOT IN (${placeholders})`,
-      [startIso, endIso, ...keepExternalIds]
+    await tombstoneRepository.recordDeleted(id, 'calendarEvent');
+    try {
+      const { alarmService } = await import('../../services/alarm/AlarmService');
+      await alarmService.cancelEventAlarm(id);
+    } catch {}
+    const result = await db.execute(
+      'DELETE FROM calendar_events WHERE id = ?',
+      [id]
     );
-    return res.rowsAffected;
+    return result.rowsAffected > 0;
   }
 
   private mapRow(row: any): CalendarEvent {
     return {
       id: row.id,
-      externalId: row.externalId ?? undefined,
-      calendarId: row.calendarId ?? undefined,
       title: row.title,
       description: row.description ?? undefined,
-      startTime: row.startTime,
-      endTime: row.endTime,
-      location: row.location ?? undefined,
-      source: row.source,
-      isAllDay: Boolean(row.isAllDay),
+      date: row.date,
+      time: row.time,
+      ringAlarm: Boolean(row.ringAlarm),
+      status: row.status || 'active',
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      syncedAt: row.syncedAt ?? undefined,
     };
   }
 }

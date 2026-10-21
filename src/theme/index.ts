@@ -30,7 +30,6 @@ export interface ThemeColors {
   priorityMedium: string;
   priorityHigh: string;
   eventTask: string;
-  eventCalendar: string;
   eventHabit: string;
   overlay: string;
   statusBar: 'light-content' | 'dark-content';
@@ -68,7 +67,6 @@ export const darkTheme: ThemeColors = {
   priorityMedium: '#F59E0B',
   priorityHigh: '#EF4444',
   eventTask: '#3B82F6',
-  eventCalendar: '#8B5CF6',
   eventHabit: '#FF6B00',
   overlay: 'rgba(0, 0, 0, 0.7)',
   statusBar: 'light-content',
@@ -106,7 +104,6 @@ export const lightTheme: ThemeColors = {
   priorityMedium: '#D97706',
   priorityHigh: '#DC2626',
   eventTask: '#2563EB',
-  eventCalendar: '#7C3AED',
   eventHabit: '#FF6B00',
   overlay: 'rgba(0, 0, 0, 0.5)',
   statusBar: 'dark-content',

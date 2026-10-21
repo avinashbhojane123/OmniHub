@@ -6,7 +6,6 @@ export { GoogleKeepNotesEditor } from './GoogleKeepNotesEditor';
 export { HabitRow } from './HabitRow';
 export { NewHabitModal } from './NewHabitModal';
 export { ProfileModal } from './ProfileModal';
-export { NotepadModal } from './NotepadModal';
 export { ProgressBar } from './ProgressBar';
-export { TaskCard } from './TaskCard';
 export { DateTimePickerModal } from './DateTimePickerModal';
+export { CreateCategoryModal } from './CreateCategoryModal';

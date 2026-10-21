@@ -68,7 +68,8 @@ export const AlarmRingingModal: React.FC = () => {
   ).padStart(2, '0')} ${period}`;
 
   const displayTime = alarmState.timeString || currentFormattedTime;
-  const progressPercent = Math.max(0, Math.min(100, (alarmState.secondsRemaining / 60) * 100));
+  const seconds = typeof alarmState.secondsRemaining === 'number' && !isNaN(alarmState.secondsRemaining) ? alarmState.secondsRemaining : 0;
+  const progressPercent = Math.max(0, Math.min(100, Math.round((seconds / 60) * 100)));
 
   return (
     <Modal
@@ -84,7 +85,11 @@ export const AlarmRingingModal: React.FC = () => {
 
         {/* Top Header */}
         <View style={styles.header}>
-          <Text style={styles.appName}>OMNIHUB ALARM</Text>
+          <Text style={styles.appName}>
+            {alarmState.title?.includes('Battery') || alarmState.title?.includes('Charged') || alarmState.title?.includes('⚡') || alarmState.title?.includes('🪫') || alarmState.title?.includes('🔥')
+              ? 'BATTERY GUARD ALARM'
+              : 'LIFEPLANNER ALARM'}
+          </Text>
           <View style={styles.liveBadge}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>RINGING</Text>
@@ -94,7 +99,15 @@ export const AlarmRingingModal: React.FC = () => {
         {/* Center Content */}
         <View style={styles.centerSection}>
           <Animated.View style={[styles.iconWrapper, { transform: [{ scale: pulseAnim }] }]}>
-            <BellIllustration size={85} />
+            {alarmState.title?.includes('🔥') ? (
+              <Text style={{ fontSize: 75 }}>🔥</Text>
+            ) : alarmState.title?.includes('🪫') ? (
+              <Text style={{ fontSize: 75 }}>🪫</Text>
+            ) : alarmState.title?.includes('Battery') || alarmState.title?.includes('⚡') ? (
+              <Text style={{ fontSize: 75 }}>⚡</Text>
+            ) : (
+              <BellIllustration size={85} />
+            )}
           </Animated.View>
 
           <Text style={styles.timeBig}>{displayTime}</Text>
@@ -102,6 +115,12 @@ export const AlarmRingingModal: React.FC = () => {
           <Text style={styles.routineTitle} numberOfLines={2}>
             {alarmState.title || 'Daily Routine Alarm'}
           </Text>
+
+          {alarmState.description ? (
+            <Text style={styles.routineDesc} numberOfLines={3}>
+              {alarmState.description}
+            </Text>
+          ) : null}
 
           {/* Countdown timer & progress bar (rings up to 1 minute) */}
           <View style={styles.timerCard}>
@@ -233,7 +252,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#E2E3ED',
     textAlign: 'center',
-    marginBottom: 28,
+    marginBottom: 8,
+  },
+  routineDesc: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#A0A2B4',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+    paddingHorizontal: 16,
   },
   timerCard: {
     width: '100%',

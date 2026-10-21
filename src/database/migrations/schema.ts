@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   reminderMinutes INTEGER DEFAULT 0,
   snoozeUntil TEXT,
   notes TEXT,
+  isLoudAlarm INTEGER DEFAULT 0,
+  eisenhowerQuadrant TEXT,
+  accentColor TEXT,
+  estimatedMinutes INTEGER,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   completedAt TEXT,
@@ -30,18 +34,14 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE TABLE IF NOT EXISTS calendar_events (
   id TEXT PRIMARY KEY,
-  externalId TEXT UNIQUE,
-  calendarId TEXT,
   title TEXT NOT NULL,
   description TEXT,
-  startTime TEXT NOT NULL,
-  endTime TEXT NOT NULL,
-  location TEXT,
-  source TEXT NOT NULL DEFAULT 'local',
-  isAllDay INTEGER NOT NULL DEFAULT 0,
+  date TEXT NOT NULL,
+  time TEXT NOT NULL,
+  ringAlarm INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'active',
   createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  syncedAt TEXT
+  updatedAt TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS habits (
@@ -69,26 +69,6 @@ CREATE TABLE IF NOT EXISTS habit_logs (
   UNIQUE(habitId, date)
 );
 
-CREATE TABLE IF NOT EXISTS goals (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  deadline TEXT,
-  progress REAL NOT NULL DEFAULT 0,
-  color TEXT,
-  category TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS goal_tasks (
-  id TEXT PRIMARY KEY,
-  goalId TEXT NOT NULL,
-  taskId TEXT NOT NULL,
-  FOREIGN KEY (goalId) REFERENCES goals(id) ON DELETE CASCADE,
-  FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE,
-  UNIQUE(goalId, taskId)
-);
 
 CREATE TABLE IF NOT EXISTS notes (
   id TEXT PRIMARY KEY,
@@ -130,14 +110,61 @@ CREATE TABLE IF NOT EXISTS settings (
   updatedAt TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS keep_notes (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT 'text',
+  color TEXT NOT NULL DEFAULT 'default',
+  isPinned INTEGER NOT NULL DEFAULT 0,
+  isArchived INTEGER NOT NULL DEFAULT 0,
+  isTrashed INTEGER NOT NULL DEFAULT 0,
+  trashedAt TEXT,
+  reminderTime TEXT,
+  labels TEXT NOT NULL DEFAULT '[]',
+  checklistData TEXT NOT NULL DEFAULT '[]',
+  drawingData TEXT,
+  audioUri TEXT,
+  imageUri TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(categoryId);
-CREATE INDEX IF NOT EXISTS idx_events_start ON calendar_events(startTime);
-CREATE INDEX IF NOT EXISTS idx_events_external ON calendar_events(externalId);
+CREATE INDEX IF NOT EXISTS idx_tasks_series ON tasks(seriesId);
+CREATE INDEX IF NOT EXISTS idx_tasks_overdue ON tasks(status, date, startTime);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(date);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_status ON calendar_events(status);
 CREATE INDEX IF NOT EXISTS idx_habits_archived ON habits(archivedAt);
 CREATE INDEX IF NOT EXISTS idx_habit_logs_date ON habit_logs(date);
 CREATE INDEX IF NOT EXISTS idx_reminders_trigger ON reminders(triggerTime, status);
 CREATE INDEX IF NOT EXISTS idx_notif_scheduled ON notification_schedules(scheduledAt, status);
+CREATE INDEX IF NOT EXISTS idx_keep_notes_active ON keep_notes(isArchived, isTrashed, isPinned, updatedAt);
+CREATE INDEX IF NOT EXISTS idx_keep_notes_reminder ON keep_notes(reminderTime);
+
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  id TEXT PRIMARY KEY,
+  entityType TEXT NOT NULL,
+  deletedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tombstones_type ON sync_tombstones(entityType);
+
+CREATE TABLE IF NOT EXISTS movie_bookmarks (
+  id TEXT PRIMARY KEY,
+  tmdbId INTEGER UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  overview TEXT,
+  posterPath TEXT,
+  backdropPath TEXT,
+  voteAverage REAL DEFAULT 0,
+  releaseDate TEXT,
+  genres TEXT,
+  runtime INTEGER DEFAULT 0,
+  isWatched INTEGER NOT NULL DEFAULT 0,
+  savedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_movie_bookmarks_watched ON movie_bookmarks(isWatched);
 `;

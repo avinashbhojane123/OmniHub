@@ -7,8 +7,6 @@ import { backupService } from '../src/services/backup/BackupService';
 import { notificationService } from '../src/services/notifications/NotificationService';
 import { getDatabase } from '../src/database/connection';
 import { computeAgeStats } from '../src/components/ProfileModal';
-import { goalService } from '../src/services/goals/GoalService';
-import { goalRepository } from '../src/database/repositories/GoalRepository';
 import { noteRepository } from '../src/database/repositories/NoteRepository';
 import { format, subDays, addDays } from 'date-fns';
 
@@ -308,7 +306,7 @@ describe('LifePlanner Local-First Core Test Suite', () => {
         status: 'pending',
       };
 
-      const result = taskService.detectConflicts([taskA, taskB, taskC], []);
+      const result = taskService.detectConflicts([taskA, taskB, taskC]);
       expect(result.hasConflict).toBe(true);
       expect(result.conflicts.length).toBe(1);
       expect(result.conflicts[0].itemA).toBe('Meeting A');
@@ -347,37 +345,6 @@ describe('LifePlanner Local-First Core Test Suite', () => {
     });
   });
 
-  describe('11. Goal Management & Linking', () => {
-    it('should create goal, link task, and compute progress correctly', async () => {
-      const goal = await goalService.createGoal({
-        title: 'Master React Native Architecture',
-        category: 'Learning',
-      });
-      expect(goal).toBeDefined();
-      expect(goal.title).toBe('Master React Native Architecture');
-      expect(goal.progress).toBe(0);
-
-      const task = await taskService.createTask({
-        title: 'Complete DB transactions lesson',
-        date: format(new Date(), 'yyyy-MM-dd'),
-      });
-
-      // Link task to goal
-      await goalService.linkTaskToGoal(goal.id, task.id);
-      const linkedTasks = await goalService.getGoalTasks(goal.id);
-      expect(linkedTasks.length).toBe(1);
-      expect(linkedTasks[0].id).toBe(task.id);
-
-      // Verify goal progress updates to 100% when task is completed
-      await taskService.completeTask(task.id);
-      const updatedGoal = await goalRepository.findById(goal.id);
-      expect(updatedGoal?.progress).toBe(100);
-
-      // Clean up goal
-      const deleted = await goalService.deleteGoal(goal.id);
-      expect(deleted).toBe(true);
-    });
-  });
 
   describe('12. Multi-Field Task Search', () => {
     it('should find tasks by notes, description, or title using keyword search', async () => {
@@ -426,33 +393,6 @@ describe('LifePlanner Local-First Core Test Suite', () => {
     });
   });
 
-  describe('14. Goal Tasks Link Persistence Across Backup & Restore', () => {
-    it('should serialize and restore goal_tasks links in backup', async () => {
-      const goal = await goalService.createGoal({
-        title: 'Backup Link Test Goal',
-      });
-      const task = await taskService.createTask({
-        title: 'Backup Link Test Task',
-        date: format(new Date(), 'yyyy-MM-dd'),
-      });
-
-      await goalService.linkTaskToGoal(goal.id, task.id);
-      const linksBefore = await goalRepository.getAllLinks();
-      expect(linksBefore.some((l) => l.goalId === goal.id && l.taskId === task.id)).toBe(true);
-
-      const backupJson = await backupService.exportBackup();
-      const parsed = JSON.parse(backupJson);
-      expect(parsed.goalTasks).toBeDefined();
-      expect(parsed.goalTasks.some((l: any) => l.goalId === goal.id && l.taskId === task.id)).toBe(true);
-
-      // Restore backup and verify link still exists
-      const importResult = await backupService.importBackup(backupJson);
-      expect(importResult.success).toBe(true);
-
-      const linksAfter = await goalRepository.getAllLinks();
-      expect(linksAfter.some((l) => l.goalId === goal.id && l.taskId === task.id)).toBe(true);
-    });
-  });
 
   describe('15. Recurring Task Series Management (seriesId)', () => {
     it('should assign seriesId to recurring task and propagate to next recurrence', async () => {

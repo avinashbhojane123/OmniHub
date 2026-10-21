@@ -39,8 +39,11 @@ export class CategoryRepository {
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
-    const result = await db.execute('DELETE FROM categories WHERE id = ?', [id]);
-    return result.rowsAffected > 0;
+    return await db.transaction(async (tx) => {
+      await tx.execute('UPDATE tasks SET categoryId = NULL WHERE categoryId = ?', [id]);
+      const result = await tx.execute('DELETE FROM categories WHERE id = ?', [id]);
+      return result.rowsAffected > 0;
+    });
   }
 }
 

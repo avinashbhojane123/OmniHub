@@ -1,6 +1,7 @@
 import { Habit, HabitLog, HabitWithStreak } from '../../types';
 import { getDatabase } from '../connection';
 import { format, subDays, addDays, isBefore, parseISO } from 'date-fns';
+import { tombstoneRepository } from './TombstoneRepository';
 
 export class HabitRepository {
   async findAll(): Promise<Habit[]> {
@@ -89,6 +90,7 @@ export class HabitRepository {
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
+    await tombstoneRepository.recordDeleted(id, 'habit');
     return await db.transaction(async (tx) => {
       await tx.execute('DELETE FROM habit_logs WHERE habitId = ?', [id]);
       const result = await tx.execute('DELETE FROM habits WHERE id = ?', [id]);
@@ -163,10 +165,8 @@ export class HabitRepository {
     if (habits.length === 0) return [];
 
     const db = await getDatabase();
-    const minDateStr = format(subDays(parseISO(todayStr), 370), 'yyyy-MM-dd');
     const allLogsResult = await db.execute(
-      'SELECT habitId, date FROM habit_logs WHERE completed = 1 AND date >= ? ORDER BY date DESC',
-      [minDateStr]
+      'SELECT habitId, date FROM habit_logs WHERE completed = 1 ORDER BY date DESC'
     );
     const logsByHabit = new Map<string, string[]>();
     for (const r of allLogsResult.rows) {
@@ -181,10 +181,14 @@ export class HabitRepository {
     for (const habit of habits) {
       const completedDates = new Set(logsByHabit.get(habit.id) || []);
 
-      const allowedDays =
-        habit.recurrenceRule?.daysOfWeek && habit.recurrenceRule.daysOfWeek.length > 0
-          ? habit.recurrenceRule.daysOfWeek
-          : [0, 1, 2, 3, 4, 5, 6];
+      let allowedDays = [0, 1, 2, 3, 4, 5, 6];
+      if (habit.recurrenceRule?.daysOfWeek && habit.recurrenceRule.daysOfWeek.length > 0) {
+        allowedDays = habit.recurrenceRule.daysOfWeek;
+      } else if (habit.recurrenceRule?.type === 'weekdays') {
+        allowedDays = [1, 2, 3, 4, 5];
+      } else if (habit.recurrenceRule?.type === 'weekends') {
+        allowedDays = [0, 6];
+      }
 
       // Calculate current streak
       let currentStreak = 0;
@@ -198,9 +202,9 @@ export class HabitRepository {
         currentStreak++;
       }
 
-      // Walk backward day by day checking consecutive scheduled days
+      // Walk backward day by day checking consecutive scheduled days (supporting multi-year streaks)
       let daysChecked = 0;
-      while (daysChecked < 365) {
+      while (daysChecked < 3650) {
         daysChecked++;
         const dayOfWeek = checkDate.getDay();
 
@@ -269,6 +273,32 @@ export class HabitRepository {
         weeklyLogs,
       });
     }
+
+    const parseTimeToMinutes = (timeStr?: string): number => {
+      if (!timeStr) return 9999;
+      const clean = timeStr.replace(/[⏰🕒]/g, '').trim();
+      const ampmMatch = clean.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+      if (ampmMatch) {
+        let h = parseInt(ampmMatch[1], 10);
+        const m = parseInt(ampmMatch[2], 10);
+        const p = ampmMatch[3].toUpperCase();
+        if (p === 'PM' && h < 12) h += 12;
+        if (p === 'AM' && h === 12) h = 0;
+        return h * 60 + m;
+      }
+      const h24Match = clean.match(/^(\d{1,2}):(\d{2})$/);
+      if (h24Match) {
+        return parseInt(h24Match[1], 10) * 60 + parseInt(h24Match[2], 10);
+      }
+      return 9999;
+    };
+
+    result.sort((a, b) => {
+      const timeA = parseTimeToMinutes(a.reminderTime || a.description);
+      const timeB = parseTimeToMinutes(b.reminderTime || b.description);
+      if (timeA !== timeB) return timeA - timeB;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
 
     return result;
   }

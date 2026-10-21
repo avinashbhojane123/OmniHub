@@ -1,25 +1,39 @@
 import { ProductivityStats } from '../../types';
-import { taskRepository } from '../../database/repositories/TaskRepository';
+import { getDatabase } from '../../database/connection';
 import { habitRepository } from '../../database/repositories/HabitRepository';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
 
 export class StatisticsService {
   async getStats(): Promise<ProductivityStats> {
+    const db = await getDatabase();
     const now = new Date();
+    const nowIso = now.toISOString();
     const todayStr = format(now, 'yyyy-MM-dd');
     const currentTimeStr = format(now, 'HH:mm');
 
-    // All tasks
-    const allTasks = await taskRepository.findAll();
-    const completedTasks = allTasks.filter((t) => t.status === 'completed');
-    const overdueTasks = await taskRepository.findOverdue(todayStr, currentTimeStr);
-    const pendingTasks = allTasks.filter((t) => t.status === 'pending' || t.status === 'in_progress');
+    // 1. O(1) SQL Aggregate Task Counts
+    const taskCountsResult = await db.execute(
+      `SELECT 
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completedCount,
+        COUNT(CASE WHEN status IN ('pending', 'in_progress') THEN 1 END) as pendingCount,
+        COUNT(CASE WHEN status != 'cancelled' THEN 1 END) as totalActive,
+        COUNT(CASE WHEN status NOT IN ('completed', 'cancelled') 
+                    AND (snoozeUntil IS NULL OR snoozeUntil <= ?) 
+                    AND date IS NOT NULL AND date != '' 
+                    AND (date < ? OR (date = ? AND startTime IS NOT NULL AND startTime != '' AND startTime < ?)) 
+              THEN 1 END) as overdueCount
+       FROM tasks`,
+      [nowIso, todayStr, todayStr, currentTimeStr]
+    );
 
-    const activeTasks = allTasks.filter((t) => t.status !== 'cancelled');
-    const totalActive = activeTasks.length;
-    const completionPercentage = totalActive > 0 ? Math.round((completedTasks.length / totalActive) * 100) : 0;
+    const countsRow = taskCountsResult.rows[0] || {};
+    const tasksCompleted = Number(countsRow.completedCount || 0);
+    const tasksPending = Number(countsRow.pendingCount || 0);
+    const tasksOverdue = Number(countsRow.overdueCount || 0);
+    const totalActive = Number(countsRow.totalActive || 0);
+    const completionPercentage = totalActive > 0 ? Math.round((tasksCompleted / totalActive) * 100) : 0;
 
-    // Habits
+    // 2. Habits
     const habitsWithStreaks = await habitRepository.getHabitsWithStreaks(todayStr);
     const totalHabits = habitsWithStreaks.length;
     const habitsCompletedToday = habitsWithStreaks.filter((h) => h.completedToday).length;
@@ -28,21 +42,29 @@ export class StatisticsService {
     const currentStreak = habitsWithStreaks.length > 0 ? Math.max(...habitsWithStreaks.map((h) => h.currentStreak)) : 0;
     const bestStreak = habitsWithStreaks.length > 0 ? Math.max(...habitsWithStreaks.map((h) => h.bestStreak)) : 0;
 
-    // Weekly stats
+    // 3. Weekly stats via SQL Aggregate
     const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
     const weekEnd = format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    const weeklyTasks = await taskRepository.findByDateRange(weekStart, weekEnd);
-    const weeklyCompleted = weeklyTasks.filter((t) => t.status === 'completed').length;
-    const weeklyOverdue = weeklyTasks.filter(
-      (t) => t.status !== 'completed' && t.status !== 'cancelled' && t.date < todayStr
-    ).length;
-    const weeklyTotal = weeklyTasks.length;
+    const weeklyResult = await db.execute(
+      `SELECT 
+        COUNT(*) as weeklyTotal,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as weeklyCompleted,
+        COUNT(CASE WHEN status NOT IN ('completed', 'cancelled') AND date < ? THEN 1 END) as weeklyOverdue
+       FROM tasks
+       WHERE date >= ? AND date <= ?`,
+      [todayStr, weekStart, weekEnd]
+    );
+
+    const weeklyRow = weeklyResult.rows[0] || {};
+    const weeklyTotal = Number(weeklyRow.weeklyTotal || 0);
+    const weeklyCompleted = Number(weeklyRow.weeklyCompleted || 0);
+    const weeklyOverdue = Number(weeklyRow.weeklyOverdue || 0);
     const weeklyCompletionRate = weeklyTotal > 0 ? Math.round((weeklyCompleted / weeklyTotal) * 100) : 0;
 
     return {
-      tasksCompleted: completedTasks.length,
-      tasksPending: pendingTasks.length,
-      tasksOverdue: overdueTasks.length,
+      tasksCompleted,
+      tasksPending,
+      tasksOverdue,
       completionPercentage,
       habitsCompletedToday,
       totalHabits,

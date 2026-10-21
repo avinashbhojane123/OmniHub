@@ -67,7 +67,7 @@ export const GoogleKeepNotesEditor: React.FC<GoogleKeepNotesEditorProps> = ({
       } else if (notes.includes('•')) {
         setMode('bullets');
       }
-    } else {
+    } else if (notes === '') {
       setItems([{ id: 'item_1', text: '', completed: false }]);
       setRawText('');
     }
@@ -143,9 +143,11 @@ export const GoogleKeepNotesEditor: React.FC<GoogleKeepNotesEditorProps> = ({
   };
 
   const handleSwitchMode = (newMode: EditorMode) => {
+    if (newMode === mode) return;
     setMode(newMode);
     if (newMode === 'text') {
-      const textVal = serializeBulletNotes(items, 'text');
+      const textVal = serializeBulletNotes(items, 'text') || rawText;
+      lastSerializedRef.current = textVal;
       setRawText(textVal);
       onChangeNotes(textVal);
     } else {
@@ -162,6 +164,7 @@ export const GoogleKeepNotesEditor: React.FC<GoogleKeepNotesEditorProps> = ({
   };
 
   const handleRawTextChange = (txt: string) => {
+    lastSerializedRef.current = txt;
     setRawText(txt);
     onChangeNotes(txt);
   };

@@ -58,3 +58,18 @@ jest.mock('@op-engineering/op-sqlite', () => {
     })),
   };
 });
+
+// Mock react-native-webview
+jest.mock('react-native-webview', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const MockWebView = React.forwardRef((props, ref) => {
+    return React.createElement(View, { ...props, ref, testID: 'mock-webview' });
+  });
+  return {
+    __esModule: true,
+    default: MockWebView,
+    WebView: MockWebView,
+  };
+});
+

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Task, CreateTaskDTO, UpdateTaskDTO, Category } from '../types';
 import { taskService } from '../services/tasks/TaskService';
@@ -10,10 +10,14 @@ export function useTasks() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [activeQuery, setActiveQuery] = useState<string>('');
+  const hasLoadedRef = useRef<boolean>(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (showLoadingSpinner = false) => {
     try {
-      setLoading(true);
+      if (showLoadingSpinner || !hasLoadedRef.current) {
+        setLoading(true);
+      }
+      await taskService.ensureUpcomingRecurrences(3);
       const allCats = await categoryRepository.findAll();
       setCategories(allCats);
       if (activeQuery.trim()) {
@@ -23,6 +27,7 @@ export function useTasks() {
         const allTasks = await taskRepository.findAll();
         setTasks(allTasks);
       }
+      hasLoadedRef.current = true;
     } catch (e) {
       console.error('Failed to load tasks:', e);
     } finally {
@@ -86,6 +91,12 @@ export function useTasks() {
     return updated;
   };
 
+  const toggleSubtask = async (id: string, subtaskIndex: number) => {
+    const updated = await taskService.toggleSubtask(id, subtaskIndex);
+    await refresh();
+    return updated;
+  };
+
   const searchTasks = (query: string) => {
     setActiveQuery(query);
   };
@@ -102,6 +113,7 @@ export function useTasks() {
     uncompleteTask,
     snoozeTask,
     rescheduleTask,
+    toggleSubtask,
     searchTasks,
   };
 }

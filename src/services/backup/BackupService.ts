@@ -1,14 +1,18 @@
 import { BackupData } from '../../types';
 import { taskRepository } from '../../database/repositories/TaskRepository';
 import { categoryRepository } from '../../database/repositories/CategoryRepository';
-import { calendarRepository } from '../../database/repositories/CalendarRepository';
 import { habitRepository } from '../../database/repositories/HabitRepository';
-import { goalRepository } from '../../database/repositories/GoalRepository';
 import { noteRepository } from '../../database/repositories/NoteRepository';
+import { keepNoteRepository } from '../../database/repositories/KeepNoteRepository';
+import { calendarRepository } from '../../database/repositories/CalendarRepository';
 import { settingsRepository } from '../../database/repositories/SettingsRepository';
+import { tombstoneRepository } from '../../database/repositories/TombstoneRepository';
 import { getDatabase } from '../../database/connection';
 import { notificationService } from '../notifications/NotificationService';
 import { alarmService } from '../alarm/AlarmService';
+
+import { DEFAULT_SETTINGS } from '../../database/seed';
+import { normalizeTimeTo24H } from '../../utils/time';
 
 export type RestoreMode = 'replace' | 'merge';
 
@@ -16,12 +20,20 @@ export class BackupService {
   async exportBackup(): Promise<string> {
     const tasks = await taskRepository.findAll();
     const categories = await categoryRepository.findAll();
-    const calendarEvents = await calendarRepository.findAll();
     const habits = await habitRepository.findAll();
-    const goals = await goalRepository.findAll();
-    const goalTasks = await goalRepository.getAllLinks();
     const notes = await noteRepository.findAll();
-    const settings = await settingsRepository.getAll();
+    const keepNotes = await keepNoteRepository.findAll();
+    const calendarEvents = await calendarRepository.findAll();
+    const rawSettings = await settingsRepository.getAll();
+    const settings: Record<string, string> = { ...DEFAULT_SETTINGS };
+    for (const [k, v] of Object.entries(rawSettings)) {
+      if (v !== undefined && v !== null) {
+        settings[k] = v;
+      }
+    }
+    if (!settings.notificationsEnabled) {
+      settings.notificationsEnabled = 'true';
+    }
 
     // Fetch all habit logs in a single batch query
     const db = await getDatabase();
@@ -36,18 +48,20 @@ export class BackupService {
       createdAt: r.createdAt,
     }));
 
+    const tombstones = await tombstoneRepository.getAll();
+
     const backup: BackupData = {
       version: 1,
       createdAt: new Date().toISOString(),
       tasks,
       categories,
-      calendarEvents,
       habits,
       habitLogs,
-      goals,
-      goalTasks,
       notes,
+      keepNotes,
+      calendarEvents,
       settings,
+      tombstones,
     };
 
     return JSON.stringify(backup, null, 2);
@@ -68,110 +82,228 @@ export class BackupService {
       const result = await db.transaction(async (tx) => {
         if (mode === 'replace') {
           // Clear existing records safely within transaction
-          await tx.execute('DELETE FROM goal_tasks');
-          await tx.execute('DELETE FROM goals');
           await tx.execute('DELETE FROM habit_logs');
           await tx.execute('DELETE FROM habits');
-          await tx.execute('DELETE FROM calendar_events');
           await tx.execute('DELETE FROM tasks');
           await tx.execute('DELETE FROM categories');
           await tx.execute('DELETE FROM notes');
+          await tx.execute('DELETE FROM keep_notes');
+          await tx.execute('DELETE FROM calendar_events');
+          await tx.execute('DELETE FROM sync_tombstones');
+
+          if (data.tombstones && Array.isArray(data.tombstones)) {
+            for (const ts of data.tombstones) {
+              await tx.execute(
+                'INSERT OR REPLACE INTO sync_tombstones (id, entityType, deletedAt) VALUES (?, ?, ?)',
+                [ts.id, ts.entityType, ts.deletedAt]
+              );
+            }
+          }
+        } else {
+          // mode === 'merge': apply remote tombstones and delete corresponding local items
+          if (data.tombstones && Array.isArray(data.tombstones)) {
+            for (const ts of data.tombstones) {
+              await tx.execute(
+                `INSERT INTO sync_tombstones (id, entityType, deletedAt)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET deletedAt = CASE WHEN excluded.deletedAt > sync_tombstones.deletedAt THEN excluded.deletedAt ELSE sync_tombstones.deletedAt END`,
+                [ts.id, ts.entityType, ts.deletedAt]
+              );
+              if (ts.entityType === 'task') {
+                await tx.execute('DELETE FROM tasks WHERE id = ? AND updatedAt <= ?', [ts.id, ts.deletedAt]);
+              } else if (ts.entityType === 'keepNote') {
+                await tx.execute('DELETE FROM keep_notes WHERE id = ? AND updatedAt <= ?', [ts.id, ts.deletedAt]);
+              } else if (ts.entityType === 'habit') {
+                await tx.execute('DELETE FROM habits WHERE id = ?', [ts.id]);
+                await tx.execute('DELETE FROM habit_logs WHERE habitId = ?', [ts.id]);
+              } else if (ts.entityType === 'calendarEvent') {
+                await tx.execute('DELETE FROM calendar_events WHERE id = ? AND updatedAt <= ?', [ts.id, ts.deletedAt]);
+              }
+            }
+          }
         }
 
-        const insertPrefix = mode === 'merge' ? 'INSERT OR IGNORE INTO' : 'INSERT INTO';
+        const tombstoneMap = new Map<string, string>();
+        if (mode === 'merge') {
+          const tombstonesRes = await tx.execute('SELECT id, deletedAt FROM sync_tombstones');
+          for (const r of tombstonesRes.rows) {
+            tombstoneMap.set(r.id, r.deletedAt);
+          }
+        }
 
         // Restore categories
         if (data.categories) {
           for (const cat of data.categories) {
             await tx.execute(
-              `${insertPrefix} categories (id, name, color, icon, createdAt) VALUES (?, ?, ?, ?, ?)`,
+              `INSERT INTO categories (id, name, color, icon, createdAt) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, icon = excluded.icon`,
               [cat.id, cat.name, cat.color, cat.icon, cat.createdAt]
             );
           }
         }
 
-        // Restore tasks
+        // Restore tasks with timestamp conflict resolution
         if (data.tasks) {
           for (const task of data.tasks) {
+            if (mode === 'merge') {
+              const deletedAt = tombstoneMap.get(task.id);
+              if (deletedAt && deletedAt >= task.updatedAt) {
+                continue;
+              }
+            }
             const recurrenceJson = task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null;
-            await tx.execute(
-              `${insertPrefix} tasks (
-                id, title, description, date, startTime, endTime,
-                priority, categoryId, status, recurrenceRule,
-                reminderMinutes, snoozeUntil, notes, createdAt, updatedAt, completedAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                task.id,
-                task.title,
-                task.description ?? null,
-                task.date,
-                task.startTime ?? null,
-                task.endTime ?? null,
-                task.priority,
-                task.categoryId ?? null,
-                task.status,
-                recurrenceJson,
-                task.reminderMinutes ?? 0,
-                task.snoozeUntil ?? null,
-                task.notes ?? null,
-                task.createdAt,
-                task.updatedAt,
-                task.completedAt ?? null,
-              ]
-            );
-          }
-        }
+            const isLoudVal = task.recurrenceRule?.isLoudAlarm ? 1 : 0;
+            const quadVal = task.recurrenceRule?.eisenhowerQuadrant || null;
+            const accentVal = task.recurrenceRule?.accentColor || null;
+            const estMinVal = task.recurrenceRule?.estimatedMinutes ?? null;
 
-        // Restore calendar events
-        if (data.calendarEvents) {
-          for (const ev of data.calendarEvents) {
-            await tx.execute(
-              `${insertPrefix} calendar_events (
-                id, externalId, calendarId, title, description,
-                startTime, endTime, location, source, isAllDay,
-                createdAt, updatedAt, syncedAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                ev.id,
-                ev.externalId ?? null,
-                ev.calendarId ?? null,
-                ev.title,
-                ev.description ?? null,
-                ev.startTime,
-                ev.endTime,
-                ev.location ?? null,
-                ev.source || 'local',
-                ev.isAllDay ? 1 : 0,
-                ev.createdAt,
-                ev.updatedAt,
-                ev.syncedAt ?? null,
-              ]
-            );
+            if (mode === 'merge') {
+              await tx.execute(
+                `INSERT INTO tasks (
+                  id, seriesId, title, description, date, startTime, endTime,
+                  priority, categoryId, status, recurrenceRule,
+                  reminderMinutes, snoozeUntil, notes, isLoudAlarm, eisenhowerQuadrant, accentColor, estimatedMinutes,
+                  createdAt, updatedAt, completedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  seriesId = excluded.seriesId,
+                  title = excluded.title,
+                  description = excluded.description,
+                  date = excluded.date,
+                  startTime = excluded.startTime,
+                  endTime = excluded.endTime,
+                  priority = excluded.priority,
+                  categoryId = excluded.categoryId,
+                  status = excluded.status,
+                  recurrenceRule = excluded.recurrenceRule,
+                  reminderMinutes = excluded.reminderMinutes,
+                  snoozeUntil = excluded.snoozeUntil,
+                  notes = excluded.notes,
+                  isLoudAlarm = excluded.isLoudAlarm,
+                  eisenhowerQuadrant = excluded.eisenhowerQuadrant,
+                  accentColor = excluded.accentColor,
+                  estimatedMinutes = excluded.estimatedMinutes,
+                  updatedAt = excluded.updatedAt,
+                  completedAt = excluded.completedAt
+                WHERE excluded.updatedAt >= tasks.updatedAt`,
+                [
+                  task.id,
+                  task.seriesId ?? null,
+                  task.title,
+                  task.description ?? null,
+                  task.date,
+                  task.startTime ? (normalizeTimeTo24H(task.startTime) ?? null) : null,
+                  task.endTime ? (normalizeTimeTo24H(task.endTime) ?? null) : null,
+                  task.priority,
+                  task.categoryId ?? null,
+                  task.status,
+                  recurrenceJson,
+                  task.reminderMinutes ?? 0,
+                  task.snoozeUntil ?? null,
+                  task.notes ?? null,
+                  isLoudVal,
+                  quadVal,
+                  accentVal,
+                  estMinVal,
+                  task.createdAt,
+                  task.updatedAt,
+                  task.completedAt ?? null,
+                ]
+              );
+            } else {
+              await tx.execute(
+                `INSERT INTO tasks (
+                  id, seriesId, title, description, date, startTime, endTime,
+                  priority, categoryId, status, recurrenceRule,
+                  reminderMinutes, snoozeUntil, notes, isLoudAlarm, eisenhowerQuadrant, accentColor, estimatedMinutes,
+                  createdAt, updatedAt, completedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  task.id,
+                  task.seriesId ?? null,
+                  task.title,
+                  task.description ?? null,
+                  task.date,
+                  task.startTime ? (normalizeTimeTo24H(task.startTime) ?? null) : null,
+                  task.endTime ? (normalizeTimeTo24H(task.endTime) ?? null) : null,
+                  task.priority,
+                  task.categoryId ?? null,
+                  task.status,
+                  recurrenceJson,
+                  task.reminderMinutes ?? 0,
+                  task.snoozeUntil ?? null,
+                  task.notes ?? null,
+                  isLoudVal,
+                  quadVal,
+                  accentVal,
+                  estMinVal,
+                  task.createdAt,
+                  task.updatedAt,
+                  task.completedAt ?? null,
+                ]
+              );
+            }
           }
         }
 
         // Restore habits
         if (data.habits) {
           for (const h of data.habits) {
+            if (mode === 'merge') {
+              const deletedAt = tombstoneMap.get(h.id);
+              if (deletedAt) {
+                continue;
+              }
+            }
             const recJson = typeof h.recurrenceRule === 'object' ? JSON.stringify(h.recurrenceRule) : h.recurrenceRule;
-            await tx.execute(
-              `${insertPrefix} habits (
-                id, name, description, icon, color, recurrenceRule,
-                target, reminderTime, createdAt, archivedAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                h.id,
-                h.name,
-                h.description ?? null,
-                h.icon,
-                h.color,
-                recJson,
-                h.target,
-                h.reminderTime ?? null,
-                h.createdAt,
-                h.archivedAt ?? null,
-              ]
-            );
+            if (mode === 'merge') {
+              await tx.execute(
+                `INSERT INTO habits (
+                  id, name, description, icon, color, recurrenceRule,
+                  target, reminderTime, createdAt, archivedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  name = excluded.name,
+                  description = excluded.description,
+                  icon = excluded.icon,
+                  color = excluded.color,
+                  recurrenceRule = excluded.recurrenceRule,
+                  target = excluded.target,
+                  reminderTime = excluded.reminderTime,
+                  archivedAt = excluded.archivedAt`,
+                [
+                  h.id,
+                  h.name,
+                  h.description ?? null,
+                  h.icon,
+                  h.color,
+                  recJson,
+                  h.target,
+                  h.reminderTime ?? null,
+                  h.createdAt,
+                  h.archivedAt ?? null,
+                ]
+              );
+            } else {
+              await tx.execute(
+                `INSERT INTO habits (
+                  id, name, description, icon, color, recurrenceRule,
+                  target, reminderTime, createdAt, archivedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  h.id,
+                  h.name,
+                  h.description ?? null,
+                  h.icon,
+                  h.color,
+                  recJson,
+                  h.target,
+                  h.reminderTime ?? null,
+                  h.createdAt,
+                  h.archivedAt ?? null,
+                ]
+              );
+            }
           }
         }
 
@@ -179,9 +311,13 @@ export class BackupService {
         if (data.habitLogs) {
           for (const hl of data.habitLogs) {
             await tx.execute(
-              `${insertPrefix} habit_logs (
+              `INSERT INTO habit_logs (
                 id, habitId, date, completed, value, notes, createdAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(habitId, date) DO UPDATE SET
+                completed = excluded.completed,
+                value = excluded.value,
+                notes = excluded.notes`,
               [
                 hl.id,
                 hl.habitId,
@@ -195,47 +331,161 @@ export class BackupService {
           }
         }
 
-        // Restore goals
-        if (data.goals) {
-          for (const g of data.goals) {
-            await tx.execute(
-              `${insertPrefix} goals (
-                id, title, description, deadline, progress,
-                color, category, createdAt, updatedAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                g.id,
-                g.title,
-                g.description ?? null,
-                g.deadline ?? null,
-                g.progress || 0,
-                g.color ?? null,
-                g.category ?? null,
-                g.createdAt,
-                g.updatedAt,
-              ]
-            );
-          }
-        }
-
-        // Restore goal-task links
-        if (data.goalTasks) {
-          for (const gt of data.goalTasks) {
-            const id = gt.id || `gt_${gt.goalId}_${gt.taskId}`;
-            await tx.execute(
-              `${insertPrefix} goal_tasks (id, goalId, taskId) VALUES (?, ?, ?)`,
-              [id, gt.goalId, gt.taskId]
-            );
-          }
-        }
-
         // Restore notes
         if (data.notes) {
           for (const n of data.notes) {
             await tx.execute(
-              `${insertPrefix} notes (id, entityType, entityId, title, content, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO notes (id, entityType, entityId, title, content, createdAt, updatedAt)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 title = excluded.title, content = excluded.content, updatedAt = excluded.updatedAt
+               WHERE excluded.updatedAt >= notes.updatedAt`,
               [n.id, n.entityType, n.entityId ?? null, n.title ?? null, n.content, n.createdAt, n.updatedAt]
             );
+          }
+        }
+
+        // Restore keep notes
+        if (data.keepNotes && Array.isArray(data.keepNotes)) {
+          for (const kn of data.keepNotes) {
+            if (mode === 'merge') {
+              const deletedAt = tombstoneMap.get(kn.id);
+              if (deletedAt && deletedAt >= kn.updatedAt) {
+                continue;
+              }
+            }
+            const labelsJson = JSON.stringify(kn.labels || []);
+            const checklistJson = JSON.stringify(kn.checklistData || []);
+            const drawingJson = kn.drawingData ? JSON.stringify(kn.drawingData) : null;
+            if (mode === 'merge') {
+              await tx.execute(
+                `INSERT INTO keep_notes (
+                  id, title, content, type, color, isPinned, isArchived,
+                  isTrashed, trashedAt, reminderTime, labels, checklistData,
+                  drawingData, audioUri, imageUri, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  title = excluded.title,
+                  content = excluded.content,
+                  type = excluded.type,
+                  color = excluded.color,
+                  isPinned = excluded.isPinned,
+                  isArchived = excluded.isArchived,
+                  isTrashed = excluded.isTrashed,
+                  trashedAt = excluded.trashedAt,
+                  reminderTime = excluded.reminderTime,
+                  labels = excluded.labels,
+                  checklistData = excluded.checklistData,
+                  drawingData = excluded.drawingData,
+                  audioUri = excluded.audioUri,
+                  imageUri = excluded.imageUri,
+                  updatedAt = excluded.updatedAt
+                WHERE excluded.updatedAt >= keep_notes.updatedAt`,
+                [
+                  kn.id,
+                  kn.title || '',
+                  kn.content || '',
+                  kn.type || 'text',
+                  kn.color || 'default',
+                  kn.isPinned ? 1 : 0,
+                  kn.isArchived ? 1 : 0,
+                  kn.isTrashed ? 1 : 0,
+                  kn.trashedAt ?? null,
+                  kn.reminderTime ?? null,
+                  labelsJson,
+                  checklistJson,
+                  drawingJson,
+                  kn.audioUri ?? null,
+                  kn.imageUri ?? null,
+                  kn.createdAt,
+                  kn.updatedAt,
+                ]
+              );
+            } else {
+              await tx.execute(
+                `INSERT INTO keep_notes (
+                  id, title, content, type, color, isPinned, isArchived,
+                  isTrashed, trashedAt, reminderTime, labels, checklistData,
+                  drawingData, audioUri, imageUri, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  kn.id,
+                  kn.title || '',
+                  kn.content || '',
+                  kn.type || 'text',
+                  kn.color || 'default',
+                  kn.isPinned ? 1 : 0,
+                  kn.isArchived ? 1 : 0,
+                  kn.isTrashed ? 1 : 0,
+                  kn.trashedAt ?? null,
+                  kn.reminderTime ?? null,
+                  labelsJson,
+                  checklistJson,
+                  drawingJson,
+                  kn.audioUri ?? null,
+                  kn.imageUri ?? null,
+                  kn.createdAt,
+                  kn.updatedAt,
+                ]
+              );
+            }
+          }
+        }
+
+        // Restore calendar events
+        if (data.calendarEvents) {
+          for (const ev of data.calendarEvents) {
+            if (mode === 'merge') {
+              const deletedAt = tombstoneMap.get(ev.id);
+              if (deletedAt && deletedAt >= ev.updatedAt) {
+                continue;
+              }
+            }
+            const ringVal = ev.ringAlarm === undefined ? 1 : (ev.ringAlarm ? 1 : 0);
+            if (mode === 'merge') {
+              await tx.execute(
+                `INSERT INTO calendar_events (
+                  id, title, description, date, time, ringAlarm, status, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  title = excluded.title,
+                  description = excluded.description,
+                  date = excluded.date,
+                  time = excluded.time,
+                  ringAlarm = excluded.ringAlarm,
+                  status = excluded.status,
+                  updatedAt = excluded.updatedAt
+                WHERE excluded.updatedAt >= calendar_events.updatedAt`,
+                [
+                  ev.id,
+                  ev.title,
+                  ev.description ?? null,
+                  ev.date,
+                  ev.time,
+                  ringVal,
+                  ev.status || 'active',
+                  ev.createdAt,
+                  ev.updatedAt,
+                ]
+              );
+            } else {
+              await tx.execute(
+                `INSERT INTO calendar_events (
+                  id, title, description, date, time, ringAlarm, status, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  ev.id,
+                  ev.title,
+                  ev.description ?? null,
+                  ev.date,
+                  ev.time,
+                  ringVal,
+                  ev.status || 'active',
+                  ev.createdAt,
+                  ev.updatedAt,
+                ]
+              );
+            }
           }
         }
 
@@ -267,6 +517,7 @@ export class BackupService {
       try {
         await notificationService.restoreAllReminders();
         await alarmService.restoreAllHabitAlarms();
+        await alarmService.restoreAllEventAlarms();
       } catch (err) {
         console.warn('Failed to reschedule triggers after backup restore:', err);
       }
@@ -296,6 +547,20 @@ export class BackupService {
     }
   }
 
+  async clearAllData(): Promise<void> {
+    const db = await getDatabase();
+    await db.transaction(async (tx) => {
+      await tx.execute('DELETE FROM habit_logs');
+      await tx.execute('DELETE FROM habits');
+      await tx.execute('DELETE FROM tasks');
+      await tx.execute('DELETE FROM notes');
+      await tx.execute('DELETE FROM keep_notes');
+      await tx.execute('DELETE FROM calendar_events');
+      await tx.execute('DELETE FROM reminders');
+      await tx.execute('DELETE FROM notification_schedules');
+    });
+  }
+
   async pingCompanionServer(serverUrl?: string, apiKey?: string): Promise<{ success: boolean; message: string }> {
     try {
       const targetUrl = serverUrl || (await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030'));
@@ -322,7 +587,6 @@ export class BackupService {
       const targetUrl = serverUrl || (await settingsRepository.get('companionServerUrl', 'http://10.0.2.2:3030'));
       const key = apiKey ?? (await settingsRepository.get('companionApiKey', ''));
       const jsonStr = await this.exportBackup();
-      const payload = JSON.parse(jsonStr);
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (key) {
         headers['x-api-key'] = key;
@@ -330,7 +594,7 @@ export class BackupService {
       const res = await this.fetchWithTimeout(`${targetUrl.replace(/\/+$/, '')}/backup`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload),
+        body: jsonStr,
       });
       if (!res.ok) {
         throw new Error(`Companion server returned status ${res.status}`);
@@ -357,8 +621,8 @@ export class BackupService {
       if (!res.ok) {
         throw new Error(`Companion server returned status ${res.status}`);
       }
-      const data = await res.json();
-      return await this.importBackup(JSON.stringify(data), mode);
+      const rawText = await res.text();
+      return await this.importBackup(rawText, mode);
     } catch (e: any) {
       return { success: false, message: e.message || 'Failed to retrieve backup from companion server.' };
     }

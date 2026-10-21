@@ -10,7 +10,8 @@ interface ProgressBarProps {
 
 export const ProgressBar: React.FC<ProgressBarProps> = ({ percentage, label }) => {
   const { colors } = useAppTheme();
-  const clamped = Math.min(100, Math.max(0, percentage));
+  const safePercentage = typeof percentage === 'number' && !isNaN(percentage) ? percentage : 0;
+  const clamped = Math.min(100, Math.max(0, Math.round(safePercentage)));
 
   return (
     <View style={styles.container}>

@@ -21,4 +21,10 @@
 
 # Notifee Core & Background Receivers
 -keep class app.notifee.** { *; }
--keepclassmembers class app.notifee.** { *; }
+-dontwarn app.notifee.**
+
+# React Native & Common Third-Party Libraries
+-dontwarn com.facebook.react.**
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn javax.annotation.**

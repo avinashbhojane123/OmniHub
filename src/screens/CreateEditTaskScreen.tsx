@@ -1,33 +1,104 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TextInput,
   TouchableOpacity,
-  Alert,
+  ScrollView,
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  Modal,
+  Alert,
+  Switch,
+  Keyboard,
+  BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTasks } from '../hooks/useTasks';
 import { useAppTheme } from '../hooks/useTheme';
 import { radius, spacing, typography } from '../theme';
 import { GoogleKeepNotesEditor } from '../components/GoogleKeepNotesEditor';
-import { DateTimePickerModal } from '../components/DateTimePickerModal';
-import { format, addDays } from 'date-fns';
-import { TaskPriority, RecurrenceType } from '../types';
-import { categoryRepository } from '../database/repositories/CategoryRepository';
+import { format, parseISO, addDays, isValid } from 'date-fns';
+import {
+  Task,
+  TaskPriority,
+  TaskStatus,
+  Category,
+  RecurrenceRule,
+  RecurrenceType,
+  EisenhowerQuadrant,
+} from '../types';
 import { taskRepository } from '../database/repositories/TaskRepository';
-import { normalizeTimeTo24H } from '../utils/time';
+import { taskService } from '../services/tasks/TaskService';
+import { DateTimePickerModal } from '../components/DateTimePickerModal';
+import { CreateCategoryModal } from '../components/CreateCategoryModal';
+import { ConflictBanner } from '../components/ConflictBanner';
+import { formatTimeTo12H, parseTimeToMinutes } from '../utils/time';
+
+interface RouteParams {
+  taskId?: string;
+  initialTitle?: string;
+  initialNotes?: string;
+  initialDate?: string;
+  initialStartTime?: string;
+  initialEndTime?: string;
+  initialCategoryId?: string;
+  initialPriority?: TaskPriority;
+}
 
 interface CreateEditTaskScreenProps {
-  route: any;
-  navigation: any;
+  route: {
+    params?: RouteParams;
+  };
+  navigation: {
+    navigate: (screen: string, params?: any) => void;
+    goBack: () => void;
+    canGoBack: () => boolean;
+    dispatch: (action: any) => void;
+    addListener: (event: string, callback: (e: any) => void) => () => void;
+  };
 }
+
+function getNextMondayDate(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (8 - day) % 7 || 7;
+  d.setDate(d.getDate() + diff);
+  return format(d, 'yyyy-MM-dd');
+}
+
+const DURATION_PRESETS = [
+  { mins: 15, label: '15m' },
+  { mins: 25, label: '🍅 25m', isPomodoro: true },
+  { mins: 30, label: '30m' },
+  { mins: 45, label: '45m' },
+  { mins: 60, label: '1 hr' },
+  { mins: 90, label: '1.5 hr' },
+  { mins: 120, label: '2 hr' },
+];
+
+const TASK_ACCENT_COLORS = [
+  { color: undefined, label: 'Default' },
+  { color: '#FF6B00', label: 'Orange' },
+  { color: '#3B82F6', label: 'Blue' },
+  { color: '#10B981', label: 'Green' },
+  { color: '#8B5CF6', label: 'Purple' },
+  { color: '#EC4899', label: 'Pink' },
+  { color: '#F59E0B', label: 'Amber' },
+  { color: '#06B6D4', label: 'Cyan' },
+];
+
+const REMINDER_OPTIONS = [
+  { value: -1, label: 'No Reminder' },
+  { value: 0, label: 'At time' },
+  { value: 5, label: '5m before' },
+  { value: 10, label: '10m before' },
+  { value: 15, label: '15m before' },
+  { value: 30, label: '30m before' },
+  { value: 60, label: '1h before' },
+  { value: 1440, label: '1d before' },
+];
 
 export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   route,
@@ -40,64 +111,588 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   const taskId = route.params?.taskId;
   const isEditing = Boolean(taskId);
 
+  // Pre-extract initial route params lazily for instant frame-1 rendering
+  const initParamTitle = route.params?.initialTitle || '';
+  const initParamNotes = route.params?.initialNotes || '';
+  const rawInitParamDate = route.params?.initialDate || format(new Date(), 'yyyy-MM-dd');
+  const candidateInitDate = rawInitParamDate.includes('T') ? rawInitParamDate.split('T')[0] : rawInitParamDate;
+  const initParamDate = isValid(parseISO(candidateInitDate)) ? candidateInitDate : format(new Date(), 'yyyy-MM-dd');
+  const initParamStart = route.params?.initialStartTime;
+  const initParamEnd = route.params?.initialEndTime;
+  const initParamCat = route.params?.initialCategoryId;
+  const initParamPrio = route.params?.initialPriority || 'medium';
+  const initParamHasTime = Boolean(initParamStart);
+
   // Form State
-  const [title, setTitle] = useState('');
-  const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
-  const [priority, setPriority] = useState<TaskPriority>('medium');
-  const [notes, setNotes] = useState('');
-  const [taskDate, setTaskDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [startTime, setStartTime] = useState<string | undefined>(undefined);
-  const [endTime, setEndTime] = useState<string | undefined>(undefined);
-  const [reminderMinutes, setReminderMinutes] = useState<number>(0);
+  const [title, setTitle] = useState(() => (taskId ? '' : initParamTitle));
+  const [categoryId, setCategoryId] = useState<string | undefined>(() => (taskId ? undefined : initParamCat));
+  const [priority, setPriority] = useState<TaskPriority>(() => (taskId ? 'medium' : initParamPrio));
+  const [status, setStatus] = useState<TaskStatus>('pending');
+  const [notes, setNotes] = useState(() => (taskId ? '' : initParamNotes));
+  const [taskDate, setTaskDate] = useState<string>(() => (taskId ? format(new Date(), 'yyyy-MM-dd') : initParamDate));
+  const [isAllDay, setIsAllDay] = useState<boolean>(() => (taskId ? true : !initParamHasTime));
+  const [startTime, setStartTime] = useState<string | undefined>(() => (taskId ? undefined : initParamStart));
+  const [endTime, setEndTime] = useState<string | undefined>(() => (taskId ? undefined : initParamEnd));
+  const [isOvernight, setIsOvernight] = useState<boolean>(false);
+  const [seriesId, setSeriesId] = useState<string | undefined>(undefined);
+  const [existingRecurrenceRule, setExistingRecurrenceRule] = useState<RecurrenceRule | undefined>(undefined);
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('none');
+  const [recurrenceInterval, setRecurrenceInterval] = useState<number>(1);
+  const [recurrenceDaysOfWeek, setRecurrenceDaysOfWeek] = useState<number[]>([]);
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState<string | undefined>(undefined);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
-  // Date/Time Modal Picker State
-  const [pickerVisible, setPickerVisible] = useState(false);
-  const [pickerMode, setPickerMode] = useState<'date' | 'time' | 'both'>('date');
+  // Reminder State (single select, -1 for none)
+  const [reminderMinutes, setReminderMinutes] = useState<number>(() => {
+    if (taskId) return 0;
+    return initParamHasTime ? 0 : -1;
+  });
+  const [isLoudAlarm, setIsLoudAlarm] = useState<boolean>(() => (!taskId && initParamPrio === 'high'));
 
-  // New Category Modal State
+  // Eisenhower Matrix State
+  const [eisenhowerQuadrant, setEisenhowerQuadrant] = useState<EisenhowerQuadrant | undefined>(undefined);
+
+  // Time Tracking & Productivity State
+  const [estimatedMinutes, setEstimatedMinutes] = useState<number | null>(null);
+  const [taskAccentColor, setTaskAccentColor] = useState<string | undefined>(undefined);
+
+  // Timestamps for edit view & optimistic concurrency
+  const [createdAt, setCreatedAt] = useState<string | undefined>(undefined);
+  const [updatedAt, setUpdatedAt] = useState<string | undefined>(undefined);
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
+  const isNavigatingRef = useRef(false);
+
+  const navigateBack = useCallback(() => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('MainTabs');
+    }
+  }, [navigation]);
+
+  // Pickers & Modals State
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [endDatePickerVisible, setEndDatePickerVisible] = useState(false);
+  const [timePickerMode, setTimePickerMode] = useState<'start' | 'end' | null>(null);
   const [newCatModalVisible, setNewCatModalVisible] = useState(false);
-  const [newCatName, setNewCatName] = useState('');
-  const [newCatIcon, setNewCatIcon] = useState('⭐');
-  const [newCatColor, setNewCatColor] = useState('#FF6B00');
 
+  // Conflict state
+  const [conflicts, setConflicts] = useState<{ itemA: string; itemB: string; time: string }[]>([]);
+  const [conflictDismissed, setConflictDismissed] = useState(false);
+
+  // Initial Snapshot for dirty checking
+  const [initialSnapshot, setInitialSnapshot] = useState<{
+    title: string;
+    notes: string;
+    categoryId?: string;
+    priority: TaskPriority;
+    status: TaskStatus;
+    taskDate: string;
+    isAllDay: boolean;
+    startTime?: string;
+    endTime?: string;
+    isOvernight: boolean;
+    recurrenceType: RecurrenceType;
+    recurrenceInterval: number;
+    recurrenceDaysOfWeek: number[];
+    recurrenceEndDate?: string;
+    reminderMinutes: number;
+    isLoudAlarm: boolean;
+    eisenhowerQuadrant?: EisenhowerQuadrant;
+    estimatedMinutes: number | null;
+    taskAccentColor?: string;
+  }>(() => ({
+    title: taskId ? '' : initParamTitle,
+    notes: taskId ? '' : initParamNotes,
+    categoryId: taskId ? undefined : initParamCat,
+    priority: taskId ? 'medium' : initParamPrio,
+    status: 'pending' as TaskStatus,
+    taskDate: taskId ? format(new Date(), 'yyyy-MM-dd') : initParamDate,
+    isAllDay: taskId ? true : !initParamHasTime,
+    startTime: taskId ? undefined : initParamStart,
+    endTime: taskId ? undefined : initParamEnd,
+    isOvernight: false,
+    recurrenceType: 'none' as RecurrenceType,
+    recurrenceInterval: 1,
+    recurrenceDaysOfWeek: [] as number[],
+    recurrenceEndDate: undefined,
+    reminderMinutes: 0,
+    isLoudAlarm: !taskId && initParamPrio === 'high',
+    eisenhowerQuadrant: undefined,
+    estimatedMinutes: null,
+    taskAccentColor: undefined,
+  }));
+
+  // Composite route key to accurately track route param transitions between edits and new tasks
+  const routeParamKey = useMemo(() => {
+    if (taskId) return `edit_${taskId}`;
+    return `new_${route.params?.initialTitle || ''}_${route.params?.initialNotes || ''}_${route.params?.initialDate || ''}_${route.params?.initialStartTime || ''}_${route.params?.initialEndTime || ''}_${route.params?.initialCategoryId || ''}_${route.params?.initialPriority || ''}`;
+  }, [taskId, route.params]);
+
+  // Load Task and Initial Values
+  const lastLoadedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     let isMounted = true;
-    async function loadTaskForEdit() {
+
+    if (lastLoadedKeyRef.current === routeParamKey) {
+      return;
+    }
+    lastLoadedKeyRef.current = routeParamKey;
+    isSavedRef.current = false;
+    isNavigatingRef.current = false;
+
+    async function loadData() {
       if (taskId) {
         try {
           const directTask = await taskRepository.findById(taskId);
+          if (!directTask && isMounted) {
+            Alert.alert('Task Not Found', 'This task could not be found or has been deleted.', [
+              { text: 'OK', onPress: () => navigateBack() },
+            ]);
+            return;
+          }
           if (directTask && isMounted) {
-            setTitle(directTask.title);
+            const hasTime = Boolean(directTask.startTime);
+            setTitle(directTask.title || '');
             setCategoryId(directTask.categoryId);
             setPriority(directTask.priority || 'medium');
+            setStatus(directTask.status || 'pending');
             setNotes(directTask.notes || directTask.description || '');
-            setTaskDate(directTask.date || format(new Date(), 'yyyy-MM-dd'));
+
+            const rawDate = directTask.date || format(new Date(), 'yyyy-MM-dd');
+            const candidateDate = rawDate.includes('T') ? rawDate.split('T')[0] : rawDate;
+            const resolvedDate = isValid(parseISO(candidateDate)) ? candidateDate : format(new Date(), 'yyyy-MM-dd');
+            setTaskDate(resolvedDate);
+            setIsAllDay(!hasTime);
             setStartTime(directTask.startTime);
             setEndTime(directTask.endTime);
-            setReminderMinutes(directTask.reminderMinutes ?? 0);
-            setRecurrenceType(directTask.recurrenceRule?.type || 'none');
+
+            // Reminders
+            const initialRem =
+              directTask.reminderMinutes !== undefined && directTask.reminderMinutes !== null
+                ? directTask.reminderMinutes
+                : -1;
+            setReminderMinutes(initialRem);
+
+            // Recurrence Rule & metadata preservation
+            const rule: RecurrenceRule | undefined = directTask.recurrenceRule;
+            setExistingRecurrenceRule(rule);
+            const initialLoudAlarm =
+              rule?.isLoudAlarm !== undefined ? Boolean(rule.isLoudAlarm) : directTask.priority === 'high';
+            setIsLoudAlarm(initialLoudAlarm);
+
+            const resolvedRecType = rule?.type || 'none';
+            setRecurrenceType(resolvedRecType);
+            const resolvedInterval = rule?.interval || 1;
+            setRecurrenceInterval(resolvedInterval);
+            const resolvedDays = rule?.daysOfWeek || [];
+            setRecurrenceDaysOfWeek(resolvedDays);
+            const resolvedEndDate = rule?.endDate;
+            setRecurrenceEndDate(resolvedEndDate);
+            const resolvedOvernight = Boolean(rule?.isOvernight);
+            setIsOvernight(resolvedOvernight);
+
+            setEisenhowerQuadrant(rule?.eisenhowerQuadrant);
+            setTaskAccentColor(rule?.accentColor);
+
+            setSeriesId(directTask.seriesId);
+            setCreatedAt(directTask.createdAt);
+            setUpdatedAt(directTask.updatedAt);
+
+            // Estimated duration
+            let resolvedEstMinutes: number | null = rule?.estimatedMinutes ?? null;
+            if (resolvedEstMinutes === null && directTask.startTime && directTask.endTime) {
+              const sM = parseTimeToMinutes(directTask.startTime);
+              const eM = parseTimeToMinutes(directTask.endTime);
+              if (sM !== null && eM !== null) {
+                const diff = resolvedOvernight ? eM + 1440 - sM : eM - sM;
+                if (diff > 0) resolvedEstMinutes = diff;
+              }
+            }
+            setEstimatedMinutes(resolvedEstMinutes);
+
+            setInitialSnapshot({
+              title: directTask.title || '',
+              notes: directTask.notes || directTask.description || '',
+              categoryId: directTask.categoryId,
+              priority: directTask.priority || 'medium',
+              status: directTask.status || 'pending',
+              taskDate: resolvedDate,
+              isAllDay: !hasTime,
+              startTime: directTask.startTime,
+              endTime: directTask.endTime,
+              isOvernight: resolvedOvernight,
+              recurrenceType: resolvedRecType,
+              recurrenceInterval: resolvedInterval,
+              recurrenceDaysOfWeek: resolvedDays,
+              recurrenceEndDate: resolvedEndDate,
+              reminderMinutes: initialRem,
+              isLoudAlarm: initialLoudAlarm,
+              eisenhowerQuadrant: rule?.eisenhowerQuadrant,
+              estimatedMinutes: resolvedEstMinutes,
+              taskAccentColor: rule?.accentColor,
+            });
           }
-        } catch (e) {
+        } catch (e: any) {
           console.warn('Failed to load task directly:', e);
+          if (isMounted) {
+            Alert.alert('Error Loading Task', e?.message || 'Could not load task details.', [
+              { text: 'Go Back', onPress: () => navigateBack() },
+            ]);
+          }
         }
+      } else {
+        // Complete state reset and pre-fill from route parameters for a new task
+        const initTitle = route.params?.initialTitle || '';
+        const initNotes = route.params?.initialNotes || '';
+        const rawInitDate = route.params?.initialDate || format(new Date(), 'yyyy-MM-dd');
+        const candidateDate = rawInitDate.includes('T') ? rawInitDate.split('T')[0] : rawInitDate;
+        const initDate = isValid(parseISO(candidateDate)) ? candidateDate : format(new Date(), 'yyyy-MM-dd');
+        const initStart = route.params?.initialStartTime;
+        const initEnd = route.params?.initialEndTime;
+        const initCat = route.params?.initialCategoryId;
+        const initPrio = route.params?.initialPriority || 'medium';
+        const initHasTime = Boolean(initStart);
+
+        setTitle(initTitle);
+        setNotes(initNotes);
+        setTaskDate(initDate);
+        setCategoryId(initCat);
+        setPriority(initPrio);
+        setStatus('pending');
+        setIsAllDay(!initHasTime);
+        setStartTime(initStart);
+        setEndTime(initEnd);
+        setIsOvernight(false);
+        setSeriesId(undefined);
+        setExistingRecurrenceRule(undefined);
+        setRecurrenceType('none');
+        setRecurrenceInterval(1);
+        setRecurrenceDaysOfWeek([]);
+        setRecurrenceEndDate(undefined);
+        setReminderMinutes(0);
+        setIsLoudAlarm(initPrio === 'high');
+        setEisenhowerQuadrant(undefined);
+        setEstimatedMinutes(null);
+        setTaskAccentColor(undefined);
+        setCreatedAt(undefined);
+        setUpdatedAt(undefined);
+        setErrors({});
+
+        setInitialSnapshot({
+          title: initTitle,
+          notes: initNotes,
+          categoryId: initCat,
+          priority: initPrio,
+          status: 'pending',
+          taskDate: initDate,
+          isAllDay: !initHasTime,
+          startTime: initStart,
+          endTime: initEnd,
+          isOvernight: false,
+          recurrenceType: 'none',
+          recurrenceInterval: 1,
+          recurrenceDaysOfWeek: [],
+          recurrenceEndDate: undefined,
+          reminderMinutes: 0,
+          isLoudAlarm: initPrio === 'high',
+          eisenhowerQuadrant: undefined,
+          estimatedMinutes: null,
+          taskAccentColor: undefined,
+        });
       }
     }
-    loadTaskForEdit();
+
+    loadData();
+
     return () => {
       isMounted = false;
+      lastLoadedKeyRef.current = null;
     };
-  }, [taskId]);
+  }, [
+    routeParamKey,
+    taskId,
+    navigateBack,
+    route.params?.initialTitle,
+    route.params?.initialNotes,
+    route.params?.initialDate,
+    route.params?.initialStartTime,
+    route.params?.initialEndTime,
+    route.params?.initialCategoryId,
+    route.params?.initialPriority,
+  ]);
 
   useEffect(() => {
-    if (!taskId && categories.length > 0 && !categoryId) {
-      setCategoryId(categories[0].id);
-    }
-  }, [taskId, categories, categoryId]);
+    const unsubBlur = navigation.addListener('blur', () => {
+      lastLoadedKeyRef.current = null;
+    });
+    return unsubBlur;
+  }, [navigation]);
 
+  // Check schedule conflict when date and time change (debounced, without title dependency)
+  useEffect(() => {
+    let isMounted = true;
+    async function checkConflicts() {
+      if (isAllDay || !startTime || !taskDate) {
+        setConflicts([]);
+        return;
+      }
+
+      try {
+        const dayTasks = await taskRepository.findByDate(taskDate);
+        let nextDayTasks: Task[] = [];
+        if (isOvernight) {
+          try {
+            const nextDateStr = format(addDays(parseISO(taskDate), 1), 'yyyy-MM-dd');
+            nextDayTasks = await taskRepository.findByDate(nextDateStr);
+          } catch {}
+        }
+
+        const otherTasks = dayTasks.filter(
+          (t) =>
+            t.id !== taskId &&
+            t.startTime &&
+            t.status !== 'cancelled' &&
+            t.status !== 'completed'
+        );
+
+        const newStartM = parseTimeToMinutes(startTime);
+        const newEndM = endTime
+          ? parseTimeToMinutes(endTime)
+          : newStartM !== null
+          ? newStartM + 30
+          : null;
+
+        if (newStartM === null || newEndM === null) {
+          setConflicts([]);
+          return;
+        }
+
+        const effectiveNewEndM = isOvernight && newEndM <= newStartM ? newEndM + 1440 : newEndM;
+        const detected: { itemA: string; itemB: string; time: string }[] = [];
+
+        // Check against other tasks on the same start date
+        for (const t of otherTasks) {
+          const tStartM = parseTimeToMinutes(t.startTime);
+          let tEndM = t.endTime
+            ? parseTimeToMinutes(t.endTime)
+            : tStartM !== null
+            ? tStartM + 30
+            : null;
+
+          if (tStartM !== null && tEndM !== null) {
+            const isTOv = Boolean(t.recurrenceRule?.isOvernight) || tEndM <= tStartM;
+            const effectiveTEndM = isTOv && tEndM <= tStartM ? tEndM + 1440 : tEndM;
+
+            if (Math.max(newStartM, tStartM) < Math.min(effectiveNewEndM, effectiveTEndM)) {
+              detected.push({
+                itemA: 'This Task',
+                itemB: t.title,
+                time: `${formatTimeTo12H(t.startTime)}${t.endTime ? ' – ' + formatTimeTo12H(t.endTime) : ''}${isTOv ? ' (+1d)' : ''}`,
+              });
+            }
+          }
+        }
+
+        // If overnight, check against tasks scheduled on the morning of the next day
+        if (isOvernight && newEndM > 0) {
+          for (const nt of nextDayTasks) {
+            if (nt.id === taskId || !nt.startTime || nt.status === 'cancelled' || nt.status === 'completed') continue;
+            const ntStartM = parseTimeToMinutes(nt.startTime);
+            if (ntStartM !== null && ntStartM < newEndM) {
+              detected.push({
+                itemA: 'This Task',
+                itemB: `🌅 Next Day: ${nt.title}`,
+                time: `${formatTimeTo12H(nt.startTime)}${nt.endTime ? ' – ' + formatTimeTo12H(nt.endTime) : ''}`,
+              });
+            }
+          }
+        }
+
+        if (isMounted) {
+          setConflicts(detected);
+          setConflictDismissed(false);
+        }
+      } catch (err) {
+        console.warn('Conflict detection error in CreateEditTaskScreen:', err);
+      }
+    }
+
+    const timer = setTimeout(() => {
+      checkConflicts();
+    }, 150);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [taskDate, isAllDay, startTime, endTime, isOvernight, taskId]);
+
+  // Real-time calculated duration (supporting overnight cross-midnight shifts)
+  const activeDurationDisplay = useMemo(() => {
+    if (isAllDay || !startTime || !endTime) return null;
+    const sM = parseTimeToMinutes(startTime);
+    const eM = parseTimeToMinutes(endTime);
+    if (sM === null || eM === null) return null;
+
+    let diff = eM - sM;
+    if (diff <= 0) {
+      if (isOvernight) {
+        diff = eM + 1440 - sM;
+      } else {
+        return null;
+      }
+    }
+
+    const hrs = Math.floor(diff / 60);
+    const mins = diff % 60;
+    const overNightSuffix = isOvernight ? ' (+1 day)' : '';
+    if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m${overNightSuffix}`;
+    if (hrs > 0) return `${hrs} hr${hrs > 1 ? 's' : ''}${overNightSuffix}`;
+    return `${mins} mins${overNightSuffix}`;
+  }, [isAllDay, startTime, endTime, isOvernight]);
+
+  // Apply Estimated Duration Preset
+  const applyDurationPreset = (mins: number) => {
+    setEstimatedMinutes(mins);
+    if (isAllDay) {
+      setIsAllDay(false);
+    }
+    const baseStart = startTime || '09:00';
+    if (!startTime) setStartTime('09:00');
+
+    const startM = parseTimeToMinutes(baseStart);
+    if (startM !== null) {
+      const totalEndM = startM + mins;
+      if (totalEndM >= 24 * 60) {
+        setIsOvernight(true);
+        const nextDayM = totalEndM - 24 * 60;
+        const hh = String(Math.floor(nextDayM / 60)).padStart(2, '0');
+        const mm = String(nextDayM % 60).padStart(2, '0');
+        setEndTime(`${hh}:${mm}`);
+      } else {
+        setIsOvernight(false);
+        const hh = String(Math.floor(totalEndM / 60)).padStart(2, '0');
+        const mm = String(totalEndM % 60).padStart(2, '0');
+        setEndTime(`${hh}:${mm}`);
+      }
+      if (errors.time) setErrors((prev) => ({ ...prev, time: '' }));
+    }
+  };
+
+  // Toggle Reminder single-select
+  const handleSelectReminder = (val: number) => {
+    setReminderMinutes(val);
+  };
+
+  // Priority and Eisenhower synchronization; decoupled loud alarm mode
+  const handleSelectPriority = (p: TaskPriority) => {
+    setPriority(p);
+    if (p === 'high') {
+      setIsLoudAlarm(true);
+    } else if (p === 'low') {
+      setIsLoudAlarm(false);
+    }
+    // Clean up contradictory Eisenhower quadrant if manually changed
+    if (eisenhowerQuadrant) {
+      if (p === 'high' && eisenhowerQuadrant !== 'q1') {
+        setEisenhowerQuadrant(undefined);
+      } else if (p === 'low' && eisenhowerQuadrant !== 'q4') {
+        setEisenhowerQuadrant(undefined);
+      } else if (p === 'medium' && (eisenhowerQuadrant === 'q1' || eisenhowerQuadrant === 'q4')) {
+        setEisenhowerQuadrant(undefined);
+      }
+    }
+  };
+
+  const handleToggleLoudAlarm = (val: boolean) => {
+    setIsLoudAlarm(val);
+  };
+
+  // Toggle day of week in weekly recurrence
+  const handleToggleDayOfWeek = (dayNumber: number) => {
+    if (errors.recurrence) setErrors((prev) => ({ ...prev, recurrence: '' }));
+    setRecurrenceDaysOfWeek((prev) => {
+      if (prev.includes(dayNumber)) {
+        return prev.filter((d) => d !== dayNumber);
+      } else {
+        return [...prev, dayNumber].sort((a, b) => a - b);
+      }
+    });
+  };
+
+  // Handle Eisenhower Selection with clean priority alignment
+  const handleSelectQuadrant = (q: EisenhowerQuadrant) => {
+    if (eisenhowerQuadrant === q) {
+      setEisenhowerQuadrant(undefined);
+    } else {
+      setEisenhowerQuadrant(q);
+      if (q === 'q1') {
+        setPriority('high');
+        setIsLoudAlarm(true);
+      } else if (q === 'q2') {
+        setPriority('medium');
+        setIsLoudAlarm(false);
+      } else if (q === 'q3') {
+        setPriority('medium');
+        setIsLoudAlarm(false);
+      } else if (q === 'q4') {
+        setPriority('low');
+        setIsLoudAlarm(false);
+      }
+    }
+  };
+
+  // Dirty check
   const isSavedRef = useRef(false);
-  const isDirty = (title.trim().length > 0 || notes.trim().length > 0);
+  const isDirty = useMemo(() => {
+    return (
+      title.trim() !== (initialSnapshot.title || '').trim() ||
+      notes.trim() !== (initialSnapshot.notes || '').trim() ||
+      taskDate !== initialSnapshot.taskDate ||
+      priority !== initialSnapshot.priority ||
+      status !== initialSnapshot.status ||
+      categoryId !== initialSnapshot.categoryId ||
+      isAllDay !== initialSnapshot.isAllDay ||
+      startTime !== initialSnapshot.startTime ||
+      endTime !== initialSnapshot.endTime ||
+      isOvernight !== initialSnapshot.isOvernight ||
+      recurrenceType !== initialSnapshot.recurrenceType ||
+      recurrenceInterval !== initialSnapshot.recurrenceInterval ||
+      JSON.stringify([...(recurrenceDaysOfWeek || [])].sort((a, b) => a - b)) !==
+        JSON.stringify([...(initialSnapshot.recurrenceDaysOfWeek || [])].sort((a, b) => a - b)) ||
+      recurrenceEndDate !== initialSnapshot.recurrenceEndDate ||
+      reminderMinutes !== initialSnapshot.reminderMinutes ||
+      isLoudAlarm !== initialSnapshot.isLoudAlarm ||
+      eisenhowerQuadrant !== initialSnapshot.eisenhowerQuadrant ||
+      estimatedMinutes !== initialSnapshot.estimatedMinutes ||
+      taskAccentColor !== initialSnapshot.taskAccentColor
+    );
+  }, [
+    title,
+    notes,
+    taskDate,
+    priority,
+    status,
+    categoryId,
+    isAllDay,
+    startTime,
+    endTime,
+    isOvernight,
+    recurrenceType,
+    recurrenceInterval,
+    recurrenceDaysOfWeek,
+    recurrenceEndDate,
+    reminderMinutes,
+    isLoudAlarm,
+    eisenhowerQuadrant,
+    estimatedMinutes,
+    taskAccentColor,
+    initialSnapshot,
+  ]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
@@ -109,167 +704,448 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
         'Discard changes?',
         'You have unsaved changes. Are you sure you want to discard them and leave?',
         [
-          { text: 'Keep editing', style: 'cancel', onPress: () => {} },
+          {
+            text: 'Keep editing',
+            style: 'cancel',
+            onPress: () => {
+              isNavigatingRef.current = false;
+            },
+          },
           {
             text: 'Discard',
             style: 'destructive',
-            onPress: () => navigation.dispatch(e.data.action),
+            onPress: () => {
+              isSavedRef.current = true;
+              lastLoadedKeyRef.current = null;
+              navigation.dispatch(e.data.action);
+            },
           },
-        ]
+        ],
+        {
+          cancelable: true,
+          onDismiss: () => {
+            isNavigatingRef.current = false;
+          },
+        }
       );
     });
     return unsubscribe;
   }, [navigation, isDirty]);
 
-  const addMinutesToTime = (timeStr?: string, minutesToAdd = 30): string | undefined => {
-    if (!timeStr) return undefined;
-    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
-    if (!match) return undefined;
-    let hours = parseInt(match[1], 10);
-    const mins = parseInt(match[2], 10);
-    const period = match[3]?.toLowerCase();
-    if (period === 'pm' && hours < 12) hours += 12;
-    if (period === 'am' && hours === 12) hours = 0;
-    const totalMin = hours * 60 + mins + minutesToAdd;
-    const newHours = Math.floor(totalMin / 60) % 24;
-    const newMins = totalMin % 60;
-    return `${String(newHours).padStart(2, '0')}:${String(newMins).padStart(2, '0')}`;
-  };
+  useEffect(() => {
+    const onBackPress = () => {
+      navigateBack();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [navigateBack]);
 
-  const handleCreateCategory = async () => {
-    if (!newCatName.trim()) {
-      Alert.alert('Validation Error', 'Please enter a category name.');
-      return;
-    }
+  const handleCategoryCreated = async (created: Category) => {
+    setCategoryId(created.id);
     try {
-      const id = `cat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const created = await categoryRepository.create({
-        id,
-        name: newCatName.trim(),
-        color: newCatColor,
-        icon: newCatIcon,
-        createdAt: new Date().toISOString(),
-      });
       await refresh();
-      setCategoryId(created.id);
-      setNewCatModalVisible(false);
-      setNewCatName('');
-    } catch (e: any) {
-      Alert.alert('Error', e.message || 'Could not create category.');
+    } catch (e) {
+      console.warn('Failed to refresh categories:', e);
     }
   };
 
-  const validate = (): boolean => {
+  const validate = (): { isValid: boolean; message?: string } => {
     const errs: { [key: string]: string } = {};
 
     if (!title.trim()) {
       errs.title = 'Title is required';
+    } else if (title.trim().length > 250) {
+      errs.title = 'Title cannot exceed 250 characters';
+    }
+
+    if (!taskDate || !isValid(parseISO(taskDate))) {
+      errs.date = 'Valid due date is required';
+    }
+
+    if (!isAllDay) {
+      if (!startTime && endTime) {
+        errs.time = 'Please select a start time or clear the end time';
+      } else if (startTime && endTime) {
+        const startMin = parseTimeToMinutes(startTime);
+        const endMin = parseTimeToMinutes(endTime);
+        if (startMin !== null && endMin !== null) {
+          if (endMin <= startMin && !isOvernight) {
+            errs.time = 'End time must be after start time, or toggle Overnight (+1d)';
+          }
+        }
+      }
+    }
+
+    if (recurrenceType === 'weekly' && recurrenceDaysOfWeek.length === 0) {
+      errs.recurrence = 'Please select at least one day of the week for weekly repeat';
+    }
+
+    if (recurrenceType !== 'none' && recurrenceEndDate) {
+      if (!isValid(parseISO(recurrenceEndDate))) {
+        errs.recurrence = 'Please enter a valid repeat end date';
+      } else if (taskDate && recurrenceEndDate < taskDate) {
+        errs.recurrence = 'Repeat end date cannot be earlier than task due date';
+      }
     }
 
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    const keys = Object.keys(errs);
+    return {
+      isValid: keys.length === 0,
+      message:
+        keys.length > 0
+          ? (errs.title || errs.date || errs.time || errs.recurrence || 'Please check the required fields.')
+          : undefined,
+    };
   };
 
-  const handleSave = async () => {
-    if (!validate()) {
-      Alert.alert('Validation Error', 'Please enter a title for the task.');
-      return;
-    }
+  const performSaveTask = async (forceOverwrite = false, updateEntireSeries = false) => {
+    if (isSavingRef.current) return;
 
     try {
-      const recurrenceRule =
-        recurrenceType !== 'none'
+      if (isEditing && taskId && !forceOverwrite) {
+        // Optimistic concurrency check against background modifications
+        const currentTaskInDb = await taskRepository.findById(taskId);
+        if (currentTaskInDb && updatedAt && currentTaskInDb.updatedAt !== updatedAt) {
+          Alert.alert(
+            'Task Modified Externally',
+            'This task was updated in the background. Do you still want to overwrite it with your edits?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Overwrite & Save',
+                style: 'destructive',
+                onPress: () => {
+                  setUpdatedAt(currentTaskInDb.updatedAt);
+                  performSaveTask(true, updateEntireSeries);
+                },
+              },
+            ]
+          );
+          return;
+        }
+      }
+
+      isSavingRef.current = true;
+      setIsSaving(true);
+
+      // Build comprehensive recurrence rule with all metadata preserved
+      const hasRecurrence = recurrenceType !== 'none';
+      const hasExtendedMeta = Boolean(
+        eisenhowerQuadrant || taskAccentColor || estimatedMinutes !== null || isOvernight || isLoudAlarm
+      );
+
+      const recurrenceRule: RecurrenceRule | undefined =
+        hasRecurrence || hasExtendedMeta
           ? {
+              ...(existingRecurrenceRule || {}),
               type: recurrenceType,
-              interval: 1,
+              interval: recurrenceType !== 'none' && recurrenceInterval > 1 ? recurrenceInterval : undefined,
+              daysOfWeek: recurrenceType === 'weekly' && recurrenceDaysOfWeek.length > 0 ? recurrenceDaysOfWeek : undefined,
+              endDate: recurrenceType !== 'none' && recurrenceEndDate ? recurrenceEndDate : undefined,
+              isOvernight: isOvernight || undefined,
+              isLoudAlarm: isLoudAlarm || undefined,
+              eisenhowerQuadrant: eisenhowerQuadrant || undefined,
+              accentColor: taskAccentColor || undefined,
+              estimatedMinutes: estimatedMinutes ?? undefined,
             }
           : undefined;
 
-      const normalizedStart = normalizeTimeTo24H(startTime);
-      const normalizedEnd = normalizeTimeTo24H(endTime);
+      const normStart = isAllDay ? undefined : startTime;
+      const normEnd = isAllDay ? undefined : endTime;
+      const cleanNotes = notes.trim();
 
       if (isEditing && taskId) {
-        await updateTask(taskId, {
-          title: title.trim(),
-          date: taskDate,
-          startTime: normalizedStart || null,
-          endTime: normalizedEnd || null,
-          priority,
-          categoryId: categoryId || null,
-          reminderMinutes,
-          recurrenceRule: recurrenceRule || null,
-          notes: notes.trim() || null,
-        });
+        // Check if recurrence schedule itself was altered
+        const isRecurrenceAltered =
+          recurrenceType !== initialSnapshot.recurrenceType ||
+          recurrenceInterval !== initialSnapshot.recurrenceInterval ||
+          JSON.stringify([...(recurrenceDaysOfWeek || [])].sort((a, b) => a - b)) !==
+            JSON.stringify([...(initialSnapshot.recurrenceDaysOfWeek || [])].sort((a, b) => a - b)) ||
+          recurrenceEndDate !== initialSnapshot.recurrenceEndDate;
+
+        // Resolve seriesId when recurrence is toggled
+        const resolvedSeriesId =
+          recurrenceType === 'none'
+            ? null
+            : (!updateEntireSeries && isRecurrenceAltered)
+            ? `series_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+            : seriesId || `series_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+        if (updateEntireSeries && seriesId) {
+          const seriesTasks = await taskRepository.findBySeriesId(seriesId);
+          await Promise.all(
+            seriesTasks.map((st) =>
+              taskService.updateTask(st.id, {
+                title: title.trim(),
+                description: cleanNotes || null,
+                notes: cleanNotes || null,
+                date: st.id === taskId ? taskDate : undefined,
+                startTime: normStart || null,
+                endTime: normEnd || null,
+                priority,
+                categoryId: categoryId || null,
+                status: st.id === taskId ? status : st.status,
+                reminderMinutes,
+                recurrenceRule: recurrenceRule || null,
+                seriesId: resolvedSeriesId,
+              })
+            )
+          );
+          await refresh();
+        } else {
+          await updateTask(taskId, {
+            title: title.trim(),
+            description: cleanNotes || null,
+            notes: cleanNotes || null,
+            date: taskDate,
+            startTime: normStart || null,
+            endTime: normEnd || null,
+            priority,
+            categoryId: categoryId || null,
+            status,
+            reminderMinutes,
+            recurrenceRule: recurrenceRule || null,
+            seriesId: resolvedSeriesId,
+          });
+        }
       } else {
         await createTask({
           title: title.trim(),
+          description: cleanNotes || undefined,
+          notes: cleanNotes || undefined,
           date: taskDate,
-          startTime: normalizedStart,
-          endTime: normalizedEnd,
+          startTime: normStart,
+          endTime: normEnd,
           priority,
           categoryId,
           reminderMinutes,
           recurrenceRule,
-          notes: notes.trim() || undefined,
         });
       }
 
       isSavedRef.current = true;
+      lastLoadedKeyRef.current = null;
       navigateBack();
     } catch (err: any) {
+      isSavedRef.current = false;
+      isNavigatingRef.current = false;
       Alert.alert('Save Failed', err.message || 'An error occurred while saving.');
+    } finally {
+      setIsSaving(false);
+      isSavingRef.current = false;
     }
   };
 
-  const navigateBack = () => {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
+  const handleSave = () => {
+    if (isSavingRef.current || isSaving) return;
+
+    const { isValid: isFormValid, message } = validate();
+    if (!isFormValid) {
+      Alert.alert('Validation Error', message || 'Please check the required fields.');
+      return;
+    }
+
+    if (isEditing && taskId && seriesId) {
+      Alert.alert(
+        'Save Recurring Task',
+        'This task is part of a recurring series. How would you like to save your edits?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'This Task Only',
+            onPress: () => performSaveTask(false, false),
+          },
+          {
+            text: 'All in Series',
+            onPress: () => performSaveTask(false, true),
+          },
+        ],
+        { cancelable: true }
+      );
     } else {
-      navigation.navigate('MainTabs');
+      performSaveTask(false, false);
     }
   };
 
   const handleDelete = () => {
-    if (!taskId) return;
-    Alert.alert('Delete Task', 'Are you sure you want to delete this task?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          isSavedRef.current = true;
-          await deleteTask(taskId);
-          navigateBack();
-        },
-      },
-    ]);
+    if (!taskId || isSavingRef.current || isSaving) return;
+
+    if (seriesId) {
+      Alert.alert(
+        'Delete Recurring Task',
+        'This task is part of a recurring series. How would you like to delete it?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'This Task Only',
+            style: 'destructive',
+            onPress: async () => {
+              if (isSavingRef.current || isSaving) return;
+              try {
+                isSavingRef.current = true;
+                setIsSaving(true);
+                isSavedRef.current = true;
+                await deleteTask(taskId, false);
+                navigateBack();
+              } catch (err: any) {
+                isSavedRef.current = false;
+                setIsSaving(false);
+                isSavingRef.current = false;
+                isNavigatingRef.current = false;
+                Alert.alert('Delete Failed', err?.message || 'Could not delete task.');
+              }
+            },
+          },
+          {
+            text: 'All in Series',
+            style: 'destructive',
+            onPress: async () => {
+              if (isSavingRef.current || isSaving) return;
+              try {
+                isSavingRef.current = true;
+                setIsSaving(true);
+                isSavedRef.current = true;
+                await deleteTask(taskId, true);
+                navigateBack();
+              } catch (err: any) {
+                isSavedRef.current = false;
+                setIsSaving(false);
+                isSavingRef.current = false;
+                isNavigatingRef.current = false;
+                Alert.alert('Delete Failed', err?.message || 'Could not delete series tasks.');
+              }
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+    } else {
+      Alert.alert(
+        'Delete Task',
+        'Are you sure you want to delete this task?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              if (isSavingRef.current || isSaving) return;
+              try {
+                isSavingRef.current = true;
+                setIsSaving(true);
+                isSavedRef.current = true;
+                await deleteTask(taskId, false);
+                navigateBack();
+              } catch (err: any) {
+                isSavedRef.current = false;
+                setIsSaving(false);
+                isSavingRef.current = false;
+                isNavigatingRef.current = false;
+                Alert.alert('Delete Failed', err?.message || 'Could not delete task.');
+              }
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+    }
   };
+
+  // Quick Date Helpers
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const tomorrowStr = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+  const nextMonStr = getNextMondayDate();
+
+  const formattedDisplayDate = useMemo(() => {
+    try {
+      const d = parseISO(taskDate);
+      if (isValid(d)) {
+        if (taskDate === todayStr) return `Today, ${format(d, 'MMM d')}`;
+        if (taskDate === tomorrowStr) return `Tomorrow, ${format(d, 'MMM d')}`;
+        return format(d, 'EEE, MMM d, yyyy');
+      }
+    } catch {}
+    return taskDate;
+  }, [taskDate, todayStr, tomorrowStr]);
+
+  // Priority options config
+  const priorityConfig: { value: TaskPriority; label: string; color: string; icon: string }[] = [
+    { value: 'low', label: 'Low', color: colors.priorityLow, icon: '🟢' },
+    { value: 'medium', label: 'Medium', color: colors.priorityMedium, icon: '🟡' },
+    { value: 'high', label: 'High', color: colors.priorityHigh, icon: '🔴' },
+  ];
+
+  // Status options config (Edit mode)
+  const statusConfig: { value: TaskStatus; label: string; color: string; icon: string }[] = [
+    { value: 'pending', label: 'Pending', color: colors.textSecondary, icon: '⏳' },
+    { value: 'in_progress', label: 'In Progress', color: colors.info, icon: '🚀' },
+    { value: 'completed', label: 'Completed', color: colors.success, icon: '✓' },
+    { value: 'cancelled', label: 'Cancelled', color: colors.danger, icon: '🚫' },
+  ];
+
+  const activeColorTheme = taskAccentColor || colors.primary;
+
+  // Detect if current end time is chronologically earlier than or equal to start time
+  const isTimeEarlierOrEqual = useMemo(() => {
+    if (!startTime || !endTime) return false;
+    const sM = parseTimeToMinutes(startTime);
+    const eM = parseTimeToMinutes(endTime);
+    return sM !== null && eM !== null && eM <= sM;
+  }, [startTime, endTime]);
+
+  // Auto-clear sticky isOvernight state if times are normalized
+  useEffect(() => {
+    if (startTime && endTime) {
+      const sM = parseTimeToMinutes(startTime);
+      const eM = parseTimeToMinutes(endTime);
+      if (sM !== null && eM !== null && sM < eM && isOvernight) {
+        setIsOvernight(false);
+      }
+    }
+  }, [startTime, endTime, isOvernight]);
+
+  // Check if chosen reminder trigger time for today or overdue task has already elapsed
+  const isPastReminderForToday = useMemo(() => {
+    if (reminderMinutes < 0) return false;
+    if (!taskDate) return false;
+    if (taskDate < todayStr) return true;
+    if (taskDate > todayStr) return false;
+
+    const now = new Date();
+    const currentMin = now.getHours() * 60 + now.getMinutes();
+
+    if (isAllDay) {
+      // All-day tasks alert at 9:00 AM (540 mins) minus reminderMinutes
+      const triggerMin = 540 - Math.max(reminderMinutes, 0);
+      return triggerMin < currentMin;
+    }
+
+    if (!startTime) return false;
+    const startMin = parseTimeToMinutes(startTime);
+    if (startMin === null) return false;
+    const triggerMin = startMin - reminderMinutes;
+    return triggerMin < currentMin;
+  }, [isAllDay, startTime, reminderMinutes, taskDate, todayStr]);
 
   return (
     <View style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <StatusBar barStyle={colors.statusBar} />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.keyboardAvoid}
+
+      {/* Header Bar */}
+      <View
+        style={[
+          styles.topBar,
+          {
+            paddingTop: Math.max(insets.top, 16),
+            backgroundColor: colors.surface,
+            borderBottomColor: taskAccentColor ? `${taskAccentColor}50` : colors.borderSubtle,
+          },
+        ]}
       >
-        {/* Top Bar */}
-        <View
-          style={[
-            styles.topBar,
-            {
-              borderBottomColor: colors.borderSubtle,
-              paddingTop: Math.max(insets.top, 16),
-            },
-          ]}
-        >
-        <TouchableOpacity
-          onPress={navigateBack}
-          style={styles.navButton}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Text style={[styles.navButtonText, { color: colors.textSecondary }]}>✕ Cancel</Text>
-        </TouchableOpacity>
+        {/* Back / Cancel button hidden from frontend */}
+        <View style={styles.navButton} />
 
         <Text style={[styles.navTitle, typography.title, { color: colors.text }]}>
           {isEditing ? 'Edit Task' : 'New Task'}
@@ -277,559 +1153,863 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
 
         <TouchableOpacity
           onPress={handleSave}
-          style={[styles.saveBtn, { backgroundColor: colors.primary }]}
+          disabled={isSaving}
+          style={[
+            styles.saveBtn,
+            { backgroundColor: activeColorTheme, opacity: isSaving ? 0.7 : 1 },
+          ]}
           accessibilityRole="button"
-          accessibilityLabel="Save Task"
+          accessibilityLabel={isEditing ? 'Save Changes' : 'Create Task'}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={styles.saveBtnText}>Save</Text>
+          <Text style={styles.saveBtnText}>
+            {isSaving ? 'Saving...' : isEditing ? 'Save' : 'Create'}
+          </Text>
         </TouchableOpacity>
       </View>
 
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 48 : 0}
+        style={styles.keyboardAvoid}
+      >
         <ScrollView
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled={true}
+          keyboardDismissMode="on-drag"
           contentContainerStyle={[
             styles.scrollContent,
             { paddingBottom: Math.max(insets.bottom, 20) + 40 },
           ]}
           keyboardShouldPersistTaps="handled"
         >
-        {/* Main Heading (Task Title) */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            MAIN HEADING / TASK TITLE *
-          </Text>
-          <TextInput
-            placeholder="e.g. Study React Native, Weekly Groceries..."
-            placeholderTextColor={colors.textMuted}
-            value={title}
-            onChangeText={(txt) => {
-              setTitle(txt);
-              if (errors.title) setErrors((prev) => ({ ...prev, title: '' }));
-            }}
-            style={[
-              styles.input,
-              styles.titleInput,
-              typography.title,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: errors.title ? colors.danger : colors.borderSubtle,
-                color: colors.text,
-              },
-            ]}
-          />
-          {errors.title ? (
-            <Text style={[styles.errorText, { color: colors.danger }]}>{errors.title}</Text>
-          ) : null}
-        </View>
+          {/* Conflict Banner if schedule conflict detected */}
+          {conflicts.length > 0 && !conflictDismissed && (
+            <ConflictBanner
+              conflicts={conflicts.map((c) => ({
+                ...c,
+                itemA: title.trim() || 'This Task',
+              }))}
+              onDismiss={() => setConflictDismissed(true)}
+            />
+          )}
 
-        {/* Down Side: Google Keep Style Notes with Bullet Marks */}
-        <GoogleKeepNotesEditor
-          notes={notes}
-          onChangeNotes={(newNotes) => setNotes(newNotes)}
-          label="BULLET NOTES (GOOGLE KEEP STYLE)"
-        />
-
-
-
-        {/* Category Selector */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            CATEGORY
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-            {categories.map((c) => {
-              const isSelected = categoryId === c.id;
-              return (
-                <TouchableOpacity
-                  key={c.id}
-                  onPress={() => setCategoryId(c.id)}
-                  style={[
-                    styles.categoryPill,
-                    {
-                      backgroundColor: isSelected ? `${c.color}35` : colors.surfaceElevated,
-                      borderColor: isSelected ? c.color : colors.borderSubtle,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.categoryPillText, { color: isSelected ? c.color : colors.textSecondary }]}>
-                    {c.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-            <TouchableOpacity
-              onPress={() => setNewCatModalVisible(true)}
+          {/* Task Title Input */}
+          <View style={styles.formGroup}>
+            <View style={styles.titleLabelRow}>
+              <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+                TASK TITLE *
+              </Text>
+              <Text
+                style={[
+                  styles.charCount,
+                  typography.micro,
+                  { color: title.length >= 240 ? colors.danger : colors.textMuted },
+                ]}
+              >
+                {title.length}/250 chars
+              </Text>
+            </View>
+            <View
               style={[
-                styles.categoryPill,
-                styles.categoryPillDashed,
+                styles.titleInputContainer,
                 {
                   backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.primary,
+                  borderColor: errors.title
+                    ? colors.danger
+                    : taskAccentColor
+                    ? `${taskAccentColor}80`
+                    : colors.borderSubtle,
+                },
+              ]}
+            >
+              <TextInput
+                placeholder="e.g. Design review, Team meeting, Workout..."
+                placeholderTextColor={colors.textMuted}
+                value={title}
+                maxLength={250}
+                returnKeyType="done"
+                onSubmitEditing={() => Keyboard.dismiss()}
+                onChangeText={(txt) => {
+                  setTitle(txt);
+                  if (errors.title) setErrors((prev) => ({ ...prev, title: '' }));
+                }}
+                style={[
+                  styles.titleTextInput,
+                  typography.title,
+                  {
+                    color: colors.text,
+                  },
+                ]}
+                autoFocus={!isEditing}
+              />
+              {title.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setTitle('')}
+                  style={styles.clearTitleBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear title"
+                >
+                  <Text style={[styles.clearTitleText, { color: colors.textMuted }]}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {errors.title ? (
+              <Text style={[styles.errorText, { color: colors.danger }]}>{errors.title}</Text>
+            ) : null}
+          </View>
+
+          {/* Schedule Section: Due Date & Quick Presets */}
+          <View style={styles.formGroup}>
+            <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+              DUE DATE (DEADLINE)
+            </Text>
+
+            {/* Quick Date Presets */}
+            <View style={styles.quickDateRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  setTaskDate(todayStr);
+                  if (errors.date) setErrors((prev) => ({ ...prev, date: '' }));
+                  if (errors.recurrence) setErrors((prev) => ({ ...prev, recurrence: '' }));
+                }}
+                style={[
+                  styles.quickDateBtn,
+                  {
+                    backgroundColor:
+                      taskDate === todayStr ? `${activeColorTheme}25` : colors.surfaceElevated,
+                    borderColor: taskDate === todayStr ? activeColorTheme : colors.borderSubtle,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: taskDate === todayStr }}
+                accessibilityLabel={`Due today${taskDate === todayStr ? ', selected' : ''}`}
+              >
+                <Text
+                  style={[
+                    styles.quickDateText,
+                    { color: taskDate === todayStr ? activeColorTheme : colors.textSecondary },
+                  ]}
+                >
+                  ⚡ Today
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setTaskDate(tomorrowStr);
+                  if (errors.date) setErrors((prev) => ({ ...prev, date: '' }));
+                  if (errors.recurrence) setErrors((prev) => ({ ...prev, recurrence: '' }));
+                }}
+                style={[
+                  styles.quickDateBtn,
+                  {
+                    backgroundColor:
+                      taskDate === tomorrowStr ? `${activeColorTheme}25` : colors.surfaceElevated,
+                    borderColor: taskDate === tomorrowStr ? activeColorTheme : colors.borderSubtle,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: taskDate === tomorrowStr }}
+                accessibilityLabel={`Due tomorrow${taskDate === tomorrowStr ? ', selected' : ''}`}
+              >
+                <Text
+                  style={[
+                    styles.quickDateText,
+                    { color: taskDate === tomorrowStr ? activeColorTheme : colors.textSecondary },
+                  ]}
+                >
+                  🌅 Tomorrow
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setDatePickerVisible(true);
+                }}
+                style={[
+                  styles.quickDateBtn,
+                  {
+                    backgroundColor:
+                      taskDate !== todayStr && taskDate !== tomorrowStr
+                        ? `${activeColorTheme}25`
+                        : colors.surfaceElevated,
+                    borderColor:
+                      taskDate !== todayStr && taskDate !== tomorrowStr
+                        ? activeColorTheme
+                        : colors.borderSubtle,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Change due date"
+              >
+                <Text
+                  style={[
+                    styles.quickDateText,
+                    styles.changeDateQuickText,
+                    {
+                      color:
+                        taskDate !== todayStr && taskDate !== tomorrowStr
+                          ? activeColorTheme
+                          : colors.textSecondary,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  📅 Change Due Date
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Date Picker Trigger Card */}
+            <TouchableOpacity
+              onPress={() => {
+                Keyboard.dismiss();
+                setDatePickerVisible(true);
+              }}
+              style={[
+                styles.dateCard,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: errors.date ? colors.danger : colors.borderSubtle,
                 },
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Add New Category"
+              accessibilityLabel={`Select due date. Currently ${formattedDisplayDate}`}
             >
-              <Text style={[styles.categoryPillText, { color: colors.primary }]}>
-                + Add Category
-              </Text>
+              <View style={styles.dateCardLeft}>
+                <Text style={styles.dateCardIcon}>📅</Text>
+                <Text style={[styles.dateCardText, typography.title, { color: colors.text }]}>
+                  {formattedDisplayDate}
+                </Text>
+              </View>
+              <Text style={[styles.dateCardChange, { color: activeColorTheme }]}>Change Due Date ›</Text>
             </TouchableOpacity>
-          </ScrollView>
-        </View>
-
-        {/* Priority Level Selector */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            PRIORITY LEVEL
-          </Text>
-          <View style={styles.chipRow}>
-            {(['low', 'medium', 'high'] as const).map((p) => {
-              const isSelected = priority === p;
-              const pColor =
-                p === 'high' ? colors.priorityHigh : p === 'low' ? colors.priorityLow : colors.priorityMedium;
-              return (
-                <TouchableOpacity
-                  key={p}
-                  onPress={() => setPriority(p)}
-                  style={[
-                    styles.dateChip,
-                    {
-                      backgroundColor: isSelected ? pColor : colors.surfaceElevated,
-                      borderColor: isSelected ? pColor : colors.borderSubtle,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.dateChipText,
-                      isSelected ? styles.chipTextSelected : { color: colors.text },
-                    ]}
-                  >
-                    {p === 'high' ? '🔥 High' : p === 'low' ? '🌱 Low' : '⚡ Medium'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* Due Date Selector */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            DUE DATE (YYYY-MM-DD)
-          </Text>
-          <View style={styles.chipRow}>
-            {[
-              { label: 'Today', date: format(new Date(), 'yyyy-MM-dd') },
-              { label: 'Tomorrow', date: format(addDays(new Date(), 1), 'yyyy-MM-dd') },
-              { label: 'Next Week', date: format(addDays(new Date(), 7), 'yyyy-MM-dd') },
-            ].map((d) => {
-              const isSelected = taskDate === d.date;
-              return (
-                <TouchableOpacity
-                  key={d.label}
-                  onPress={() => setTaskDate(d.date)}
-                  style={[
-                    styles.dateChip,
-                    {
-                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
-                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.dateChipText,
-                      isSelected ? styles.chipTextSelected : { color: colors.text },
-                    ]}
-                  >
-                    📅 {d.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-            <TouchableOpacity
-              onPress={() => {
-                setPickerMode('date');
-                setPickerVisible(true);
-              }}
-              style={[
-                styles.dateChip,
-                { backgroundColor: colors.surfaceElevated, borderColor: colors.primary },
-              ]}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.dateChipText, { color: colors.primaryLight }]}>
-                🗓️ Calendar
-              </Text>
-            </TouchableOpacity>
+            {errors.date ? (
+              <Text style={[styles.errorText, { color: colors.danger }]}>{errors.date}</Text>
+            ) : null}
           </View>
 
-          {/* Interactive Selected Date Banner */}
-          <TouchableOpacity
-            onPress={() => {
-              setPickerMode('date');
-              setPickerVisible(true);
-            }}
-            style={[
-              styles.input,
-              styles.marginTopSm,
-              styles.dateCardRow,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.borderSubtle,
-              },
-            ]}
-          >
-            <Text style={[typography.body, { color: colors.text }, styles.boldText]}>
-              📅 {taskDate}
-            </Text>
-            <Text style={[typography.caption, { color: colors.primary }]}>Tap to pick ▾</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Reminder Time Selector */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            REMINDER TIME (HH:MM or Pick Preset)
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-            {[
-              { label: 'None', time: undefined },
-              { label: '09:00 AM', time: '09:00' },
-              { label: '01:00 PM', time: '13:00' },
-              { label: '06:00 PM', time: '18:00' },
-              { label: '08:00 PM', time: '20:00' },
-            ].map((t) => {
-              const isSelected = startTime === t.time;
-              return (
-                <TouchableOpacity
-                  key={t.label}
-                  onPress={() => setStartTime(t.time)}
-                  style={[
-                    styles.categoryPill,
-                    {
-                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
-                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.categoryPillText,
-                      isSelected ? styles.chipTextSelected : { color: colors.textSecondary },
-                    ]}
-                  >
-                    {t.time ? `⏰ ${t.label}` : '🔕 None'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-            <TouchableOpacity
-              onPress={() => {
-                setPickerMode('time');
-                setPickerVisible(true);
-              }}
-              style={[
-                styles.categoryPill,
-                { backgroundColor: colors.surfaceElevated, borderColor: colors.primary },
-              ]}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.categoryPillText, { color: colors.primaryLight }]}>
-                ⏰ Custom Time
+          {/* Time Picker Section */}
+          <View style={styles.formGroup}>
+            <View style={styles.timeHeaderRow}>
+              <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+                TIME SETTING
               </Text>
-            </TouchableOpacity>
-          </ScrollView>
-
-          {/* Interactive Selected Time Banner */}
-          <TouchableOpacity
-            onPress={() => {
-              setPickerMode('time');
-              setPickerVisible(true);
-            }}
-            style={[
-              styles.input,
-              styles.marginTopSm,
-              styles.dateCardRow,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.borderSubtle,
-              },
-            ]}
-          >
-            <Text style={[typography.body, { color: colors.text }, styles.boldText]}>
-              {startTime ? `⏰ ${startTime}` : '🔕 No specific reminder time'}
-            </Text>
-            <Text style={[typography.caption, { color: colors.primary }]}>Tap to pick ▾</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* End Time / Duration Selector */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            END TIME / DURATION (FOR CONFLICT DETECTION)
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-            {[
-              { label: 'None', mins: 0, time: undefined },
-              { label: '+30m', mins: 30, time: addMinutesToTime(startTime, 30) },
-              { label: '+45m', mins: 45, time: addMinutesToTime(startTime, 45) },
-              { label: '+1h', mins: 60, time: addMinutesToTime(startTime, 60) },
-              { label: '+2h', mins: 120, time: addMinutesToTime(startTime, 120) },
-            ].map((p) => {
-              const isSelected = p.mins === 0 ? !endTime : (endTime !== undefined && p.time === endTime);
-              return (
-                <TouchableOpacity
-                  key={p.label}
-                  onPress={() => {
-                    if (p.mins === 0) {
-                      setEndTime(undefined);
-                    } else {
-                      const calculated = addMinutesToTime(startTime || '09:00', p.mins);
-                      setEndTime(calculated);
+              <View style={styles.allDayToggleRow}>
+                <Text style={[styles.allDayLabel, { color: colors.textSecondary }]}>All-Day</Text>
+                <Switch
+                  value={isAllDay}
+                  onValueChange={(val) => {
+                    setIsAllDay(val);
+                    if (errors.time) setErrors((prev) => ({ ...prev, time: '' }));
+                    if (val) {
+                      setIsOvernight(false);
+                      if (reminderMinutes === 0) {
+                        setReminderMinutes(-1);
+                      }
+                    } else if (!startTime) {
+                      setStartTime('09:00');
+                      setEndTime('10:00');
+                      setIsOvernight(false);
+                      if (reminderMinutes === -1) {
+                        setReminderMinutes(0);
+                      }
                     }
                   }}
-                  style={[
-                    styles.categoryPill,
-                    {
-                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
-                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.categoryPillText,
-                      isSelected ? styles.chipTextSelected : { color: colors.textSecondary },
-                    ]}
-                  >
-                    {p.mins === 0 ? '🏁 None' : `⏳ ${p.label}`}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <TextInput
-            style={[
-              styles.input,
-              styles.marginTopSm,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.borderSubtle,
-                color: colors.text,
-              },
-            ]}
-            placeholder="Custom end time e.g. 11:30 or 08:00 PM"
-            placeholderTextColor={colors.textMuted}
-            value={endTime || ''}
-            onChangeText={(val) => setEndTime(val.trim() || undefined)}
-          />
-        </View>
-
-        {/* Reminder Notification Offset Selector */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            REMINDER NOTIFICATION OFFSET
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-            {[
-              { label: 'At start (0m)', mins: 0 },
-              { label: '5m before', mins: 5 },
-              { label: '10m before', mins: 10 },
-              { label: '15m before', mins: 15 },
-              { label: '30m before', mins: 30 },
-              { label: '1h before', mins: 60 },
-            ].map((rm) => {
-              const isSelected = reminderMinutes === rm.mins;
-              return (
-                <TouchableOpacity
-                  key={rm.label}
-                  onPress={() => setReminderMinutes(rm.mins)}
-                  style={[
-                    styles.categoryPill,
-                    {
-                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
-                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.categoryPillText,
-                      isSelected ? styles.chipTextSelected : { color: colors.textSecondary },
-                    ]}
-                  >
-                    🔔 {rm.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-
-        {/* Recurrence Schedule Selector */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
-            RECURRENCE SCHEDULE (AUTO-SPAWNS ON COMPLETION)
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-            {[
-              { label: 'Does not repeat', type: 'none' as const },
-              { label: 'Daily', type: 'daily' as const },
-              { label: 'Mon-Fri (Weekdays)', type: 'weekdays' as const },
-              { label: 'Weekly', type: 'weekly' as const },
-              { label: 'Monthly', type: 'monthly' as const },
-            ].map((rc) => {
-              const isSelected = recurrenceType === rc.type;
-              return (
-                <TouchableOpacity
-                  key={rc.label}
-                  onPress={() => setRecurrenceType(rc.type)}
-                  style={[
-                    styles.categoryPill,
-                    {
-                      backgroundColor: isSelected ? colors.primary : colors.surfaceElevated,
-                      borderColor: isSelected ? colors.primary : colors.borderSubtle,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.categoryPillText,
-                      isSelected ? styles.chipTextSelected : { color: colors.textSecondary },
-                    ]}
-                  >
-                    🔄 {rc.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-
-        {/* Delete Button (If editing) */}
-        {isEditing && (
-          <TouchableOpacity
-            onPress={handleDelete}
-            style={[styles.deleteButton, { borderColor: colors.danger }]}
-            accessibilityRole="button"
-            accessibilityLabel="Delete Task"
-          >
-            <Text style={[styles.deleteText, { color: colors.danger }]}>🗑 Delete Task</Text>
-          </TouchableOpacity>
-        )}
-      </ScrollView>
-      </KeyboardAvoidingView>
-
-      {/* Create Custom Category Modal */}
-      <Modal
-        visible={newCatModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNewCatModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <Text style={[styles.modalTitle, typography.title, { color: colors.text }]}>
-              Create New Category
-            </Text>
-
-            <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
-              CATEGORY NAME *
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.borderSubtle,
-                  color: colors.text,
-                },
-              ]}
-              placeholder="e.g. Study, Finance, Side Project"
-              placeholderTextColor={colors.textMuted}
-              value={newCatName}
-              onChangeText={setNewCatName}
-            />
-
-            <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
-              CHOOSE ICON
-            </Text>
-            <View style={styles.iconPickerRow}>
-              {['💼', '👤', '🏃', '💰', '📚', '🎨', '⭐', '🍳', '🛒', '🧘'].map((ic) => (
-                <TouchableOpacity
-                  key={ic}
-                  onPress={() => setNewCatIcon(ic)}
-                  style={[
-                    styles.iconCircle,
-                    { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
-                    newCatIcon === ic && { borderColor: colors.primary, backgroundColor: `${colors.primary}25` },
-                  ]}
-                >
-                  <Text style={styles.iconEmoji}>{ic}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={[styles.inputLabel, typography.caption, { color: colors.textSecondary }]}>
-              CHOOSE THEME COLOR
-            </Text>
-            <View style={styles.colorPalette}>
-              {['#FF6B00', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#F59E0B'].map((col) => (
-                <TouchableOpacity
-                  key={col}
-                  onPress={() => setNewCatColor(col)}
-                  style={[
-                    styles.colorCircle,
-                    { backgroundColor: col },
-                    newCatColor === col && styles.colorCircleActive,
-                  ]}
+                  trackColor={{ false: colors.borderSubtle, true: activeColorTheme }}
+                  thumbColor="#FFFFFF"
+                  accessibilityRole="switch"
+                  accessibilityLabel="All-day task toggle"
+                  accessibilityState={{ checked: isAllDay }}
                 />
-              ))}
+              </View>
             </View>
 
-            <View style={styles.modalBtnRow}>
+            {!isAllDay && (
+              <View style={styles.timeSlotsRow}>
+                {/* Start Time Button */}
+                <TouchableOpacity
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setTimePickerMode('start');
+                  }}
+                  style={[
+                    styles.timeSlotCard,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: errors.time ? colors.danger : colors.borderSubtle,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Pick start time"
+                >
+                  <Text style={[styles.timeSlotLabel, { color: colors.textMuted }]}>STARTS</Text>
+                  <Text style={[styles.timeSlotValue, { color: colors.text }]}>
+                    ⏰ {startTime ? formatTimeTo12H(startTime) : 'Select'}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* End Time Slot */}
+                <View
+                  style={[
+                    styles.timeSlotCard,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: errors.time ? colors.danger : colors.borderSubtle,
+                    },
+                  ]}
+                >
+                  <View style={styles.endSlotHeader}>
+                    <Text style={[styles.timeSlotLabel, { color: colors.textMuted }]}>ENDS (OPTIONAL)</Text>
+                    {endTime ? (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setEndTime(undefined);
+                          setEstimatedMinutes(null);
+                          setIsOvernight(false);
+                        }}
+                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear end time"
+                      >
+                        <Text style={[styles.clearEndText, { color: colors.textMuted }]}>✕ Clear</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setTimePickerMode('end');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={endTime ? `Pick end time, currently ${formatTimeTo12H(endTime)}` : 'Pick end time'}
+                    style={styles.timeSlotTouchArea}
+                  >
+                    <Text style={[styles.timeSlotValue, { color: endTime ? colors.text : colors.textMuted }]}>
+                      🏁 {endTime ? `${formatTimeTo12H(endTime)}${isOvernight ? ' (+1d)' : ''}` : 'No end time'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Overnight Cross-Midnight Toggle Bar */}
+            {!isAllDay && isTimeEarlierOrEqual && (
               <TouchableOpacity
-                onPress={() => setNewCatModalVisible(false)}
-                style={[styles.modalCancelBtn, { borderColor: colors.borderSubtle }]}
+                onPress={() => {
+                  const nextVal = !isOvernight;
+                  setIsOvernight(nextVal);
+                  if (nextVal && errors.time) setErrors((prev) => ({ ...prev, time: '' }));
+                }}
+                style={[
+                  styles.overnightToggleCard,
+                  {
+                    backgroundColor: isOvernight ? `${activeColorTheme}20` : colors.surfaceElevated,
+                    borderColor: isOvernight ? activeColorTheme : colors.danger,
+                  },
+                ]}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: isOvernight }}
+                accessibilityLabel={`Overnight task toggle. Finishes the next day. Currently ${isOvernight ? 'enabled' : 'disabled'}`}
               >
-                <Text style={[styles.modalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+                <Text style={[styles.overnightIcon]}>{isOvernight ? '🌙' : '⚠️'}</Text>
+                <Text style={[styles.overnightLabel, { color: isOvernight ? activeColorTheme : colors.text }]}>
+                  {isOvernight
+                    ? 'Overnight Task (Finishes the next day)'
+                    : 'End time is earlier than start time. Tap to mark as Overnight (+1 day)'}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleCreateCategory}
-                style={[styles.modalSaveBtn, { backgroundColor: colors.primary }]}
-              >
-                <Text style={styles.modalSaveText}>Save Category</Text>
-              </TouchableOpacity>
+            )}
+
+            {/* Active Duration Display Badge */}
+            {activeDurationDisplay && !isAllDay && (
+              <View style={[styles.durationBadge, { backgroundColor: `${activeColorTheme}20`, borderColor: activeColorTheme }]}>
+                <Text style={[styles.durationBadgeText, { color: activeColorTheme }]}>
+                  ⏱️ Duration: {activeDurationDisplay}
+                  {estimatedMinutes === 25 ? ' (🍅 Pomodoro block)' : ''}
+                </Text>
+              </View>
+            )}
+
+            {errors.time ? (
+              <Text style={[styles.errorText, { color: colors.danger, marginTop: 6 }]}>
+                {errors.time}
+              </Text>
+            ) : null}
+          </View>
+
+          {/* Section: ⏱️ Time Tracking & Estimated Effort */}
+          <View style={styles.formGroup}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+                ESTIMATED DURATION / POMODORO PRESETS
+              </Text>
+              {estimatedMinutes ? (
+                <TouchableOpacity
+                  onPress={() => setEstimatedMinutes(null)}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reset estimated duration"
+                >
+                  <Text style={[styles.resetText, { color: colors.textMuted }]}>Reset</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+              {DURATION_PRESETS.map((dp) => {
+                const isSelected = estimatedMinutes === dp.mins;
+                return (
+                  <TouchableOpacity
+                    key={dp.mins}
+                    onPress={() => applyDurationPreset(dp.mins)}
+                    style={[
+                      styles.chipPill,
+                      {
+                        backgroundColor: isSelected ? `${activeColorTheme}30` : colors.surfaceElevated,
+                        borderColor: isSelected ? activeColorTheme : colors.borderSubtle,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`${dp.label} duration${isSelected ? ', selected' : ''}`}
+                  >
+                    <Text
+                      style={[
+                        styles.chipPillText,
+                        { color: isSelected ? activeColorTheme : colors.textSecondary },
+                      ]}
+                    >
+                      {dp.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          {/* Priority Selector */}
+          <View style={styles.formGroup}>
+            <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+              PRIORITY
+            </Text>
+            <View style={styles.priorityRow}>
+              {priorityConfig.map((p) => {
+                const isSelected = priority === p.value;
+                return (
+                  <TouchableOpacity
+                    key={p.value}
+                    onPress={() => handleSelectPriority(p.value)}
+                    style={[
+                      styles.priorityChip,
+                      {
+                        backgroundColor: isSelected ? `${p.color}25` : colors.surfaceElevated,
+                        borderColor: isSelected ? p.color : colors.borderSubtle,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`Priority ${p.label}`}
+                  >
+                    <Text style={styles.priorityEmoji}>{p.icon}</Text>
+                    <Text
+                      style={[
+                        styles.priorityChipText,
+                        { color: isSelected ? p.color : colors.textSecondary },
+                      ]}
+                    >
+                      {p.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
 
-      <DateTimePickerModal
-        visible={pickerVisible}
-        onClose={() => setPickerVisible(false)}
-        mode={pickerMode}
-        selectedDate={taskDate}
-        selectedTime={startTime}
-        onConfirm={(date, time) => {
-          if (pickerMode === 'date' || pickerMode === 'both') {
-            setTaskDate(date);
-          }
-          if (pickerMode === 'time' || pickerMode === 'both') {
-            setStartTime(time);
-          }
-        }}
-      />
+          {/* Status Selector (If Editing) */}
+          {isEditing && (
+            <View style={styles.formGroup}>
+              <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+                TASK STATUS
+              </Text>
+              <View style={styles.statusRow}>
+                {statusConfig.map((s) => {
+                  const isSelected = status === s.value;
+                  return (
+                    <TouchableOpacity
+                      key={s.value}
+                      onPress={() => setStatus(s.value)}
+                      style={[
+                        styles.statusChip,
+                        {
+                          backgroundColor: isSelected ? `${s.color}25` : colors.surfaceElevated,
+                          borderColor: isSelected ? s.color : colors.borderSubtle,
+                        },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel={`Status ${s.label}${isSelected ? ', selected' : ''}`}
+                    >
+                      <Text style={[styles.statusChipText, { color: isSelected ? s.color : colors.textSecondary }]}>
+                        {s.icon} {s.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Section: 🔔 Reminders & Loud Alarm Mode */}
+          <View style={styles.formGroup}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+                REMINDER
+              </Text>
+              <View style={styles.allDayToggleRow}>
+                <Text style={[styles.allDayLabel, { color: colors.textSecondary }]}>🚨 Loud Alarm</Text>
+                <Switch
+                  value={isLoudAlarm}
+                  onValueChange={handleToggleLoudAlarm}
+                  trackColor={{ false: colors.borderSubtle, true: colors.danger }}
+                  thumbColor="#FFFFFF"
+                  accessibilityRole="switch"
+                  accessibilityLabel="Loud alarm mode toggle"
+                  accessibilityState={{ checked: isLoudAlarm }}
+                />
+              </View>
+            </View>
+
+            {isAllDay && (
+              <Text style={[styles.reminderHintText, { color: colors.textMuted }]}>
+                ℹ️ All-day reminders alert at 9:00 AM on due date
+              </Text>
+            )}
+
+            {isPastReminderForToday && (
+              <Text style={[styles.reminderHintText, { color: colors.warning }]}>
+                ⚠️ Scheduled reminder time has already passed {taskDate < todayStr ? 'for this overdue task' : 'for today'}.
+              </Text>
+            )}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+              {/* Dynamic Chip for Custom Reminder Value */}
+              {reminderMinutes > 0 && !REMINDER_OPTIONS.some((rem) => rem.value === reminderMinutes) && (
+                <TouchableOpacity
+                  key="custom_rem"
+                  onPress={() => handleSelectReminder(reminderMinutes)}
+                  style={[
+                    styles.chipPill,
+                    {
+                      backgroundColor: `${activeColorTheme}25`,
+                      borderColor: activeColorTheme,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: true }}
+                  accessibilityLabel={`Custom ${reminderMinutes} minutes reminder, selected`}
+                >
+                  <Text style={[styles.chipPillText, { color: activeColorTheme }]}>
+                    ✓ ⏰ {reminderMinutes}m before (Custom)
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {REMINDER_OPTIONS.map((rem) => {
+                const isSelected = reminderMinutes === rem.value;
+                return (
+                  <TouchableOpacity
+                    key={rem.value}
+                    onPress={() => handleSelectReminder(rem.value)}
+                    style={[
+                      styles.chipPill,
+                      {
+                        backgroundColor: isSelected ? `${activeColorTheme}25` : colors.surfaceElevated,
+                        borderColor: isSelected ? activeColorTheme : colors.borderSubtle,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`${rem.label} reminder${isSelected ? ', selected' : ''}`}
+                  >
+                    <Text style={[styles.chipPillText, { color: isSelected ? activeColorTheme : colors.textSecondary }]}>
+                      {isSelected ? '✓ ' : ''}{rem.value === -1 ? '🔕 None' : `⏰ ${rem.label}`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          {/* Category Selector */}
+          <View style={styles.formGroup}>
+            <Text style={[styles.label, typography.caption, { color: colors.textSecondary }]}>
+              CATEGORY
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+              {/* Optional None Category Option */}
+              <TouchableOpacity
+                onPress={() => setCategoryId(undefined)}
+                style={[
+                  styles.categoryPill,
+                  {
+                    backgroundColor: !categoryId ? `${activeColorTheme}25` : colors.surfaceElevated,
+                    borderColor: !categoryId ? activeColorTheme : colors.borderSubtle,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !categoryId }}
+                accessibilityLabel={`No Category${!categoryId ? ', selected' : ''}`}
+              >
+                <Text style={[styles.categoryPillText, { color: !categoryId ? activeColorTheme : colors.textSecondary }]}>
+                  ∅ No Category
+                </Text>
+              </TouchableOpacity>
+
+              {categories.map((c) => {
+                const isSelected = categoryId === c.id;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    onPress={() => setCategoryId(categoryId === c.id ? undefined : c.id)}
+                    style={[
+                      styles.categoryPill,
+                      {
+                        backgroundColor: isSelected ? `${c.color}35` : colors.surfaceElevated,
+                        borderColor: isSelected ? c.color : colors.borderSubtle,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`Category ${c.name}${isSelected ? ', selected' : ''}`}
+                  >
+                    <Text
+                      style={[styles.categoryPillText, { color: isSelected ? c.color : colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {c.icon ? `${c.icon} ` : ''}{c.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setNewCatModalVisible(true);
+                }}
+                style={[
+                  styles.categoryPill,
+                  styles.categoryPillDashed,
+                  {
+                    backgroundColor: colors.surfaceElevated,
+                    borderColor: activeColorTheme,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Add New Category"
+              >
+                <Text style={[styles.categoryPillText, { color: activeColorTheme }]}>
+                  + Add Category
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+
+
+
+          {/* Google Keep Style Notes with Bullet Marks */}
+          <GoogleKeepNotesEditor
+            notes={notes}
+            onChangeNotes={(newNotes) => setNotes(newNotes)}
+            label="BULLET NOTES & CHECKLIST (GOOGLE KEEP STYLE)"
+          />
+
+          {/* Metadata Display in Edit Mode */}
+          {isEditing && (createdAt || updatedAt) && (() => {
+            const parsedCreated = createdAt ? parseISO(createdAt) : null;
+            const parsedUpdated = updatedAt ? parseISO(updatedAt) : null;
+            const validCreated =
+              parsedCreated && isValid(parsedCreated) ? format(parsedCreated, 'MMM d, yyyy h:mm a') : null;
+            const validUpdated =
+              parsedUpdated && isValid(parsedUpdated) ? format(parsedUpdated, 'MMM d, yyyy h:mm a') : null;
+
+            if (!validCreated && !validUpdated) return null;
+
+            return (
+              <View style={styles.metadataCard}>
+                {validCreated ? (
+                  <Text style={[styles.metadataText, { color: colors.textMuted }]}>
+                    Created: {validCreated}
+                  </Text>
+                ) : null}
+                {validUpdated ? (
+                  <Text style={[styles.metadataText, { color: colors.textMuted, marginTop: 2 }]}>
+                    Last updated: {validUpdated}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })()}
+
+          {/* Delete Button (If editing) */}
+          {isEditing && (
+            <TouchableOpacity
+              onPress={handleDelete}
+              disabled={isSaving}
+              style={[
+                styles.deleteButton,
+                {
+                  borderColor: colors.danger,
+                  backgroundColor: colors.surfaceElevated,
+                  opacity: isSaving ? 0.5 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Delete Task"
+            >
+              <Text style={[styles.deleteText, { color: colors.danger }]}>🗑 Delete Task</Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Due Date Picker Modal (Lazy Mounted) */}
+      {datePickerVisible && (
+        <DateTimePickerModal
+          visible={datePickerVisible}
+          onClose={() => setDatePickerVisible(false)}
+          mode="date"
+          selectedDate={taskDate}
+          onConfirm={(pickedDate) => {
+            setTaskDate(pickedDate);
+            setDatePickerVisible(false);
+            if (errors.date) setErrors((prev) => ({ ...prev, date: '' }));
+            if (errors.recurrence) setErrors((prev) => ({ ...prev, recurrence: '' }));
+          }}
+          title="Select Due Date"
+        />
+      )}
+
+      {/* Recurrence End Date Picker Modal (Lazy Mounted) */}
+      {endDatePickerVisible && (
+        <DateTimePickerModal
+          visible={endDatePickerVisible}
+          onClose={() => setEndDatePickerVisible(false)}
+          mode="date"
+          selectedDate={recurrenceEndDate || taskDate}
+          onConfirm={(pickedDate) => {
+            if (taskDate && pickedDate < taskDate) {
+              Alert.alert(
+                'Invalid Repeat End Date',
+                'Repeat end date cannot be earlier than the task due date.'
+              );
+              return;
+            }
+            setRecurrenceEndDate(pickedDate);
+            setEndDatePickerVisible(false);
+            if (errors.recurrence) setErrors((prev) => ({ ...prev, recurrence: '' }));
+          }}
+          title="Repeat Until (End Date)"
+        />
+      )}
+
+      {/* Time Picker Modal (Lazy Mounted) */}
+      {timePickerMode !== null && (
+        <DateTimePickerModal
+          visible={timePickerMode !== null}
+          onClose={() => setTimePickerMode(null)}
+          mode="time"
+          selectedDate={taskDate}
+          selectedTime={timePickerMode === 'end' ? (endTime || startTime) : startTime}
+          onConfirm={(_d, pickedTime) => {
+            if (pickedTime) {
+              if (timePickerMode === 'start') {
+                const oldStartM = startTime ? parseTimeToMinutes(startTime) : null;
+                const newStartM = parseTimeToMinutes(pickedTime);
+                setStartTime(pickedTime);
+                if (errors.time) setErrors((prev) => ({ ...prev, time: '' }));
+
+                // Auto-advance end time to maintain duration or adjust overnight
+                if (endTime && oldStartM !== null && newStartM !== null) {
+                  const endM = parseTimeToMinutes(endTime);
+                  if (endM !== null) {
+                    const prevDuration = isOvernight ? endM + 1440 - oldStartM : endM - oldStartM;
+                    if (newStartM >= endM && !isOvernight) {
+                      const targetEndM = newStartM + (prevDuration > 0 ? prevDuration : 60);
+                      if (targetEndM >= 1440) {
+                        const nextDayM = targetEndM - 1440;
+                        const hh = String(Math.floor(nextDayM / 60)).padStart(2, '0');
+                        const mm = String(nextDayM % 60).padStart(2, '0');
+                        setEndTime(`${hh}:${mm}`);
+                        setIsOvernight(true);
+                      } else {
+                        const hh = String(Math.floor(targetEndM / 60)).padStart(2, '0');
+                        const mm = String(targetEndM % 60).padStart(2, '0');
+                        setEndTime(`${hh}:${mm}`);
+                        setIsOvernight(false);
+                      }
+                    } else if (newStartM < endM && isOvernight) {
+                      setIsOvernight(false);
+                    }
+                  }
+                }
+              } else if (timePickerMode === 'end') {
+                setEndTime(pickedTime);
+                if (errors.time) setErrors((prev) => ({ ...prev, time: '' }));
+                if (startTime) {
+                  const sM = parseTimeToMinutes(startTime);
+                  const eM = parseTimeToMinutes(pickedTime);
+                  if (sM !== null && eM !== null) {
+                    if (eM <= sM) {
+                      setIsOvernight(true);
+                    } else {
+                      setIsOvernight(false);
+                    }
+                  }
+                } else {
+                  // If start time was unset, auto-populate start time 1 hour earlier
+                  const endM = parseTimeToMinutes(pickedTime);
+                  if (endM !== null) {
+                    const defStartM = endM >= 60 ? endM - 60 : 540;
+                    const hh = String(Math.floor(defStartM / 60)).padStart(2, '0');
+                    const mm = String(defStartM % 60).padStart(2, '0');
+                    setStartTime(`${hh}:${mm}`);
+                  }
+                }
+              }
+            } else {
+              // User selected "None" / cleared time in picker modal
+              if (timePickerMode === 'start') {
+                setStartTime(undefined);
+                setEndTime(undefined);
+                setIsOvernight(false);
+                setEstimatedMinutes(null);
+                if (errors.time) setErrors((prev) => ({ ...prev, time: '' }));
+              } else if (timePickerMode === 'end') {
+                setEndTime(undefined);
+                setIsOvernight(false);
+                setEstimatedMinutes(null);
+                if (errors.time) setErrors((prev) => ({ ...prev, time: '' }));
+              }
+            }
+            setTimePickerMode(null);
+          }}
+          title={timePickerMode === 'start' ? 'Select Start Time' : 'Select End Time'}
+        />
+      )}
+
+      {/* Create Custom Category Modal (Lazy Mounted) */}
+      {newCatModalVisible && (
+        <CreateCategoryModal
+          visible={newCatModalVisible}
+          onClose={() => setNewCatModalVisible(false)}
+          onCategoryCreated={handleCategoryCreated}
+          accentColor={activeColorTheme}
+        />
+      )}
     </View>
   );
 };
@@ -871,55 +2051,253 @@ const styles = StyleSheet.create({
   formGroup: {
     marginBottom: spacing.lg,
   },
-  rowGroup: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
   label: {
     fontWeight: '700',
     marginBottom: 6,
     letterSpacing: 0.5,
   },
-  input: {
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  resetText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  reminderHintText: {
+    fontSize: 11,
+    marginBottom: 6,
+    fontWeight: '500',
+  },
+  titleLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  charCount: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  titleInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderRadius: radius.md,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: 10,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 4,
   },
-  textArea: {
-    height: 70,
-    textAlignVertical: 'top',
+  titleTextInput: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '700',
+    paddingVertical: 6,
+  },
+  clearTitleBtn: {
+    padding: spacing.xs,
+    marginLeft: spacing.xs,
+  },
+  clearTitleText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   errorText: {
     fontSize: 11,
     marginTop: 4,
     fontWeight: '600',
   },
-  selectorRow: {
+  quickDateRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
-  selectorButton: {
+  quickDateBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  quickDateText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  changeDateQuickText: {
+    fontSize: 11,
+  },
+  dateCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  dateCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dateCardIcon: {
+    fontSize: 18,
+  },
+  dateCardText: {
+    fontWeight: '600',
+  },
+  dateCardChange: {
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  timeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  allDayToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  allDayLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  timeSlotsRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.xs,
+  },
+  timeSlotCard: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  endSlotHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  timeSlotLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  clearEndText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  timeSlotValue: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  timeSlotTouchArea: {
+    marginTop: 2,
+  },
+  overnightToggleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
     borderRadius: radius.sm,
     borderWidth: 1,
+    gap: spacing.xs,
   },
-  pDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+  overnightIcon: {
+    fontSize: 14,
   },
-  selectorText: {
-    fontWeight: '700',
+  overnightLabel: {
     fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
   },
-  categoryScroll: {
+  durationBadge: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
+  durationBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  chipsScroll: {
     gap: spacing.sm,
+  },
+  chipPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
+  chipPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  colorPaletteRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: 4,
+  },
+  accentCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  accentCircleActive: {
+    borderWidth: 3,
+    transform: [{ scale: 1.15 }],
+  },
+  defaultAccentText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  priorityRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  priorityChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: 6,
+  },
+  priorityEmoji: {
+    fontSize: 13,
+  },
+  priorityChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  statusChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
+  statusChipText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   categoryPill: {
     paddingHorizontal: spacing.md,
@@ -934,6 +2312,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12,
   },
+  metadataCard: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+  },
+  metadataText: {
+    fontSize: 11,
+  },
   deleteButton: {
     borderWidth: 1,
     borderRadius: radius.md,
@@ -945,126 +2332,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
-  chipRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  dateChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    borderRadius: radius.md,
-    borderWidth: 1,
-  },
-  dateChipText: {
-    fontWeight: '700',
-    fontSize: 13,
-  },
   keyboardAvoid: {
     flex: 1,
-  },
-  titleInput: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  chipTextSelected: {
-    color: '#FFFFFF',
-  },
-  marginTopSm: {
-    marginTop: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.lg,
-  },
-  modalTitle: {
-    fontWeight: '700',
-    marginBottom: spacing.md,
-  },
-  inputLabel: {
-    fontWeight: '700',
-    marginTop: spacing.md,
-    marginBottom: 6,
-  },
-  modalTextInput: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    fontSize: 14,
-  },
-  iconPickerRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginVertical: 4,
-  },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  iconEmoji: {
-    fontSize: 18,
-  },
-  colorPalette: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginVertical: spacing.xs,
-  },
-  colorCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-  },
-  colorCircleActive: {
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-    transform: [{ scale: 1.15 }],
-  },
-  modalBtnRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
-  modalCancelBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderWidth: 1,
-    borderRadius: radius.md,
-  },
-  modalCancelText: {
-    fontWeight: '600',
-  },
-  modalSaveBtn: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  modalSaveText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  dateCardRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  boldText: {
-    fontWeight: '600',
   },
 });

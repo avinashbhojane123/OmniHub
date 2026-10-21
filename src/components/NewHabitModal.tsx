@@ -16,6 +16,7 @@ import { CalendarGraphic } from './CalendarGraphic';
 import { habitService } from '../services/habits/HabitService';
 import { alarmService } from '../services/alarm/AlarmService';
 import { HabitWithStreak } from '../types';
+import { parseHabitNameItems } from '../utils/bulletNotes';
 
 interface NewHabitModalProps {
   visible: boolean;
@@ -78,7 +79,7 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
   habitToEdit,
 }) => {
   const insets = useSafeAreaInsets();
-  const [habitName, setHabitName] = useState('');
+  const [habitItems, setHabitItems] = useState<string[]>(['']);
   const [alarmEnabled, setAlarmEnabled] = useState(true);
   const [selectedGoalDate, setSelectedGoalDate] = useState('Daily');
   const [alarmHour, setAlarmHour] = useState('08');
@@ -93,7 +94,8 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
 
   React.useEffect(() => {
     if (habitToEdit) {
-      setHabitName(habitToEdit.name);
+      const parsedItems = parseHabitNameItems(habitToEdit.name);
+      setHabitItems(parsedItems.length > 0 ? parsedItems : ['']);
       const parsed = parseTimeString(
         habitToEdit.reminderTime || habitToEdit.description,
         habitToEdit.name
@@ -103,28 +105,64 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
       setAlarmPeriod(parsed.period);
       setAlarmEnabled(Boolean(habitToEdit.reminderTime || habitToEdit.description || true));
 
-      setSelectedDays(habitToEdit.recurrenceRule?.daysOfWeek || [1, 2, 3, 4, 5, 6, 0]);
+      const days = habitToEdit.recurrenceRule?.daysOfWeek || [1, 2, 3, 4, 5, 6, 0];
+      setSelectedDays(days);
+      if (days.length === 7) setSelectedGoalDate('Daily');
+      else if (days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d))) setSelectedGoalDate('Weekdays');
+      else if (days.length === 2 && [0, 6].every((d) => days.includes(d))) setSelectedGoalDate('Weekends');
+      else setSelectedGoalDate('Custom');
+
       setSelectedIcon(habitToEdit.icon || '🎯');
       setSelectedColor(habitToEdit.color || '#FF6B00');
     } else {
-      setHabitName('');
+      setHabitItems(['']);
       setAlarmHour('08');
       setAlarmMinute('30');
       setAlarmPeriod('AM');
       setAlarmEnabled(true);
       setSelectedDays([1, 2, 3, 4, 5, 6, 0]);
+      setSelectedGoalDate('Daily');
       setSelectedIcon('🎯');
       setSelectedColor('#FF6B00');
     }
   }, [visible, habitToEdit]);
 
+  const handleCycleGoalDate = () => {
+    setSelectedGoalDate((prev) => {
+      if (prev === 'Daily') {
+        setSelectedDays([1, 2, 3, 4, 5]);
+        return 'Weekdays';
+      }
+      if (prev === 'Weekdays') {
+        setSelectedDays([0, 6]);
+        return 'Weekends';
+      }
+      setSelectedDays([1, 2, 3, 4, 5, 6, 0]);
+      return 'Daily';
+    });
+  };
+
   const toggleDay = (dayIndex: number) => {
+    let nextDays: number[];
     if (selectedDays.includes(dayIndex)) {
       if (selectedDays.length > 1) {
-        setSelectedDays(selectedDays.filter((d) => d !== dayIndex));
+        nextDays = selectedDays.filter((d) => d !== dayIndex);
+      } else {
+        nextDays = selectedDays;
       }
     } else {
-      setSelectedDays([...selectedDays, dayIndex]);
+      nextDays = [...selectedDays, dayIndex];
+    }
+    setSelectedDays(nextDays);
+
+    if (nextDays.length === 7) {
+      setSelectedGoalDate('Daily');
+    } else if (nextDays.length === 5 && [1, 2, 3, 4, 5].every((d) => nextDays.includes(d))) {
+      setSelectedGoalDate('Weekdays');
+    } else if (nextDays.length === 2 && [0, 6].every((d) => nextDays.includes(d))) {
+      setSelectedGoalDate('Weekends');
+    } else {
+      setSelectedGoalDate('Custom');
     }
   };
 
@@ -153,22 +191,24 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
   };
 
   const handleSave = async () => {
-    const trimmed = habitName.trim();
-    if (!trimmed) {
+    const validItems = habitItems.map((s) => s.trim()).filter(Boolean);
+    if (validItems.length === 0) {
       Alert.alert('Habit Name Required', 'Please enter a name for your habit.');
       return;
     }
+    const trimmed = validItems.join(' || ');
 
     try {
       setLoading(true);
       const formattedTime = `${alarmHour}:${alarmMinute} ${alarmPeriod}`;
       const savedTime = alarmEnabled ? formattedTime : undefined;
       const descTime = alarmEnabled ? `⏰ ${formattedTime}` : undefined;
+      const finalDescription = habitToEdit?.description || descTime;
 
       if (habitToEdit) {
         await habitService.updateHabit(habitToEdit.id, {
           name: trimmed,
-          description: descTime,
+          description: finalDescription,
           icon: selectedIcon,
           color: selectedColor,
           recurrenceRule: {
@@ -240,17 +280,30 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardView}
         >
-          {/* Header Row: Title & Close Button */}
+          {/* Header Row: Title & Action/Close Buttons */}
           <View style={styles.headerRow}>
             <Text style={styles.headerTitle}>{habitToEdit ? 'Edit habit' : 'New habit'}</Text>
-            <TouchableOpacity
-              onPress={onClose}
-              style={styles.closeButton}
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-            >
-              <Text style={styles.closeIcon}>✕</Text>
-            </TouchableOpacity>
+            <View style={styles.headerRightActions}>
+              {habitToEdit && (
+                <TouchableOpacity
+                  onPress={handleDelete}
+                  style={styles.headerDeleteBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete habit"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.headerDeleteIcon}>🗑️</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={onClose}
+                style={styles.closeButton}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Text style={styles.closeIcon}>✕</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView
@@ -266,15 +319,76 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
 
             {/* Field 1: Name your habit */}
             <View style={styles.sectionGroup}>
-              <Text style={styles.sectionLabel}>Name your habit</Text>
-              <TextInput
-                style={styles.inputPill}
-                placeholder="Morning Meditations"
-                placeholderTextColor="#A09FA6"
-                value={habitName}
-                onChangeText={setHabitName}
-                returnKeyType="done"
-              />
+              <View style={styles.labelRow}>
+                <Text style={styles.sectionLabel}>Name your habit</Text>
+                <TouchableOpacity
+                  onPress={() => setHabitItems((prev) => [...prev, ''])}
+                  style={styles.addNameItemBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add another item"
+                >
+                  <Text style={[styles.addNameItemBtnText, { color: selectedColor || '#FF6B00' }]}>
+                    + Add item
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {habitItems.map((item, idx) => (
+                <View key={`habit_item_${idx}`} style={styles.habitItemRow}>
+                  {habitItems.length > 1 && (
+                    <View style={styles.habitItemBadge}>
+                      <Text style={[styles.habitItemBadgeText, { color: selectedColor || '#FF6B00' }]}>
+                        {idx + 1}.
+                      </Text>
+                    </View>
+                  )}
+                  <TextInput
+                    style={[
+                      styles.inputPill,
+                      styles.habitItemInput,
+                      habitItems.length > 1 && styles.habitItemInputNumbered,
+                    ]}
+                    placeholder={
+                      idx === 0
+                        ? 'e.g. Exercise'
+                        : idx === 1
+                        ? 'e.g. Meditate'
+                        : idx === 2
+                        ? 'e.g. Yoga'
+                        : `Item ${idx + 1}...`
+                    }
+                    placeholderTextColor="#A09FA6"
+                    value={item}
+                    onChangeText={(val) => {
+                      setHabitItems((prev) => {
+                        const next = [...prev];
+                        next[idx] = val;
+                        return next;
+                      });
+                    }}
+                    returnKeyType={idx === habitItems.length - 1 ? 'done' : 'next'}
+                    onSubmitEditing={() => {
+                      if (idx === habitItems.length - 1 && item.trim()) {
+                        setHabitItems((prev) => [...prev, '']);
+                      }
+                    }}
+                  />
+                  {habitItems.length > 1 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setHabitItems((prev) => prev.filter((_, i) => i !== idx));
+                      }}
+                      style={styles.removeItemBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel={`Remove item ${idx + 1}`}
+                    >
+                      <Text style={styles.removeItemIcon}>✕</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
             </View>
 
             {/* Field: Icon & Color Selection */}
@@ -335,11 +449,7 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
               <View style={styles.twoColumnRow}>
                 <TouchableOpacity
                   style={styles.halfPill}
-                  onPress={() =>
-                    setSelectedGoalDate((prev) =>
-                      prev === 'Daily' ? 'Weekdays' : prev === 'Weekdays' ? 'Weekends' : 'Daily'
-                    )
-                  }
+                  onPress={handleCycleGoalDate}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.halfPillText}>{selectedGoalDate}</Text>
@@ -494,7 +604,7 @@ export const NewHabitModal: React.FC<NewHabitModalProps> = ({
                     onPress={() => {
                       const testTime = `${alarmHour}:${alarmMinute} ${alarmPeriod}`;
                       alarmService.startRinging(
-                        habitName.trim() || 'Daily Routine Alarm',
+                        habitItems.map((s) => s.trim()).filter(Boolean)[0] || 'Daily Routine Alarm',
                         habitToEdit?.id,
                         testTime
                       );
@@ -611,6 +721,29 @@ const styles = StyleSheet.create({
     color: '#1E1F24',
     letterSpacing: -0.5,
   },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerDeleteBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  headerDeleteIcon: {
+    fontSize: 18,
+  },
   closeButton: {
     width: 44,
     height: 44,
@@ -646,6 +779,45 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#75757F',
     marginBottom: 8,
+  },
+  addNameItemBtn: {
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+  },
+  addNameItemBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  habitItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  habitItemBadge: {
+    width: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+  },
+  habitItemBadgeText: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  habitItemInput: {
+    flex: 1,
+  },
+  habitItemInputNumbered: {
+    paddingLeft: 16,
+  },
+  removeItemBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    marginLeft: 2,
+  },
+  removeItemIcon: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontWeight: '700',
   },
   checkboxBox: {
     width: 22,

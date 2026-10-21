@@ -84,6 +84,25 @@ class DeviceBatteryModule(private val reactContext: ReactApplicationContext) :
             val technology = batteryStatus.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY) ?: "Li-poly"
             val present = batteryStatus.getBooleanExtra(BatteryManager.EXTRA_PRESENT, true)
 
+            // Read live current & compute real-time charging wattage
+            var currentNow = 0
+            val bm = reactContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            if (bm != null) {
+                try {
+                    val rawCurrent = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+                    if (rawCurrent != Int.MIN_VALUE && rawCurrent != 0) {
+                        val absVal = Math.abs(rawCurrent)
+                        currentNow = if (absVal > 50000) absVal / 1000 else absVal
+                    }
+                } catch (e: Exception) {}
+            }
+
+            val wattage = if (isCharging && currentNow > 0 && voltage > 0) {
+                (voltage.toDouble() * currentNow.toDouble()) / 1000000.0
+            } else {
+                0.0
+            }
+
             map.putInt("level", batteryPct)
             map.putBoolean("isCharging", isCharging)
             map.putString("chargingType", plugType)
@@ -91,6 +110,8 @@ class DeviceBatteryModule(private val reactContext: ReactApplicationContext) :
             map.putString("health", healthString)
             map.putDouble("temperature", temperature)
             map.putInt("voltage", voltage)
+            map.putInt("currentNow", currentNow)
+            map.putDouble("wattage", Math.round(wattage * 10.0) / 10.0)
             map.putString("technology", technology)
             map.putBoolean("present", present)
         } else {
@@ -101,6 +122,8 @@ class DeviceBatteryModule(private val reactContext: ReactApplicationContext) :
             map.putString("health", "Unknown")
             map.putDouble("temperature", 25.0)
             map.putInt("voltage", 3800)
+            map.putInt("currentNow", 0)
+            map.putDouble("wattage", 0.0)
             map.putString("technology", "Li-ion")
             map.putBoolean("present", true)
         }

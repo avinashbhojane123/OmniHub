@@ -14,26 +14,55 @@ class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(null)
     applyLockScreenFlags()
+    handleAlarmIntent(intent)
   }
 
   override fun onNewIntent(intent: Intent?) {
     super.onNewIntent(intent)
     setIntent(intent)
     applyLockScreenFlags()
+    handleAlarmIntent(intent)
+  }
+
+  override fun onResume() {
+    super.onResume()
+    applyLockScreenFlags()
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    applyLockScreenFlags()
+  }
+
+  private fun handleAlarmIntent(intent: Intent?) {
+    if (intent?.getBooleanExtra("isAlarmTrigger", false) == true) {
+      val alarmId = intent.getStringExtra("alarmId") ?: ""
+      val title = intent.getStringExtra("alarmTitle") ?: "Alarm"
+      val description = intent.getStringExtra("alarmDescription") ?: ""
+      AlarmRingtoneModule.notifyAlarmTriggered(alarmId, title, description)
+    }
   }
 
   private fun applyLockScreenFlags() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
       setShowWhenLocked(true)
       setTurnScreenOn(true)
+      val keyguardManager = getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+      keyguardManager?.requestDismissKeyguard(this, null)
     } else {
       @Suppress("DEPRECATION")
       window.addFlags(
         WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
         WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
       )
     }
+    // Keep screen on while alarm / activity is displayed so it doesn't immediately sleep
+    window.addFlags(
+      WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+      WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+      WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+    )
   }
 
   /**

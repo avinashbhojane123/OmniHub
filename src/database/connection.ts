@@ -1,6 +1,5 @@
 import { CREATE_TABLES_SQL } from './migrations/schema';
-import { DEFAULT_CATEGORIES, DEFAULT_SETTINGS, DEFAULT_HABITS, DEFAULT_TASKS } from './seed';
-import { format, subDays } from 'date-fns';
+import { DEFAULT_CATEGORIES, DEFAULT_SETTINGS } from './seed';
 
 declare const process: any;
 
@@ -24,42 +23,13 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
 
   private initTables() {
     this.tables.set('categories', DEFAULT_CATEGORIES.map((c) => ({ ...c })));
-    this.tables.set('tasks', DEFAULT_TASKS.map((t) => ({ ...t })));
+    this.tables.set('tasks', []);
     this.tables.set('calendar_events', []);
-    this.tables.set(
-      'habits',
-      DEFAULT_HABITS.map((h) => ({
-        ...h,
-        recurrenceRule: JSON.stringify(h.recurrenceRule),
-      }))
-    );
-    const initialLogs: any[] = [];
-    for (let i = 0; i < 3; i++) {
-      const d = format(subDays(new Date(), i), 'yyyy-MM-dd');
-      initialLogs.push({
-        id: `log_habit-water_${d}`,
-        habitId: 'habit-water',
-        date: d,
-        completed: 1,
-        value: 1,
-        createdAt: new Date().toISOString(),
-      });
-    }
-    for (let i = 0; i < 6; i++) {
-      const d = format(subDays(new Date(), i), 'yyyy-MM-dd');
-      initialLogs.push({
-        id: `log_habit-meditate_${d}`,
-        habitId: 'habit-meditate',
-        date: d,
-        completed: 1,
-        value: 1,
-        createdAt: new Date().toISOString(),
-      });
-    }
-    this.tables.set('habit_logs', initialLogs);
-    this.tables.set('goals', []);
-    this.tables.set('goal_tasks', []);
+    this.tables.set('habits', []);
+    this.tables.set('habit_logs', []);
     this.tables.set('notes', []);
+    this.tables.set('keep_notes', []);
+    this.tables.set('movie_bookmarks', []);
     this.tables.set('reminders', []);
     this.tables.set('notification_schedules', []);
     this.tables.set(
@@ -108,6 +78,12 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       } else if (trimmed.includes('seriesId = ?')) {
         const sid = params[0];
         rows = rows.filter((r) => r.seriesId === sid);
+      } else if (trimmed.includes('WHERE tmdbId = ?')) {
+        const tid = Number(params[0]);
+        rows = rows.filter((r) => Number(r.tmdbId) === tid);
+      } else if (trimmed.includes('WHERE category = ?')) {
+        const cat = params[0];
+        rows = rows.filter((r) => r.category === cat);
       } else if (trimmed.includes('WHERE entityType = ?')) {
         const et = params[0];
         rows = rows.filter((r) => r.entityType === et);
@@ -119,19 +95,13 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
         if (trimmed.includes('AND date >= ?') && params[0]) {
           rows = rows.filter((r) => r.date >= params[0]);
         }
-      } else if (trimmed.includes('LIKE ?')) {
+      } else if (trimmed.includes('LIKE ?') && tableName !== 'keep_notes') {
         const rawTerm = (params[0] || '').replace(/%/g, '').toLowerCase();
         rows = rows.filter((r) => {
           const t = (r.title || '').toLowerCase();
           const d = (r.description || '').toLowerCase();
           const n = (r.notes || '').toLowerCase();
           return t.includes(rawTerm) || d.includes(rawTerm) || n.includes(rawTerm);
-        });
-      } else if (tableName === 'calendar_events' && (trimmed.includes('startTime <= ?') || trimmed.includes('startTime >= ?'))) {
-        const endIso = trimmed.includes('startTime <= ?') ? params[0] : params[1];
-        const startIso = trimmed.includes('startTime <= ?') ? params[1] : params[0];
-        rows = rows.filter((r) => {
-          return r.startTime <= endIso && r.endTime >= startIso;
         });
       } else if (trimmed.includes('t.date >= ? AND t.date <= ?')) {
         const startDate = params[0];
@@ -149,29 +119,6 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
         });
       }
 
-      // Handle goal_tasks JOIN tasks query
-      if (tableName === 'goal_tasks' && trimmed.includes('JOIN tasks')) {
-        const goalId = params[0];
-        const allGoalTasks = this.tables.get('goal_tasks') || [];
-        const goalTasks = goalId ? allGoalTasks.filter((gt) => gt.goalId === goalId) : allGoalTasks;
-        const tasks = this.tables.get('tasks') || [];
-        const categories = this.tables.get('categories') || [];
-        rows = goalTasks
-          .map((gt) => {
-            const t = tasks.find((task) => task.id === gt.taskId);
-            if (!t) return null;
-            const cat = categories.find((c) => c.id === t.categoryId);
-            return {
-              ...t,
-              goalId: gt.goalId,
-              categoryName: cat?.name,
-              categoryColor: cat?.color,
-              categoryIcon: cat?.icon,
-            };
-          })
-          .filter(Boolean) as any[];
-        return { rows, rowsAffected: 0 };
-      }
 
       // Add joined fields for categories if querying tasks
       if (tableName === 'tasks') {
@@ -184,6 +131,46 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
             categoryColor: cat?.color,
             categoryIcon: cat?.icon,
           };
+        });
+      }
+
+      // Handle keep_notes filtering and sorting
+      if (tableName === 'keep_notes') {
+        if (trimmed.includes('isTrashed = 1')) {
+          rows = rows.filter((r) => Boolean(r.isTrashed));
+        } else if (trimmed.includes('isArchived = 1')) {
+          rows = rows.filter((r) => !r.isTrashed && Boolean(r.isArchived));
+        } else if (trimmed.includes('reminderTime IS NOT NULL')) {
+          rows = rows.filter((r) => !r.isTrashed && !r.isArchived && Boolean(r.reminderTime));
+        } else if (trimmed.includes('isTrashed = 0') || trimmed.includes('isArchived = 0')) {
+          rows = rows.filter((r) => !r.isTrashed && !r.isArchived);
+        }
+        if (trimmed.includes('color = ?')) {
+          const colorParam = params[params.length - 1];
+          rows = rows.filter((r) => r.color === colorParam);
+        }
+        if (trimmed.includes('AND labels LIKE ?')) {
+          const lblParam = trimmed.includes('color = ?') ? params[params.length - 2] : params[params.length - 1];
+          const cleanLbl = (lblParam || '').replace(/%/g, '').replace(/"/g, '').toLowerCase();
+          rows = rows.filter((r) => (r.labels || '').toLowerCase().includes(cleanLbl));
+        }
+        if (params.length > 0 && typeof params[0] === 'string' && trimmed.includes('(title LIKE ?')) {
+          let raw = params[0] || '';
+          if (raw.startsWith('%')) raw = raw.slice(1);
+          if (raw.endsWith('%')) raw = raw.slice(0, -1);
+          const q = raw.replace(/\\([%_\\])/g, '$1').toLowerCase();
+          rows = rows.filter((r) =>
+            (r.title || '').toLowerCase().includes(q) ||
+            (r.content || '').toLowerCase().includes(q) ||
+            (r.labels || '').toLowerCase().includes(q) ||
+            (r.checklistData || '').toLowerCase().includes(q)
+          );
+        }
+        rows.sort((a, b) => {
+          if (Boolean(b.isPinned) !== Boolean(a.isPinned)) {
+            return (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0);
+          }
+          return (b.updatedAt || '').localeCompare(a.updatedAt || '');
         });
       }
 
@@ -223,12 +210,6 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
           }
         }
 
-        if (tableName === 'goal_tasks') {
-          const existing = table.find((r) => r.goalId === newRow.goalId && r.taskId === newRow.taskId);
-          if (existing) {
-            return { rows: [], rowsAffected: 0 };
-          }
-        }
 
         table.push(newRow);
         this.tables.set(tableName, table);
@@ -242,8 +223,12 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       const tableName = match ? match[1].toLowerCase() : '';
       const table = this.tables.get(tableName) || [];
       const idParam = params[params.length - 1];
-
-      const targetIndex = table.findIndex((r) => r.id === idParam || r.key === idParam);
+      const targetIndex = table.findIndex(
+        (r) =>
+          r.id === idParam ||
+          r.key === idParam ||
+          (r.tmdbId !== undefined && Number(r.tmdbId) === Number(idParam)),
+      );
       if (targetIndex >= 0) {
         const setPart = trimmed.substring(trimmed.indexOf('SET') + 3, trimmed.indexOf('WHERE'));
         const assignments = setPart.split(',').map((a) => a.trim().split('=')[0].trim());
@@ -262,10 +247,10 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       const tableName = match ? match[1].toLowerCase() : '';
       const table = this.tables.get(tableName) || [];
 
-      if (trimmed.includes('WHERE goalId = ? AND taskId = ?')) {
-        const gid = params[0];
-        const tid = params[1];
-        const filtered = table.filter((r) => !(r.goalId === gid && r.taskId === tid));
+
+      if (trimmed.includes('WHERE tmdbId = ?')) {
+        const tid = Number(params[0]);
+        const filtered = table.filter((r) => Number(r.tmdbId) !== tid);
         this.tables.set(tableName, filtered);
         return { rows: [], rowsAffected: table.length - filtered.length };
       }
@@ -277,26 +262,9 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
         return { rows: [], rowsAffected: table.length - filtered.length };
       }
 
-      if (tableName === 'calendar_events' && trimmed.includes("source = 'device'")) {
-        const startIso = params[0];
-        const endIso = params[1];
-        const keepIds = new Set(params.slice(2));
-        const filtered = table.filter((r) => {
-          if (r.source === 'device' && r.startTime >= startIso && r.startTime <= endIso) {
-            if (keepIds.size > 0 && keepIds.has(r.externalId)) {
-              return true;
-            }
-            return false;
-          }
-          return true;
-        });
-        this.tables.set(tableName, filtered);
-        return { rows: [], rowsAffected: table.length - filtered.length };
-      }
-
       if (params.length > 0) {
         const idParam = params[0];
-        const filtered = table.filter((r) => r.id !== idParam && r.habitId !== idParam && r.goalId !== idParam && r.seriesId !== idParam);
+        const filtered = table.filter((r) => r.id !== idParam && r.habitId !== idParam && r.seriesId !== idParam);
         this.tables.set(tableName, filtered);
         return { rows: [], rowsAffected: table.length - filtered.length };
       } else {
@@ -322,7 +290,7 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
     }
   }
 
-  async close(): Promise<void> {}
+  async close(): Promise<void> { }
 }
 
 class OPSQLiteAdapter implements DatabaseAdapter {
@@ -410,7 +378,7 @@ class OPSQLiteAdapter implements DatabaseAdapter {
         } else {
           await this.execute(`ROLLBACK TO SAVEPOINT ${savepointName};`);
         }
-      } catch {}
+      } catch { }
       throw err;
     } finally {
       this.transactionDepth--;
@@ -429,7 +397,7 @@ class DatabaseManager {
   private adapter: DatabaseAdapter | null = null;
   private isInitialized = false;
 
-  private constructor() {}
+  private constructor() { }
 
   public static getInstance(): DatabaseManager {
     if (!DatabaseManager.instance) {
@@ -460,8 +428,13 @@ class DatabaseManager {
         const { open } = require('@op-engineering/op-sqlite');
         const nativeDb = open({ name: 'lifeplanner.db', location: 'default' });
         this.adapter = new OPSQLiteAdapter(nativeDb);
-      } catch (err) {
-        console.warn('Native SQLite unavailable, using In-Memory DB:', err);
+      } catch (err: any) {
+        if (!__DEV__) {
+          throw new Error(
+            `Local SQLite database failed to initialize: ${err?.message || 'Native storage engine unavailable'}. Please check storage permissions and retry startup.`
+          );
+        }
+        console.warn('Native SQLite unavailable in development, using In-Memory DB:', err);
         this.adapter = new InMemoryDatabaseAdapter();
       }
     }
@@ -475,19 +448,13 @@ class DatabaseManager {
     if (!this.adapter) return;
 
     try {
+      await this.adapter.execute('PRAGMA journal_mode = WAL;');
+      await this.adapter.execute('PRAGMA busy_timeout = 5000;');
+      await this.adapter.execute('PRAGMA synchronous = NORMAL;');
       await this.adapter.execute('PRAGMA foreign_keys = ON;');
-    } catch {}
+    } catch { }
 
-    try {
-      const vResult = await this.adapter.execute('SELECT MAX(version) as maxVer FROM schema_migrations');
-      const currentVersion = vResult.rows[0]?.maxVer || 0;
-      if (currentVersion >= 2) {
-        return;
-      }
-    } catch {
-      // schema_migrations does not exist yet; proceed with initial migration
-    }
-
+    // 1. Ensure all core tables exist (idempotent CREATE TABLE IF NOT EXISTS)
     const statements = CREATE_TABLES_SQL.split(';')
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
@@ -513,9 +480,53 @@ class DatabaseManager {
         'INSERT OR IGNORE INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)',
         [2, 'v2_goals_notes_calendar_schema', now]
       );
-    } catch {}
+      await this.adapter.execute(
+        'INSERT OR IGNORE INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)',
+        [3, 'v3_keep_notes_schema', now]
+      );
+      await this.adapter.execute(
+        'INSERT OR IGNORE INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)',
+        [4, 'v4_notes_schema_evolution', now]
+      );
+      await this.adapter.execute(
+        'INSERT OR IGNORE INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)',
+        [5, 'v5_complete_notes_and_keep_schema', now]
+      );
+      await this.adapter.execute(
+        `CREATE TABLE IF NOT EXISTS movie_bookmarks (
+          id TEXT PRIMARY KEY,
+          tmdbId INTEGER UNIQUE NOT NULL,
+          title TEXT NOT NULL,
+          overview TEXT,
+          posterPath TEXT,
+          backdropPath TEXT,
+          voteAverage REAL DEFAULT 0,
+          releaseDate TEXT,
+          genres TEXT,
+          runtime INTEGER DEFAULT 0,
+          isWatched INTEGER NOT NULL DEFAULT 0,
+          savedAt TEXT NOT NULL
+        );`
+      );
+      await this.adapter.execute(
+        `CREATE TABLE IF NOT EXISTS sync_tombstones (
+          id TEXT PRIMARY KEY,
+          entityType TEXT NOT NULL,
+          deletedAt TEXT NOT NULL
+        );`
+      );
+      await this.adapter.execute(
+        'CREATE INDEX IF NOT EXISTS idx_tombstones_type ON sync_tombstones(entityType);'
+      );
+    } catch { }
 
-    // Ensure backwards compatibility for schema evolution across app updates
+    // 2. Clean up legacy tables
+    try {
+      await this.adapter.execute('DROP TABLE IF EXISTS goal_tasks');
+      await this.adapter.execute('DROP TABLE IF EXISTS goals');
+    } catch { }
+
+    // 3. Ensure all tasks columns exist
     try {
       const taskCols = await this.adapter.execute('PRAGMA table_info(tasks)');
       const taskColNames = new Set(taskCols.rows.map((r: any) => r.name));
@@ -534,7 +545,79 @@ class DatabaseManager {
       if (!taskColNames.has('completedAt')) {
         await this.adapter.execute('ALTER TABLE tasks ADD COLUMN completedAt TEXT');
       }
+      if (!taskColNames.has('isLoudAlarm')) {
+        await this.adapter.execute('ALTER TABLE tasks ADD COLUMN isLoudAlarm INTEGER DEFAULT 0');
+      }
+      if (!taskColNames.has('eisenhowerQuadrant')) {
+        await this.adapter.execute('ALTER TABLE tasks ADD COLUMN eisenhowerQuadrant TEXT');
+      }
+      if (!taskColNames.has('accentColor')) {
+        await this.adapter.execute('ALTER TABLE tasks ADD COLUMN accentColor TEXT');
+      }
+      if (!taskColNames.has('estimatedMinutes')) {
+        await this.adapter.execute('ALTER TABLE tasks ADD COLUMN estimatedMinutes INTEGER');
+      }
+    } catch { }
 
+    // 4. Ensure all keep_notes columns exist
+    try {
+      const noteCols = await this.adapter.execute('PRAGMA table_info(keep_notes)');
+      const noteColNames = new Set(noteCols.rows.map((r: any) => r.name));
+      if (!noteColNames.has('title')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+      }
+      if (!noteColNames.has('content')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN content TEXT NOT NULL DEFAULT ''");
+      }
+      if (!noteColNames.has('type')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN type TEXT NOT NULL DEFAULT 'text'");
+      }
+      if (!noteColNames.has('color')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN color TEXT NOT NULL DEFAULT 'default'");
+      }
+      if (!noteColNames.has('isPinned')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0');
+      }
+      if (!noteColNames.has('isArchived')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN isArchived INTEGER NOT NULL DEFAULT 0');
+      }
+      if (!noteColNames.has('isTrashed')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN isTrashed INTEGER NOT NULL DEFAULT 0');
+        if (noteColNames.has('isTrash')) {
+          await this.adapter.execute('UPDATE keep_notes SET isTrashed = isTrash WHERE isTrashed = 0');
+        }
+      }
+      if (!noteColNames.has('trashedAt')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN trashedAt TEXT');
+      }
+      if (!noteColNames.has('reminderTime')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN reminderTime TEXT');
+      }
+      if (!noteColNames.has('labels')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN labels TEXT NOT NULL DEFAULT '[]'");
+      }
+      if (!noteColNames.has('checklistData')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN checklistData TEXT NOT NULL DEFAULT '[]'");
+      }
+      if (!noteColNames.has('drawingData')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN drawingData TEXT');
+      }
+      if (!noteColNames.has('audioUri')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN audioUri TEXT');
+      }
+      if (!noteColNames.has('imageUri')) {
+        await this.adapter.execute('ALTER TABLE keep_notes ADD COLUMN imageUri TEXT');
+      }
+      if (!noteColNames.has('createdAt')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN createdAt TEXT NOT NULL DEFAULT ''");
+      }
+      if (!noteColNames.has('updatedAt')) {
+        await this.adapter.execute("ALTER TABLE keep_notes ADD COLUMN updatedAt TEXT NOT NULL DEFAULT ''");
+      }
+    } catch { }
+
+    // 5. Ensure all habits columns exist
+    try {
       const habitCols = await this.adapter.execute('PRAGMA table_info(habits)');
       const habitColNames = new Set(habitCols.rows.map((r: any) => r.name));
       if (!habitColNames.has('reminderTime')) {
@@ -543,15 +626,48 @@ class DatabaseManager {
       if (!habitColNames.has('archivedAt')) {
         await this.adapter.execute('ALTER TABLE habits ADD COLUMN archivedAt TEXT');
       }
+    } catch { }
 
+    // 6. Ensure habit_logs columns exist
+    try {
       const habitLogCols = await this.adapter.execute('PRAGMA table_info(habit_logs)');
       const habitLogColNames = new Set(habitLogCols.rows.map((r: any) => r.name));
       if (!habitLogColNames.has('notes')) {
         await this.adapter.execute('ALTER TABLE habit_logs ADD COLUMN notes TEXT');
       }
-    } catch {
-      // Safe to ignore migration errors
-    }
+    } catch { }
+
+    // 7. Ensure calendar_events columns exist
+    try {
+      const eventCols = await this.adapter.execute('PRAGMA table_info(calendar_events)');
+      const eventColNames = new Set(eventCols.rows.map((r: any) => r.name));
+      if (!eventColNames.has('date')) {
+        await this.adapter.execute("ALTER TABLE calendar_events ADD COLUMN date TEXT DEFAULT ''");
+      }
+      if (!eventColNames.has('time')) {
+        await this.adapter.execute("ALTER TABLE calendar_events ADD COLUMN time TEXT DEFAULT ''");
+      }
+      if (!eventColNames.has('ringAlarm')) {
+        await this.adapter.execute('ALTER TABLE calendar_events ADD COLUMN ringAlarm INTEGER DEFAULT 1');
+      }
+      if (!eventColNames.has('status')) {
+        await this.adapter.execute("ALTER TABLE calendar_events ADD COLUMN status TEXT DEFAULT 'active'");
+      }
+    } catch { }
+
+    // 8. Performance Indexes (using valid column names)
+    try {
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status_date ON tasks(status, date);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(categoryId);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_tasks_series ON tasks(seriesId);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_tasks_overdue ON tasks(status, date, startTime);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_keep_notes_active ON keep_notes(isArchived, isTrashed, isPinned, updatedAt);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_keep_notes_reminder ON keep_notes(reminderTime);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_habit_logs_habit_date ON habit_logs(habitId, completedDate);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(date);');
+      await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_movie_bookmarks_watched ON movie_bookmarks(isWatched);');
+    } catch { }
   }
 
   private async runSeeds(): Promise<void> {
@@ -560,15 +676,13 @@ class DatabaseManager {
     try {
       const existingCategories = await this.adapter.execute('SELECT COUNT(*) as count FROM categories');
       const count = existingCategories.rows[0]?.count ?? 0;
-      if (count > 0) {
-        // App is already seeded
-        return;
-      }
-      for (const cat of DEFAULT_CATEGORIES) {
-        await this.adapter.execute(
-          'INSERT INTO categories (id, name, color, icon, createdAt) VALUES (?, ?, ?, ?, ?)',
-          [cat.id, cat.name, cat.color, cat.icon, cat.createdAt]
-        );
+      if (count === 0) {
+        for (const cat of DEFAULT_CATEGORIES) {
+          await this.adapter.execute(
+            'INSERT INTO categories (id, name, color, icon, createdAt) VALUES (?, ?, ?, ?, ?)',
+            [cat.id, cat.name, cat.color, cat.icon, cat.createdAt]
+          );
+        }
       }
     } catch {
       // ignore
@@ -582,48 +696,16 @@ class DatabaseManager {
         for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
           await this.adapter.execute('INSERT INTO settings (key, value, updatedAt) VALUES (?, ?, ?)', [k, v, now]);
         }
-      }
-    } catch {
-      // ignore
-    }
-
-    try {
-      const existingHabits = await this.adapter.execute('SELECT COUNT(*) as count FROM habits');
-      const count = existingHabits.rows[0]?.count ?? 0;
-      if (count === 0) {
-        for (const h of DEFAULT_HABITS) {
+      } else {
+        // Ensure default Google Sheet Webhook is configured if missing or empty
+        const existingSheetUrl = await this.adapter.execute(
+          "SELECT value FROM settings WHERE key = 'googleSheetWebhookUrl'"
+        );
+        if (!existingSheetUrl.rows.length || !existingSheetUrl.rows[0]?.value) {
+          const now = new Date().toISOString();
           await this.adapter.execute(
-            'INSERT INTO habits (id, name, description, icon, color, recurrenceRule, target, reminderTime, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [h.id, h.name, h.description, h.icon, h.color, JSON.stringify(h.recurrenceRule), h.target, h.reminderTime, h.createdAt]
-          );
-        }
-        for (let i = 0; i < 3; i++) {
-          const d = format(subDays(new Date(), i), 'yyyy-MM-dd');
-          await this.adapter.execute(
-            'INSERT INTO habit_logs (id, habitId, date, completed, value, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
-            [`log_habit-water_${d}`, 'habit-water', d, 1, 1, new Date().toISOString()]
-          );
-        }
-        for (let i = 0; i < 6; i++) {
-          const d = format(subDays(new Date(), i), 'yyyy-MM-dd');
-          await this.adapter.execute(
-            'INSERT INTO habit_logs (id, habitId, date, completed, value, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
-            [`log_habit-meditate_${d}`, 'habit-meditate', d, 1, 1, new Date().toISOString()]
-          );
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    try {
-      const existingTasks = await this.adapter.execute('SELECT COUNT(*) as count FROM tasks');
-      const count = existingTasks.rows[0]?.count ?? 0;
-      if (count === 0) {
-        for (const t of DEFAULT_TASKS) {
-          await this.adapter.execute(
-            'INSERT INTO tasks (id, title, description, date, startTime, endTime, priority, categoryId, status, reminderMinutes, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [t.id, t.title, t.description, t.date, t.startTime, t.endTime, t.priority, t.categoryId, t.status, t.reminderMinutes, t.notes, t.createdAt, t.updatedAt]
+            "INSERT OR REPLACE INTO settings (key, value, updatedAt) VALUES ('googleSheetWebhookUrl', ?, ?)",
+            [DEFAULT_SETTINGS.googleSheetWebhookUrl, now]
           );
         }
       }

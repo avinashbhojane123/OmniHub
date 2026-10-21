@@ -1,0 +1,20 @@
+export const SETTINGS_KEYS = {
+  USER_NAME: 'userName',
+  BIRTH_DATE: 'birthDate',
+  BIRTH_TIME: 'birthTime',
+  EXACT_ALARM_DISMISSED: 'exactAlarmDismissed',
+  TODAY_VIEW_MODE: 'today_view_mode',
+  TODAY_DISMISSED_OVERDUE_DATE: 'today_dismissed_overdue_date',
+  TODAY_DISMISSED_OVERDUE_COUNT: 'today_dismissed_overdue_count',
+  THEME: 'theme',
+  NOTIFICATIONS_ENABLED: 'notificationsEnabled',
+  NOTIFICATION_SOUND: 'notificationSound',
+  NOTIFICATION_VIBRATION: 'notificationVibration',
+  DEFAULT_SNOOZE_MINUTES: 'defaultSnoozeMinutes',
+  USER_AVATAR: 'user_avatar',
+  GOOGLE_SHEET_WEBHOOK_URL: 'googleSheetWebhookUrl',
+  GOOGLE_SHEET_AUTO_SYNC: 'googleSheetAutoSync',
+  GOOGLE_SHEET_LAST_SYNC_TIME: 'googleSheetLastSyncTime',
+  GOOGLE_SHEET_SYNC_SECRET: 'googleSheetSyncSecret',
+} as const;
+

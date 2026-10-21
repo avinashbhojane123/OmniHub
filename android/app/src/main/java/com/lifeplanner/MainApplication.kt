@@ -7,18 +7,27 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 
+import java.io.File
+
 class MainApplication : Application(), ReactApplication {
 
   override val reactHost: ReactHost by lazy {
+    val otaBundleFile = File(applicationContext.filesDir, "ota/index.android.bundle")
+    val customBundlePath = if (otaBundleFile.exists() && otaBundleFile.length() > 50000L) {
+      otaBundleFile.absolutePath
+    } else {
+      null
+    }
+
     getDefaultReactHost(
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
           add(AlarmRingtonePackage())
-          add(DeviceCalendarPackage())
           add(DeviceBatteryPackage())
-          add(SafeGuardAgentPackage())
+          add(OTAPackage())
         },
+      jsBundleFilePath = customBundlePath,
     )
   }
 

@@ -30,8 +30,10 @@ import {
 interface ProfileModalProps {
   visible: boolean;
   onClose: () => void;
-  onSaved: (data: { name: string; birthDate: string; birthTime: string }) => void;
+  onSaved: (data: { name: string; avatar: string; birthDate: string; birthTime?: string }) => void;
 }
+
+const AVATAR_OPTIONS = ['🐯', '🚀', '🤖', '👑', '🦊', '⚡', '😎', '🦄', '🎮', '🌟'];
 
 export interface AgeCalculation {
   years: number;
@@ -44,10 +46,10 @@ export interface AgeCalculation {
   nextBirthdayDays: number;
 }
 
-export function computeAgeStats(birthDateStr: string): AgeCalculation | null {
+export function computeAgeStats(birthDateStr: string, referenceDate: Date = new Date()): AgeCalculation | null {
   try {
     const birthDate = parseISO(birthDateStr);
-    const now = new Date();
+    const now = referenceDate;
     if (!isValid(birthDate) || isAfter(birthDate, now)) return null;
 
     const totalYears = differenceInYears(now, birthDate);
@@ -91,19 +93,19 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
-  const [name, setName] = useState('Avinash');
-  const [birthDate, setBirthDate] = useState('2002-08-15');
-  const [birthTime, setBirthTime] = useState('08:30 AM');
+  const [name, setName] = useState('');
+  const [avatar, setAvatar] = useState('🐯');
+  const [birthDate, setBirthDate] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
-      const savedName = await settingsRepository.get('userName', 'Avinash');
-      const savedBirthDate = await settingsRepository.get('birthDate', '2002-08-15');
-      const savedBirthTime = await settingsRepository.get('birthTime', '08:30 AM');
+      const savedName = await settingsRepository.get('userName', '');
+      const savedAvatar = await settingsRepository.get('user_avatar', '🐯');
+      const savedBirthDate = await settingsRepository.get('birthDate', '');
       setName(savedName);
+      if (savedAvatar) setAvatar(savedAvatar);
       setBirthDate(savedBirthDate);
-      setBirthTime(savedBirthTime);
     }
     if (visible) {
       loadProfile();
@@ -134,13 +136,14 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     try {
       setSaving(true);
       await settingsRepository.set('userName', trimmedName);
+      await settingsRepository.set('user_avatar', avatar);
       await settingsRepository.set('birthDate', trimmedDate);
-      await settingsRepository.set('birthTime', birthTime.trim() || '08:00 AM');
 
       onSaved({
         name: trimmedName,
+        avatar,
         birthDate: trimmedDate,
-        birthTime: birthTime.trim() || '08:00 AM',
+        birthTime: '',
       });
       onClose();
     } catch (e: any) {
@@ -164,7 +167,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         >
           {/* Top Bar */}
           <View style={styles.headerRow}>
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Profile & Life Stats</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Profile & Milestones</Text>
             <TouchableOpacity
               onPress={onClose}
               style={[styles.closeButton, { backgroundColor: colors.surface }]}
@@ -183,25 +186,51 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               { paddingBottom: Math.max(insets.bottom, 24) + 30 },
             ]}
           >
-            {/* Hero Tiger Avatar Badge */}
+            {/* Hero Avatar Badge & Selector */}
             <View style={[styles.avatarCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={styles.avatarGlowWrapper}>
                 <View style={styles.avatarCircle}>
-                  <Text style={styles.avatarTiger}>🐯</Text>
+                  <Text style={styles.avatarTiger}>{avatar}</Text>
                 </View>
               </View>
               <Text style={[styles.profileName, { color: colors.text }]}>{name}</Text>
               {stats && (
                 <Text style={[styles.profileSub, { color: colors.textSecondary }]}>
-                  Born on {stats.dayOfWeek}, {stats.birthDateFormatted} at {birthTime}
+                  Born on {stats.dayOfWeek}, {stats.birthDateFormatted}
                 </Text>
               )}
+
+              {/* Avatar Selector Chips */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.avatarPickerRow}
+                contentContainerStyle={styles.avatarPickerContent}
+              >
+                {AVATAR_OPTIONS.map((av) => (
+                  <TouchableOpacity
+                    key={av}
+                    onPress={() => setAvatar(av)}
+                    style={[
+                      styles.avatarChip,
+                      {
+                        backgroundColor: avatar === av ? colors.primary + '25' : colors.surface,
+                        borderColor: avatar === av ? colors.primary : colors.borderSubtle,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Choose avatar ${av}`}
+                  >
+                    <Text style={styles.avatarChipText}>{av}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
 
-            {/* Live Age & Timing Stats Dashboard */}
+            {/* Live Age Stats Dashboard */}
             {stats && (
               <View style={styles.statsSection}>
-                <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>LIFE AGE & TIMING METRICS</Text>
+                <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>LIFE AGE MILESTONES</Text>
 
                 {/* Primary Age Banner */}
                 <View style={[styles.ageHighlightCard, { backgroundColor: colors.brandDark, shadowColor: colors.brandDark }]}>
@@ -241,9 +270,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   </View>
 
                   <View style={[styles.metricTile, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
-                    <Text style={styles.metricTileIcon}>⏰</Text>
-                    <Text style={[styles.metricTileNumber, { color: colors.text }]}>{birthTime}</Text>
-                    <Text style={[styles.metricTileLabel, { color: colors.textSecondary }]}>Birth Timing</Text>
+                    <Text style={styles.metricTileIcon}>🌟</Text>
+                    <Text style={[styles.metricTileNumber, { color: colors.text }]}>{stats.dayOfWeek}</Text>
+                    <Text style={[styles.metricTileLabel, { color: colors.textSecondary }]}>Day of Birth</Text>
                   </View>
 
                   <View style={[styles.metricTile, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
@@ -259,7 +288,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </View>
             )}
 
-            {/* Set Name, Birth Date, & Birth Time Form */}
+            {/* Set Name & Birth Date Form */}
             <View style={styles.formSection}>
               <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>UPDATE DETAILS</Text>
 
@@ -285,18 +314,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   placeholder="2002-08-15"
                   placeholderTextColor={colors.textMuted}
                   keyboardType="numbers-and-punctuation"
-                />
-              </View>
-
-              {/* Birth Timing Field */}
-              <View style={styles.formGroup}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>BIRTH TIMING (TIME OF BIRTH)</Text>
-                <TextInput
-                  style={[styles.inputField, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                  value={birthTime}
-                  onChangeText={setBirthTime}
-                  placeholder="08:30 AM"
-                  placeholderTextColor={colors.textMuted}
                 />
               </View>
 
@@ -406,6 +423,25 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     paddingHorizontal: 16,
+  },
+  avatarPickerRow: {
+    marginTop: 14,
+    width: '100%',
+  },
+  avatarPickerContent: {
+    paddingHorizontal: 8,
+    gap: 8,
+  },
+  avatarChip: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarChipText: {
+    fontSize: 20,
   },
   statsSection: {
     marginBottom: 20,

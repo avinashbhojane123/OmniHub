@@ -4,4 +4,5 @@ module.exports = {
   transformIgnorePatterns: [
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|@react-navigation|date-fns)/',
   ],
+  modulePathIgnorePatterns: ['<rootDir>/backend/'],
 };

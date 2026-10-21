@@ -10,13 +10,15 @@
     "test": "jest",
     "connect:wifi": "node -e \"const ip = process.env.DEVICE_IP || process.argv[1]; if (!ip) { console.log('Specify device IP: npm run connect:wifi -- <IP:5555> or set DEVICE_IP env'); process.exit(1); } require('child_process').execSync(`adb connect ${ip.includes(':') ? ip : ip + ':5555'}`, { stdio: 'inherit' });\"",
     "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res/",
+    "ota": "node scripts/publish-ota.js",
+    "ota:serve": "node scripts/serve-apk.js",
+    "serve": "node scripts/serve-apk.js",
     "deploy": "node scripts/deploy.js",
     "deploy:wifi": "node scripts/deploy.js"
   },
   "dependencies": {
     "@notifee/react-native": "^9.1.8",
     "@op-engineering/op-sqlite": "^18.2.5",
-    "@react-native/new-app-screen": "0.87.1",
     "@react-navigation/bottom-tabs": "^7.20.0",
     "@react-navigation/native": "^7.5.0",
     "@react-navigation/native-stack": "^7.20.0",
@@ -25,7 +27,11 @@
     "react-native": "0.87.1",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.28.0",
+    "react-native-webview": "^14.0.1",
     "socket.io-client": "^4.8.4"
+  },
+  "overrides": {
+    "micromatch": "^4.0.8"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

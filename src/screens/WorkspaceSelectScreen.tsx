@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from 'react';
 import {
   View,
   Text,
@@ -6,24 +12,33 @@ import {
   TouchableOpacity,
   StatusBar,
   ScrollView,
-  Modal,
-  Alert,
   useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
   BackHandler,
+  Alert,
+  TextInput,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
+import {
+  useNavigation,
+  useFocusEffect,
+  useRoute,
+} from '@react-navigation/native';
 import { format } from 'date-fns';
 import { useAppTheme } from '../hooks/useTheme';
-import { settingsRepository } from '../database/repositories/SettingsRepository';
-import { taskRepository } from '../database/repositories/TaskRepository';
-import { batteryService, BatteryStatus } from '../services/battery/BatteryService';
-import { safeGuardStore } from '../services/safeguard/SafeGuardStore';
-import { chatSocketService } from '../services/chat/chatSocketService';
+import {
+  settingsRepository,
+  taskRepository,
+} from '../database/repositories';
+import {
+  batteryService,
+  BatteryStatus,
+} from '../services/battery/BatteryService';
+import { otaService, OTAStatus } from '../services/ota/OTAService';
 
-export type WorkspaceMode = 'planner' | 'chat' | 'battery' | 'safeguard';
+export type WorkspaceMode = 'planner' | 'battery' | 'chat' | 'movies';
 
 interface WorkspaceConfig {
   id: WorkspaceMode;
@@ -54,19 +69,6 @@ const WORKSPACES: WorkspaceConfig[] = [
     features: ['Tasks & Habits', 'Focus Timer', 'Timelines & Backup'],
   },
   {
-    id: 'chat',
-    name: 'Chat & Connect',
-    tagline: 'Passcode rooms & presence',
-    category: 'MESSAGING',
-    icon: '💬',
-    color: '#06B6D4',
-    colorLight: '#22D3EE',
-    darkBg: '#082F3B',
-    lightBg: '#ECFEFF',
-    route: 'Chat',
-    features: ['Passcode-Locked Rooms', 'Real-Time Presence', 'Private Channels'],
-  },
-  {
     id: 'battery',
     name: 'Battery Guard & Alarm',
     tagline: 'Eco charge & anti-overcharge',
@@ -80,17 +82,30 @@ const WORKSPACES: WorkspaceConfig[] = [
     features: ['80% Eco Full Alarm', 'Overcharge Protection', 'Overheat Siren'],
   },
   {
-    id: 'safeguard',
-    name: 'SafeGuard Family',
-    tagline: 'Parent-child protection & GPS',
-    category: 'FAMILY SAFETY',
-    icon: '🛡️',
-    color: '#EC4899',
-    colorLight: '#F472B6',
-    darkBg: '#3B0728',
-    lightBg: '#FDF2F8',
-    route: 'SafeGuard',
-    features: ['Parent & Child Dual-Role', 'Live GPS & Geofencing', 'AI Risk Detection'],
+    id: 'chat',
+    name: 'ChatRoom',
+    tagline: 'Real-time chat, calls & watch party',
+    category: 'COMMUNICATION',
+    icon: '💬',
+    color: '#06B6D4',
+    colorLight: '#38BDF8',
+    darkBg: '#082F49',
+    lightBg: '#F0F9FF',
+    route: 'ChatRoom',
+    features: ['Real-Time Chat & Polls', 'Voice/Video Calling', 'Watch Party & Stories'],
+  },
+  {
+    id: 'movies',
+    name: 'CineVerse & Movies',
+    tagline: 'TMDb movies, trailers, cast & watchlist',
+    category: 'ENTERTAINMENT',
+    icon: '🎬',
+    color: '#E11D48',
+    colorLight: '#FB7185',
+    darkBg: '#1C1014',
+    lightBg: '#FFF1F2',
+    route: 'MovieWorkspace',
+    features: ['Trending & In Theaters', 'Trailers & Cast Details', 'My Watchlist & Watched'],
   },
 ];
 
@@ -98,61 +113,70 @@ export const WorkspaceSelectScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { colors, isDark } = useAppTheme();
-  const { width: windowWidth } = useWindowDimensions();
-  const isLandscape = windowWidth > 580;
+  const { colors, isDark, changeTheme } = useAppTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
-  // Responsive Carousel Width
-  const carouselCardWidth = Math.min(windowWidth - 64, 330);
+  // Robust orientation detection: ensures portrait tablets aren't misclassified as landscape
+  const isLandscape = windowWidth > windowHeight && windowWidth > 580;
+
+  // Responsive dynamic widths to prevent flex-wrap layout breakage on any screen size
+  const horizontalPadding = 16;
+  const gridGap = 12;
+  const gridCardWidth = useMemo(() => {
+    return Math.floor((windowWidth - horizontalPadding * 2 - gridGap) / 2);
+  }, [windowWidth]);
+
+  const carouselCardWidth = useMemo(() => {
+    if (isLandscape) {
+      return Math.min(windowWidth * 0.45, 360);
+    }
+    return Math.min(windowWidth - 52, 340);
+  }, [windowWidth, isLandscape]);
+
   const carouselSpacing = 14;
   const carouselSnapStep = carouselCardWidth + carouselSpacing;
 
-  const [selectedMode, setSelectedMode] = useState<WorkspaceMode>('planner');
+  const [selectedMode, setSelectedMode] = useState<WorkspaceMode>(
+    route?.params?.currentMode || route?.params?.initialMode || 'planner',
+  );
   const [viewMode, setViewMode] = useState<'grid' | 'carousel'>('grid');
 
   // Live Telemetry states
-  const [batteryStatus, setBatteryStatus] = useState<BatteryStatus | null>(null);
-  const [pendingTasksCount, setPendingTasksCount] = useState<number | null>(null);
-  const [activeAlertsCount, setActiveAlertsCount] = useState<number>(0);
-  const [chatOnlineStatus, setChatOnlineStatus] = useState<string>('Encrypted Rooms');
+  const [batteryStatus, setBatteryStatus] = useState<BatteryStatus | null>(
+    null,
+  );
+  const [pendingTasksCount, setPendingTasksCount] = useState<number | null>(
+    null,
+  );
 
-  // Parent PIN Verification Modal (for Child Mode SafeGuard exit protection)
-  const [sessionParentUnlocked, setSessionParentUnlocked] = useState(false);
-  const [pinModalVisible, setPinModalVisible] = useState(false);
-  const [pendingTargetMode, setPendingTargetMode] = useState<WorkspaceMode | null>(null);
-  const [enteredPin, setEnteredPin] = useState('');
-  const [pinError, setPinError] = useState(false);
-  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
-  const [pinAttempts, setPinAttempts] = useState(0);
-  const [pinLockoutUntil, setPinLockoutUntil] = useState<number | null>(null);
+  // OTA Updates State
+  const [otaStatus, setOtaStatus] = useState<OTAStatus | null>(null);
+  const [otaChecking, setOtaChecking] = useState(false);
+  const [otaServerHost, setOtaServerHost] = useState('10.16.64.73:8888');
 
   const carouselScrollRef = useRef<any>(null);
-  const parentUnlockTimerRef = useRef<any>(null);
 
-  // Auto-rearm Child Mode protection after 60 seconds of inactivity on OmniHub
-  useEffect(() => {
-    if (sessionParentUnlocked || route?.params?.parentUnlocked) {
-      if (parentUnlockTimerRef.current) clearTimeout(parentUnlockTimerRef.current);
-      parentUnlockTimerRef.current = setTimeout(() => {
-        setSessionParentUnlocked(false);
-        if (route?.params?.parentUnlocked) {
-          navigation.setParams({ parentUnlocked: false });
-        }
-      }, 60000);
-    }
-    return () => {
-      if (parentUnlockTimerRef.current) clearTimeout(parentUnlockTimerRef.current);
-    };
-  }, [sessionParentUnlocked, route?.params?.parentUnlocked, navigation]);
-
-  // Load preferences concurrently on mount
+  // Load preferences (view mode and default workspace) on mount
   useEffect(() => {
     let isMounted = true;
-    settingsRepository.get('workspace_view_mode', 'grid')
-      .then((viewModeVal) => {
+    Promise.all([
+      settingsRepository.get('workspace_view_mode', 'grid'),
+      settingsRepository.get('default_workspace', 'planner'),
+    ])
+      .then(([savedViewMode, savedDefaultWorkspace]) => {
         if (!isMounted) return;
-        if (viewModeVal === 'grid' || viewModeVal === 'carousel') {
-          setViewMode(viewModeVal as 'grid' | 'carousel');
+        if (savedViewMode === 'grid' || savedViewMode === 'carousel') {
+          setViewMode(savedViewMode as 'grid' | 'carousel');
+        }
+        if (!route?.params?.currentMode && !route?.params?.initialMode) {
+          if (
+            savedDefaultWorkspace === 'planner' ||
+            savedDefaultWorkspace === 'battery' ||
+            savedDefaultWorkspace === 'chat' ||
+            savedDefaultWorkspace === 'movies'
+          ) {
+            setSelectedMode(savedDefaultWorkspace as WorkspaceMode);
+          }
         }
       })
       .catch(() => {});
@@ -160,71 +184,91 @@ export const WorkspaceSelectScreen: React.FC = () => {
     return () => {
       isMounted = false;
     };
+  }, [route?.params?.currentMode, route?.params?.initialMode]);
+
+  // Sync carousel scroll position on screen resize / orientation change
+  useEffect(() => {
+    if (viewMode === 'carousel' && carouselScrollRef.current) {
+      const targetIndex = WORKSPACES.findIndex(w => w.id === selectedMode);
+      if (targetIndex >= 0) {
+        requestAnimationFrame(() => {
+          carouselScrollRef.current?.scrollTo({
+            x: targetIndex * carouselSnapStep,
+            animated: false,
+          });
+        });
+      }
+    }
+  }, [windowWidth, isLandscape, viewMode, carouselSnapStep, selectedMode]);
+
+  // OTA Status refresh callback
+  const refreshOtaStatus = useCallback(async () => {
+    try {
+      const [status, serverUrl] = await Promise.all([
+        otaService.getStatus(),
+        otaService.getServerUrl(),
+      ]);
+      setOtaStatus(status);
+      if (serverUrl) {
+        setOtaServerHost(serverUrl.replace(/^https?:\/\//, ''));
+      }
+    } catch {
+      // Ignored non-critical OTA telemetry error
+    }
   }, []);
 
-  // Fresh Telemetry on Every Screen Focus (fixes stale counts)
+  // Fresh Telemetry on Every Screen Focus (fixes stale counts, includes overdue tasks)
   useFocusEffect(
     useCallback(() => {
-      // 1. Planner Tasks Telemetry (Exclude completed AND cancelled) with reactive refresh
-      let taskInterval: any;
-      const refreshTasks = () => {
+      let isMounted = true;
+
+      // 1. Planner Tasks Telemetry (Include today's pending AND overdue pending tasks)
+      const refreshTasks = async () => {
         try {
-          const todayStr = format(new Date(), 'yyyy-MM-dd');
-          taskRepository
-            .findByDate(todayStr)
-            .then((tasks) => {
-              const pending = tasks.filter(
-                (t) => t.status !== 'completed' && t.status !== 'cancelled'
-              ).length;
-              setPendingTasksCount(pending);
-            })
-            .catch(() => setPendingTasksCount(null));
+          const now = new Date();
+          const todayStr = format(now, 'yyyy-MM-dd');
+          const timeStr = format(now, 'HH:mm');
+
+          const [todayTasks, overdueTasks] = await Promise.all([
+            taskRepository.findByDate(todayStr),
+            taskRepository.findOverdue(todayStr, timeStr),
+          ]);
+
+          if (!isMounted) return;
+
+          const pendingToday = todayTasks.filter(
+            t => t.status !== 'completed' && t.status !== 'cancelled',
+          );
+          const pendingOverdue = overdueTasks.filter(
+            t => t.status !== 'completed' && t.status !== 'cancelled',
+          );
+
+          const uniqueTaskIds = new Set<string>();
+          pendingToday.forEach(t => uniqueTaskIds.add(t.id));
+          pendingOverdue.forEach(t => uniqueTaskIds.add(t.id));
+
+          setPendingTasksCount(uniqueTaskIds.size);
         } catch {
-          setPendingTasksCount(null);
+          if (isMounted) setPendingTasksCount(null);
         }
       };
-      refreshTasks();
-      taskInterval = setInterval(refreshTasks, 4000);
 
-      // 2. Battery Telemetry & live listener
+      refreshTasks();
+      refreshOtaStatus();
+      // Low-frequency polling interval to prevent battery/CPU thrashing
+      const taskInterval = setInterval(refreshTasks, 15000);
+
+      // 2. Battery Telemetry: Subscribe to live events without duplicate immediate dispatch
       let unsubBattery: (() => void) | undefined;
       try {
-        setBatteryStatus(batteryService.getStatus());
-        unsubBattery = batteryService.subscribeStatus((st) => setBatteryStatus(st));
+        unsubBattery = batteryService.subscribeStatus(st => {
+          if (isMounted) setBatteryStatus(st);
+        });
       } catch {
         // Fallback gracefully
       }
 
-      // 3. SafeGuard Risk Alerts Telemetry & live store listener
-      const updateSafeGuardAlerts = () => {
-        try {
-          const alerts = safeGuardStore.getAlerts();
-          const unreadCount = alerts.filter((a) => !a.isRead).length;
-          setActiveAlertsCount(unreadCount);
-        } catch {
-          setActiveAlertsCount(0);
-        }
-      };
-      updateSafeGuardAlerts();
-      const unsubSafeGuard = safeGuardStore.subscribe(updateSafeGuardAlerts);
-
-      // 4. Chat Telemetry (real live status)
-      try {
-        if (chatSocketService.isConnected) {
-          const users = chatSocketService.getCachedUsers();
-          const userCount = users.length > 0 ? users.length : 1;
-          const roomTag = chatSocketService.passcode ? ` • Room ${chatSocketService.passcode}` : '';
-          setChatOnlineStatus(`${userCount} Online${roomTag}`);
-        } else if (chatSocketService.wasInRoom && chatSocketService.passcode) {
-          setChatOnlineStatus(`Room ${chatSocketService.passcode} Saved`);
-        } else {
-          setChatOnlineStatus('Encrypted Rooms');
-        }
-      } catch {
-        setChatOnlineStatus('Encrypted Rooms');
-      }
-
-      // 5. Hardware Back Handler support
+      // 3. Hardware Back Handler support
       const onBackPress = () => {
         if (navigation.canGoBack()) {
           navigation.goBack();
@@ -232,32 +276,38 @@ export const WorkspaceSelectScreen: React.FC = () => {
         }
         return false;
       };
-      const backSub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      const backSub = BackHandler.addEventListener(
+        'hardwareBackPress',
+        onBackPress,
+      );
 
       return () => {
-        if (taskInterval) clearInterval(taskInterval);
+        isMounted = false;
+        clearInterval(taskInterval);
         if (unsubBattery) unsubBattery();
-        if (unsubSafeGuard) unsubSafeGuard();
         backSub.remove();
-        // Clear temporary parent unlocked state upon screen blur for strict security
-        setSessionParentUnlocked(false);
       };
-    }, [navigation])
+    }, [navigation, refreshOtaStatus]),
   );
 
   const handleSelectViewMode = async (mode: 'grid' | 'carousel') => {
     if (viewMode === mode) return;
     setViewMode(mode);
-    await settingsRepository.set('workspace_view_mode', mode);
+    try {
+      await settingsRepository.set('workspace_view_mode', mode);
+    } catch {
+      // Ignored non-critical setting persistence failure
+    }
+
     if (mode === 'carousel') {
-      const targetIndex = WORKSPACES.findIndex((w) => w.id === selectedMode);
+      const targetIndex = WORKSPACES.findIndex(w => w.id === selectedMode);
       if (targetIndex >= 0) {
         setTimeout(() => {
           carouselScrollRef.current?.scrollTo({
             x: targetIndex * carouselSnapStep,
-            animated: false,
+            animated: true,
           });
-        }, 60);
+        }, 80);
       }
     }
   };
@@ -268,7 +318,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
       const targetIndex =
         scrollIndex !== undefined
           ? scrollIndex
-          : WORKSPACES.findIndex((w) => w.id === mode);
+          : WORKSPACES.findIndex(w => w.id === mode);
       if (targetIndex >= 0) {
         carouselScrollRef.current.scrollTo({
           x: targetIndex * carouselSnapStep,
@@ -278,124 +328,160 @@ export const WorkspaceSelectScreen: React.FC = () => {
     }
   };
 
-  const executeLaunch = (modeToEnter: WorkspaceMode) => {
-    const targetConfig = WORKSPACES.find((w) => w.id === modeToEnter);
+  const handleLaunch = (modeToEnter: WorkspaceMode) => {
+    const targetConfig = WORKSPACES.find(w => w.id === modeToEnter);
     const targetRoute = targetConfig?.route || 'MainTabs';
 
-    // Clean reset to the target workspace so backstack does not accumulate duplicate screens or loop
+    // Persist default workspace preference so future app launches remember the choice
+    settingsRepository.set('default_workspace', modeToEnter).catch(() => {});
+
+    // Clean reset to the target workspace
     navigation.reset({
       index: 0,
       routes: [{ name: targetRoute }],
     });
   };
 
-  // Safe launch check: verifies Parent PIN if child account tries to switch out of SafeGuard
-  const handleInitiateLaunch = (modeToEnter: WorkspaceMode) => {
-    const currentRole = safeGuardStore.getRole();
-    const settings = safeGuardStore.getSettings();
-    const isUnlocked = sessionParentUnlocked || route?.params?.parentUnlocked;
-    if (
-      currentRole === 'CHILD' &&
-      !isUnlocked &&
-      modeToEnter !== 'safeguard' &&
-      settings.requirePinForChildSwitch
-    ) {
-      setPendingTargetMode(modeToEnter);
-      setEnteredPin('');
-      setPinError(false);
-      setIsVerifyingPin(false);
-      setPinModalVisible(true);
+  const handleCheckOtaUpdate = async () => {
+    if (otaChecking) return;
+    setOtaChecking(true);
+    try {
+      const result = await otaService.checkForUpdate();
+      if (result.available) {
+        Alert.alert(
+          'Update Available! 🚀',
+          `New Bundle v${result.remoteVersion} is ready to install.\n${
+            result.notes ? `\nNotes: ${result.notes}\n` : ''
+          }\nWould you like to download and install now?`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Download & Apply',
+              onPress: async () => {
+                try {
+                  setOtaChecking(true);
+                  await otaService.downloadAndApplyUpdate(
+                    result.bundleUrl,
+                    result.remoteVersion,
+                  );
+                  await refreshOtaStatus();
+                  Alert.alert(
+                    'Update Installed! 🎉',
+                    'The update bundle was successfully installed. Restart the app to apply changes.',
+                    [
+                      { text: 'Later', style: 'cancel' },
+                      {
+                        text: 'Restart Now',
+                        onPress: () => otaService.restartApp(),
+                      },
+                    ],
+                  );
+                } catch (e: any) {
+                  Alert.alert('Installation Failed', e.message || 'Unknown error');
+                } finally {
+                  setOtaChecking(false);
+                }
+              },
+            },
+          ],
+        );
+      } else {
+        Alert.alert(
+          'Up to Date ✨',
+          `You have the latest version (v${result.currentVersion || 0}).`,
+        );
+      }
+    } catch (e: any) {
+      Alert.alert(
+        'Update Check Failed',
+        e.message || 'Could not connect to update server.',
+      );
+    } finally {
+      setOtaChecking(false);
+    }
+  };
+
+  const handleSaveServerHost = async () => {
+    const raw = otaServerHost.trim();
+    if (!raw) {
+      Alert.alert('Invalid Server', 'Please enter a valid IP:port or hostname.');
       return;
     }
-    executeLaunch(modeToEnter);
-  };
-
-  const handlePinDigit = (digit: string) => {
-    if (isVerifyingPin) return;
-    if (pinLockoutUntil && Date.now() < pinLockoutUntil) return;
-    if (enteredPin.length < 4) {
-      const nextPin = enteredPin + digit;
-      setEnteredPin(nextPin);
-      if (nextPin.length === 4) {
-        verifyPin(nextPin);
-      }
+    let hostWithoutProtocol = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    if (!hostWithoutProtocol.includes(':')) {
+      hostWithoutProtocol = `${hostWithoutProtocol}:8888`;
     }
+    const fullUrl = `http://${hostWithoutProtocol}`;
+    await otaService.setServerUrl(fullUrl);
+    setOtaServerHost(hostWithoutProtocol);
+    Alert.alert('Server Saved', `OTA Server URL updated to ${fullUrl}`);
+    await refreshOtaStatus();
   };
 
-  const handlePinDelete = () => {
-    if (isVerifyingPin) return;
-    if (enteredPin.length > 0) {
-      setEnteredPin(enteredPin.slice(0, -1));
-      setPinError(false);
-    }
+  const handleRevertOta = () => {
+    Alert.alert(
+      'Revert to Factory Bundle?',
+      'This removes downloaded OTA updates and restores the base embedded APK bundle.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revert & Restart',
+          style: 'destructive',
+          onPress: async () => {
+            await otaService.revertToDefault();
+            await refreshOtaStatus();
+            otaService.restartApp();
+          },
+        },
+      ],
+    );
   };
 
-  const verifyPin = (pinToTest: string) => {
-    setIsVerifyingPin(true);
-    const settings = safeGuardStore.getSettings();
-    if (pinToTest === settings.parentPin) {
-      setPinModalVisible(false);
-      setEnteredPin('');
-      setPinError(false);
-      setIsVerifyingPin(false);
-      setSessionParentUnlocked(true);
-      setPinAttempts(0);
-      setPinLockoutUntil(null);
-      if (pendingTargetMode) {
-        executeLaunch(pendingTargetMode);
-      }
-    } else {
-      setPinError(true);
-      const newAttempts = pinAttempts + 1;
-      setPinAttempts(newAttempts);
-      if (newAttempts >= 5) {
-        setPinLockoutUntil(Date.now() + 10000);
-      }
-      setTimeout(() => {
-        setEnteredPin('');
-        setPinError(false);
-        setIsVerifyingPin(false);
-      }, 700);
-    }
-  };
-
-  // Carousel scroll sync (updates active preview without mutating persisted database default until launch)
+  // Carousel scroll sync bound to both momentum end and scroll drag end
   const handleCarouselScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const offsetX = e.nativeEvent.contentOffset.x;
       const index = Math.round(offsetX / carouselSnapStep);
-      if (index >= 0 && index < WORKSPACES.length) {
-        const currentMode = WORKSPACES[index].id;
-        if (currentMode !== selectedMode) {
-          setSelectedMode(currentMode);
-        }
-      }
+      const clampedIndex = Math.max(0, Math.min(WORKSPACES.length - 1, index));
+      const currentMode = WORKSPACES[clampedIndex].id;
+      setSelectedMode(prev => (prev !== currentMode ? currentMode : prev));
     },
-    [carouselSnapStep, selectedMode]
+    [carouselSnapStep],
   );
 
-  const activeWorkspace =
-    WORKSPACES.find((w) => w.id === selectedMode) || WORKSPACES[0];
+  const activeWorkspace = useMemo(() => {
+    return WORKSPACES.find(w => w.id === selectedMode) || WORKSPACES[0];
+  }, [selectedMode]);
 
   const getLiveTelemetryBadge = (id: WorkspaceMode) => {
     switch (id) {
       case 'planner':
+        if (pendingTasksCount === 0) {
+          return '✓ All Tasks Done';
+        }
         if (pendingTasksCount !== null && pendingTasksCount > 0) {
           return `📅 ${pendingTasksCount} Pending Today`;
         }
         return '📅 Schedule Ready';
-      case 'chat':
-        return `💬 ${chatOnlineStatus}`;
       case 'battery':
         if (batteryStatus) {
-          return `⚡ ${batteryStatus.level}% ${batteryStatus.isCharging ? '• Charging' : '• Normal'}`;
+          if (batteryStatus.level >= 99 && batteryStatus.isCharging) {
+            return '⚡ 100% • Fully Charged';
+          }
+          if (batteryStatus.level <= 15 && !batteryStatus.isCharging) {
+            return `🪫 ${batteryStatus.level}% • Low Battery`;
+          }
+          return `⚡ ${batteryStatus.level}% ${
+            batteryStatus.isCharging ? '• Charging' : '• Guarded'
+          }`;
         }
         return '⚡ Guard Active';
-      case 'safeguard':
-        if (activeAlertsCount > 0) {
-          return `🛡️ ${activeAlertsCount} Alert${activeAlertsCount > 1 ? 's' : ''}`;
-        }
-        return '🛡️ Shield Active';
+      case 'chat':
+        return '💬 ChatRoom & Calling Ready';
+      case 'movies':
+        return '🍿 TMDb Trending Live';
+      default:
+        return 'Ready';
     }
   };
 
@@ -412,46 +498,17 @@ export const WorkspaceSelectScreen: React.FC = () => {
     >
       <StatusBar barStyle={colors.statusBar} />
 
-      {/* Responsive Vertical Scroll Wrapper to prevent cutoff on any screen size */}
+      {/* Main Vertical Scroll Container */}
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[
-          styles.scrollContent,
-          { minHeight: '100%' },
-        ]}
+        directionalLockEnabled={true}
+        contentContainerStyle={styles.scrollContent}
       >
         {/* Top Header */}
         <View style={styles.header}>
           <View style={styles.topRow}>
             <View style={styles.topLeftGroup}>
-              {navigation.canGoBack() && (
-                <TouchableOpacity
-                  style={[
-                    styles.backBtn,
-                    {
-                      backgroundColor: isDark
-                        ? 'rgba(255, 255, 255, 0.08)'
-                        : 'rgba(15, 23, 42, 0.06)',
-                      borderColor: colors.border,
-                    },
-                  ]}
-                  onPress={() => navigation.goBack()}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to previous screen"
-                >
-                  <Text
-                    style={[
-                      styles.backBtnText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    ‹ Back
-                  </Text>
-                </TouchableOpacity>
-              )}
-
               <View
                 style={[
                   styles.brandPill,
@@ -464,113 +521,124 @@ export const WorkspaceSelectScreen: React.FC = () => {
                 ]}
               >
                 <Text style={styles.brandIcon}>💎</Text>
-                <Text
-                  style={[
-                    styles.brandText,
-                    { color: colors.text },
-                  ]}
-                >
+                <Text style={[styles.brandText, { color: colors.text }]}>
                   OmniHub
                 </Text>
               </View>
             </View>
 
-            {/* Intuitive Segmented Control (Grid vs Carousel) */}
-            <View
-              style={[
-                styles.segmentedWrapper,
-                {
-                  backgroundColor: isDark
-                    ? 'rgba(255, 255, 255, 0.08)'
-                    : 'rgba(15, 23, 42, 0.06)',
-                  borderColor: colors.borderSubtle,
-                },
-              ]}
-            >
+            {/* Top Right Group: Quick Theme Toggle & Segmented View Switcher */}
+            <View style={styles.topRightGroup}>
               <TouchableOpacity
                 style={[
-                  styles.segmentedBtn,
-                  viewMode === 'grid' && [
-                    styles.segmentedBtnActive,
-                    { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' },
-                  ],
+                  styles.quickThemeBtn,
+                  {
+                    backgroundColor: isDark
+                      ? 'rgba(255, 255, 255, 0.08)'
+                      : 'rgba(15, 23, 42, 0.06)',
+                    borderColor: colors.borderSubtle,
+                  },
                 ]}
-                onPress={() => handleSelectViewMode('grid')}
+                onPress={() => changeTheme(isDark ? 'light' : 'dark')}
                 activeOpacity={0.8}
                 accessibilityRole="button"
-                accessibilityLabel="Switch to Grid view"
-                accessibilityState={{ selected: viewMode === 'grid' }}
+                accessibilityLabel={`Toggle theme, currently ${
+                  isDark ? 'dark' : 'light'
+                }`}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
-                <Text
-                  style={[
-                    styles.segmentedBtnText,
-                    {
-                      color:
-                        viewMode === 'grid'
-                          ? colors.text
-                          : colors.textMuted,
-                      fontWeight: viewMode === 'grid' ? '800' : '600',
-                    },
-                  ]}
-                >
-                  ⊞ Grid
+                <Text style={styles.quickThemeBtnIcon}>
+                  {isDark ? '🌙' : '☀️'}
                 </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
+              {/* Segmented Control (Grid vs Carousel) */}
+              <View
                 style={[
-                  styles.segmentedBtn,
-                  viewMode === 'carousel' && [
-                    styles.segmentedBtnActive,
-                    { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' },
-                  ],
+                  styles.segmentedWrapper,
+                  {
+                    backgroundColor: isDark
+                      ? 'rgba(255, 255, 255, 0.08)'
+                      : 'rgba(15, 23, 42, 0.06)',
+                    borderColor: colors.borderSubtle,
+                  },
                 ]}
-                onPress={() => handleSelectViewMode('carousel')}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel="Switch to Carousel view"
-                accessibilityState={{ selected: viewMode === 'carousel' }}
               >
-                <Text
+                <TouchableOpacity
                   style={[
-                    styles.segmentedBtnText,
-                    {
-                      color:
-                        viewMode === 'carousel'
-                          ? colors.text
-                          : colors.textMuted,
-                      fontWeight: viewMode === 'carousel' ? '800' : '600',
-                    },
+                    styles.segmentedBtn,
+                    viewMode === 'grid' && [
+                      styles.segmentedBtnActive,
+                      { backgroundColor: isDark ? colors.card : '#FFFFFF' },
+                    ],
                   ]}
+                  onPress={() => handleSelectViewMode('grid')}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Switch to Grid view"
+                  accessibilityState={{ selected: viewMode === 'grid' }}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 >
-                  ⊟ Slide
-                </Text>
-              </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.segmentedBtnText,
+                      {
+                        color:
+                          viewMode === 'grid' ? colors.text : colors.textMuted,
+                        fontWeight: viewMode === 'grid' ? '800' : '600',
+                      },
+                    ]}
+                  >
+                    ⊞ Grid
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.segmentedBtn,
+                    viewMode === 'carousel' && [
+                      styles.segmentedBtnActive,
+                      { backgroundColor: isDark ? colors.card : '#FFFFFF' },
+                    ],
+                  ]}
+                  onPress={() => handleSelectViewMode('carousel')}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Switch to Carousel view"
+                  accessibilityState={{ selected: viewMode === 'carousel' }}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Text
+                    style={[
+                      styles.segmentedBtnText,
+                      {
+                        color:
+                          viewMode === 'carousel'
+                            ? colors.text
+                            : colors.textMuted,
+                        fontWeight: viewMode === 'carousel' ? '800' : '600',
+                      },
+                    ]}
+                  >
+                    ⊟ Slide
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
-          <Text
-            style={[
-              styles.mainTitle,
-              { color: colors.text },
-            ]}
-          >
+          <Text style={[styles.mainTitle, { color: colors.text }]}>
             Choose Your Workspace
           </Text>
-          <Text
-            style={[
-              styles.subtitle,
-              { color: colors.textSecondary },
-            ]}
-          >
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             4 standalone power suites. Tap to select or launch directly.
           </Text>
         </View>
 
-        {/* Main Content Area: 2x2 Bento Grid vs. Detailed Carousel */}
+        {/* Main Content Area: 2x2 Bento Grid vs. Carousel */}
         {viewMode === 'grid' ? (
-          <View style={styles.gridContainer}>
-            {WORKSPACES.map((ws) => {
+          <View style={[styles.gridContainer, { gap: gridGap }]}>
+            {WORKSPACES.map(ws => {
               const isSelected = selectedMode === ws.id;
               return (
                 <TouchableOpacity
@@ -578,7 +646,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                   activeOpacity={0.85}
                   onPress={() => {
                     if (isSelected) {
-                      handleInitiateLaunch(ws.id);
+                      handleLaunch(ws.id);
                     } else {
                       handleSelectMode(ws.id);
                     }
@@ -589,8 +657,8 @@ export const WorkspaceSelectScreen: React.FC = () => {
                   accessibilityHint="Tap to select or launch this workspace"
                   style={[
                     styles.gridCard,
-                    isLandscape && styles.gridCardLandscape,
                     {
+                      width: gridCardWidth,
                       backgroundColor: isDark
                         ? isSelected
                           ? ws.darkBg
@@ -601,7 +669,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                       borderColor: isSelected ? ws.color : colors.border,
                       borderWidth: isSelected ? 2.5 : 1,
                       shadowColor: isSelected ? ws.color : '#000000',
-                      shadowOpacity: isSelected ? 0.38 : 0.06,
+                      shadowOpacity: isSelected ? 0.35 : 0.06,
                       elevation: isSelected ? 6 : 2,
                     },
                   ]}
@@ -619,10 +687,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                       ]}
                     >
                       <Text
-                        style={[
-                          styles.categoryBadgeText,
-                          { color: ws.color },
-                        ]}
+                        style={[styles.categoryBadgeText, { color: ws.color }]}
                         numberOfLines={1}
                       >
                         {ws.category}
@@ -670,10 +735,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
 
                     <View style={styles.titleContainer}>
                       <Text
-                        style={[
-                          styles.gridCardTitle,
-                          { color: colors.text },
-                        ]}
+                        style={[styles.gridCardTitle, { color: colors.text }]}
                         numberOfLines={2}
                       >
                         {ws.name}
@@ -700,9 +762,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                         style={[
                           styles.liveTelemetryText,
                           {
-                            color: isSelected
-                              ? ws.color
-                              : colors.textSecondary,
+                            color: isSelected ? ws.color : colors.textSecondary,
                           },
                         ]}
                         numberOfLines={1}
@@ -712,15 +772,18 @@ export const WorkspaceSelectScreen: React.FC = () => {
                     </View>
 
                     <View style={styles.gridActionRow}>
-                      <View
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => handleLaunch(ws.id)}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                         style={[
                           styles.gridActionPill,
                           {
                             backgroundColor: isSelected
                               ? ws.color
                               : isDark
-                              ? 'rgba(255, 255, 255, 0.06)'
-                              : 'rgba(15, 23, 42, 0.04)',
+                              ? 'rgba(255, 255, 255, 0.08)'
+                              : 'rgba(15, 23, 42, 0.05)',
                             borderColor: isSelected
                               ? ws.color
                               : colors.borderSubtle,
@@ -739,7 +802,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                         >
                           {isSelected ? 'Launch ➔' : 'Select'}
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -752,16 +815,21 @@ export const WorkspaceSelectScreen: React.FC = () => {
             <ScrollView
               ref={carouselScrollRef}
               horizontal
-              nestedScrollEnabled={true}
+              directionalLockEnabled={true}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={[
                 styles.carouselScroll,
-                { paddingHorizontal: Math.max((windowWidth - carouselCardWidth) / 2, 16) },
+                {
+                  paddingHorizontal: Math.max(
+                    (windowWidth - carouselCardWidth) / 2,
+                    16,
+                  ),
+                },
               ]}
               decelerationRate="fast"
               snapToOffsets={WORKSPACES.map((_, i) => i * carouselSnapStep)}
-              snapToAlignment="center"
               onMomentumScrollEnd={handleCarouselScroll}
+              onScrollEndDrag={handleCarouselScroll}
             >
               {WORKSPACES.map((ws, idx) => {
                 const isSelected = selectedMode === ws.id;
@@ -771,7 +839,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                     activeOpacity={0.9}
                     onPress={() => {
                       if (isSelected) {
-                        handleInitiateLaunch(ws.id);
+                        handleLaunch(ws.id);
                       } else {
                         handleSelectMode(ws.id, idx);
                       }
@@ -794,7 +862,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                         borderColor: isSelected ? ws.color : colors.border,
                         borderWidth: isSelected ? 2.5 : 1,
                         shadowColor: isSelected ? ws.color : '#000000',
-                        shadowOpacity: isSelected ? 0.38 : 0.08,
+                        shadowOpacity: isSelected ? 0.35 : 0.08,
                         elevation: isSelected ? 8 : 2,
                       },
                     ]}
@@ -810,12 +878,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                         },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.cardBadgeText,
-                          { color: ws.color },
-                        ]}
-                      >
+                      <Text style={[styles.cardBadgeText, { color: ws.color }]}>
                         {ws.category}
                       </Text>
                     </View>
@@ -836,12 +899,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                     </View>
 
                     {/* Title & Tagline */}
-                    <Text
-                      style={[
-                        styles.cardTitle,
-                        { color: colors.text },
-                      ]}
-                    >
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>
                       {ws.name}
                     </Text>
                     <Text
@@ -866,10 +924,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                       ]}
                     >
                       <Text
-                        style={[
-                          styles.carouselLiveText,
-                          { color: ws.color },
-                        ]}
+                        style={[styles.carouselLiveText, { color: ws.color }]}
                       >
                         {getLiveTelemetryBadge(ws.id)}
                       </Text>
@@ -916,7 +971,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
               })}
             </ScrollView>
 
-            {/* Dots Indicator with Accessible Touch Target */}
+            {/* Dots Indicator */}
             <View style={styles.dotsRow}>
               {WORKSPACES.map((ws, idx) => (
                 <TouchableOpacity
@@ -924,11 +979,11 @@ export const WorkspaceSelectScreen: React.FC = () => {
                   onPress={() => handleSelectMode(ws.id, idx)}
                   hitSlop={{ top: 16, bottom: 16, left: 10, right: 10 }}
                   accessibilityRole="button"
-                  accessibilityLabel={`Page ${idx + 1} of ${WORKSPACES.length}: ${ws.name}`}
+                  accessibilityLabel={`Page ${idx + 1} of ${
+                    WORKSPACES.length
+                  }: ${ws.name}`}
                   accessibilityState={{ selected: selectedMode === ws.id }}
-                  style={[
-                    styles.dotTouchWrapper,
-                  ]}
+                  style={styles.dotTouchWrapper}
                 >
                   <View
                     style={[
@@ -948,9 +1003,8 @@ export const WorkspaceSelectScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Bottom Controls Section */}
+        {/* Bottom Launch Button Section */}
         <View style={styles.bottomSection}>
-          {/* Prominent Launch Button */}
           <TouchableOpacity
             style={[
               styles.continueButton,
@@ -960,7 +1014,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
               },
             ]}
             activeOpacity={0.88}
-            onPress={() => handleInitiateLaunch(selectedMode)}
+            onPress={() => handleLaunch(selectedMode)}
             accessibilityRole="button"
             accessibilityLabel={`Launch ${activeWorkspace.name}`}
             accessibilityHint="Enters the selected workspace suite"
@@ -970,141 +1024,183 @@ export const WorkspaceSelectScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
 
-      {/* Parental PIN Authentication Modal (Protects against Child Mode Escape) */}
-      <Modal visible={pinModalVisible} transparent animationType="fade">
-        <View style={styles.pinBackdrop}>
+        {/* Over-The-Air (OTA) Updates Section */}
+        <View style={styles.otaContainer}>
           <View
             style={[
-              styles.pinCard,
+              styles.otaCard,
               {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
+                backgroundColor: isDark
+                  ? 'rgba(30, 27, 75, 0.45)'
+                  : colors.surface,
+                borderColor: colors.borderSubtle,
               },
             ]}
           >
-            <View style={styles.pinHeader}>
-              <Text style={styles.pinIcon}>🔒</Text>
-              <Text style={[styles.pinTitle, { color: colors.text }]}>
-                Parent Security PIN
-              </Text>
-              <Text style={[styles.pinSubtitle, { color: colors.textSecondary }]}>
-                SafeGuard Child Agent Mode is active. Enter Parent Security PIN to unlock OmniHub.
-              </Text>
-            </View>
-
-            {/* 4-digit PIN Dots */}
-            <View style={styles.pinDotsRow}>
-              {[0, 1, 2, 3].map((idx) => {
-                const filled = enteredPin.length > idx;
-                return (
-                  <View
-                    key={idx}
-                    style={[
-                      styles.pinDot,
-                      {
-                        borderColor: pinError ? '#EF4444' : colors.border,
-                        backgroundColor: filled
-                          ? pinError
-                            ? '#EF4444'
-                            : activeWorkspace.color
-                          : 'transparent',
-                      },
-                    ]}
-                  />
-                );
-              })}
-            </View>
-
-            {pinLockoutUntil && Date.now() < pinLockoutUntil ? (
-              <Text style={styles.pinErrorText}>Too many attempts. Wait 10 seconds.</Text>
-            ) : pinError ? (
-              <Text style={styles.pinErrorText}>Incorrect PIN. Try again.</Text>
-            ) : null}
-
-            {/* Numeric Keypad */}
-            <View style={styles.keypad}>
-              {[
-                ['1', '2', '3'],
-                ['4', '5', '6'],
-                ['7', '8', '9'],
-                ['CANCEL', '0', '⌫'],
-              ].map((row, rIdx) => (
-                <View key={rIdx} style={styles.keypadRow}>
-                  {row.map((item) => (
-                    <TouchableOpacity
-                      key={item}
-                      disabled={
-                        item !== 'CANCEL' &&
-                        (isVerifyingPin || Boolean(pinLockoutUntil && Date.now() < pinLockoutUntil))
-                      }
-                      style={[
-                        styles.keypadBtn,
-                        item === 'CANCEL' && styles.keypadBtnCancel,
-                        {
-                          backgroundColor: isDark
-                            ? 'rgba(255, 255, 255, 0.08)'
-                            : 'rgba(15, 23, 42, 0.05)',
-                          opacity:
-                            item !== 'CANCEL' &&
-                            (isVerifyingPin || Boolean(pinLockoutUntil && Date.now() < pinLockoutUntil))
-                              ? 0.4
-                              : 1,
-                        },
-                      ]}
-                      onPress={() => {
-                        if (item === 'CANCEL') {
-                          setPinModalVisible(false);
-                          setEnteredPin('');
-                          setPinError(false);
-                          setIsVerifyingPin(false);
-                        } else if (item === '⌫') {
-                          handlePinDelete();
-                        } else {
-                          handlePinDigit(item);
-                        }
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text
-                        style={[
-                          styles.keypadBtnText,
-                          item === 'CANCEL' && styles.cancelText,
-                          {
-                            color:
-                              item === 'CANCEL'
-                                ? '#EF4444'
-                                : colors.text,
-                          },
-                        ]}
-                      >
-                        {item}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+            {/* Header Row */}
+            <View style={styles.otaHeaderRow}>
+              <View style={styles.otaHeaderLeft}>
+                <View
+                  style={[
+                    styles.otaIconBadge,
+                    {
+                      backgroundColor: isDark
+                        ? 'rgba(139, 92, 246, 0.2)'
+                        : 'rgba(139, 92, 246, 0.1)',
+                      borderColor: 'rgba(139, 92, 246, 0.35)',
+                    },
+                  ]}
+                >
+                  <Text style={styles.otaIconText}>⚡</Text>
                 </View>
-              ))}
+                <View style={styles.otaTitleCol}>
+                  <Text style={[styles.otaTitle, { color: colors.text }]}>
+                    Over-The-Air Updates
+                  </Text>
+                  <Text
+                    style={[styles.otaSubtitle, { color: colors.textSecondary }]}
+                  >
+                    Wireless hot-patching & live bundle updates
+                  </Text>
+                </View>
+              </View>
+
+              <View
+                style={[
+                  styles.otaStatusBadge,
+                  {
+                    backgroundColor: otaStatus?.hasCustomBundle
+                      ? 'rgba(16, 185, 129, 0.15)'
+                      : isDark
+                      ? 'rgba(255, 255, 255, 0.08)'
+                      : 'rgba(0, 0, 0, 0.05)',
+                    borderColor: otaStatus?.hasCustomBundle
+                      ? '#10B981'
+                      : colors.borderSubtle,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.otaStatusBadgeText,
+                    {
+                      color: otaStatus?.hasCustomBundle
+                        ? '#10B981'
+                        : colors.textMuted,
+                    },
+                  ]}
+                >
+                  {otaStatus?.hasCustomBundle
+                    ? `v${otaStatus.installedVersion} Live`
+                    : 'Base APK'}
+                </Text>
+              </View>
             </View>
 
-            {/* PIN Help / Recovery Guidance */}
-            <TouchableOpacity
-              style={styles.pinHelpBtn}
-              onPress={() => {
-                Alert.alert(
-                  'Parent PIN Assistance',
-                  'The Parent Security PIN is configured inside SafeGuard Family settings (factory default: 1234).\n\nIf you need to change or reset your PIN, switch to Parent Dashboard inside SafeGuard.'
-                );
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.pinHelpText, { color: colors.textSecondary }]}>
-                Forgot PIN or need help? ⓘ
+            {/* Quick Actions / Status Row */}
+            <View style={styles.otaActionRow}>
+              <View
+                style={[
+                  styles.otaInfoPill,
+                  {
+                    backgroundColor: isDark
+                      ? 'rgba(255, 255, 255, 0.05)'
+                      : 'rgba(0, 0, 0, 0.04)',
+                    borderColor: colors.borderSubtle,
+                  },
+                ]}
+              >
+                <Text
+                  style={[styles.otaInfoPillText, { color: colors.textSecondary }]}
+                >
+                  {otaStatus?.hasCustomBundle
+                    ? `📦 ${(otaStatus.bundleSize / 1024).toFixed(0)} KB installed`
+                    : '📦 Embedded bundle'}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.otaCheckBtn,
+                  {
+                    backgroundColor: activeWorkspace.color,
+                    opacity: otaChecking ? 0.7 : 1,
+                  },
+                ]}
+                onPress={handleCheckOtaUpdate}
+                disabled={otaChecking}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Check for OTA updates"
+              >
+                <Text style={styles.otaCheckBtnText}>
+                  {otaChecking ? 'Checking...' : 'Check Updates ⚡'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Server Configuration */}
+            <View style={styles.otaServerSection}>
+              <Text
+                style={[styles.otaServerLabel, { color: colors.textSecondary }]}
+              >
+                HOTSPOT SERVER (IP:PORT)
               </Text>
-            </TouchableOpacity>
+              <View style={styles.otaInputRow}>
+                <TextInput
+                  style={[
+                    styles.otaServerInput,
+                    {
+                      backgroundColor: isDark
+                        ? 'rgba(255, 255, 255, 0.06)'
+                        : 'rgba(0, 0, 0, 0.03)',
+                      borderColor: colors.borderSubtle,
+                      color: colors.text,
+                    },
+                  ]}
+                  value={otaServerHost}
+                  onChangeText={setOtaServerHost}
+                  placeholder="10.16.64.73:8888"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.otaSaveBtn,
+                    {
+                      backgroundColor: isDark
+                        ? 'rgba(255, 255, 255, 0.1)'
+                        : 'rgba(15, 23, 42, 0.08)',
+                      borderColor: colors.borderSubtle,
+                    },
+                  ]}
+                  onPress={handleSaveServerHost}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.otaSaveBtnText, { color: colors.text }]}>
+                    Save
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Revert Option if Custom Bundle is Installed */}
+            {otaStatus?.hasCustomBundle && (
+              <TouchableOpacity
+                style={styles.otaRevertBtn}
+                onPress={handleRevertOta}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.otaRevertBtnText, { color: '#EF4444' }]}>
+                  ↺ Revert to Original Base APK
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
-      </Modal>
+      </ScrollView>
     </View>
   );
 };
@@ -1116,8 +1212,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'space-between',
-    paddingBottom: 12,
+    paddingBottom: 24,
   },
   header: {
     alignItems: 'center',
@@ -1139,9 +1234,11 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 16,
     borderWidth: 1,
+    minHeight: 34,
+    justifyContent: 'center',
   },
   backBtnText: {
     fontSize: 12,
@@ -1151,7 +1248,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
   },
@@ -1164,17 +1261,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
   },
+  topRightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quickThemeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickThemeBtnIcon: {
+    fontSize: 14,
+  },
   segmentedWrapper: {
     flexDirection: 'row',
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 2.5,
+    padding: 3,
     gap: 2,
   },
   segmentedBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4.5,
-    borderRadius: 13,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    minHeight: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   segmentedBtnActive: {
     shadowOffset: { width: 0, height: 1 },
@@ -1183,7 +1299,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   segmentedBtnText: {
-    fontSize: 11,
+    fontSize: 12,
     letterSpacing: 0.1,
   },
   mainTitle: {
@@ -1194,23 +1310,21 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   subtitle: {
-    fontSize: 12,
+    fontSize: 12.5,
     textAlign: 'center',
-    lineHeight: 16,
-    maxWidth: 320,
+    lineHeight: 17,
+    maxWidth: 340,
     marginBottom: 6,
   },
 
-  // 2x2 Bento Grid Styles (Guaranteed Equal-Height Row Alignment)
+  // 2x2 Bento Grid Styles (Guaranteed Equal Width Alignment without flex-wrap overflow)
   gridContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     marginVertical: 8,
-    gap: 10,
   },
   gridCard: {
-    width: '48%',
     borderRadius: 20,
     padding: 12,
     minHeight: 200,
@@ -1218,30 +1332,26 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 10,
   },
-  gridCardLandscape: {
-    width: '23.5%',
-    minHeight: 185,
-  },
   gridCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   categoryBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2.5,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     borderRadius: 6,
     maxWidth: '75%',
   },
   categoryBadgeText: {
-    fontSize: 8.5,
+    fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   checkCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1251,42 +1361,42 @@ const styles = StyleSheet.create({
   },
   gridCardMiddle: {
     alignItems: 'flex-start',
-    marginVertical: 2,
+    marginVertical: 4,
   },
   gridIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
     marginBottom: 6,
   },
   gridIconEmoji: {
-    fontSize: 17,
+    fontSize: 18,
   },
   titleContainer: {
-    height: 34,
+    minHeight: 38,
     justifyContent: 'center',
   },
   gridCardTitle: {
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '800',
     letterSpacing: -0.2,
-    lineHeight: 16.5,
+    lineHeight: 18,
   },
   gridCardBottom: {
-    marginTop: 2,
+    marginTop: 4,
   },
   liveTelemetryBadge: {
-    paddingVertical: 2.5,
-    paddingHorizontal: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
     borderRadius: 8,
     borderWidth: 1,
-    marginBottom: 5,
+    marginBottom: 6,
   },
   liveTelemetryText: {
-    fontSize: 9.5,
+    fontSize: 10.5,
     fontWeight: '700',
   },
   gridActionRow: {
@@ -1294,13 +1404,16 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   gridActionPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2.5,
+    paddingHorizontal: 9,
+    paddingVertical: 3.5,
     borderRadius: 10,
     borderWidth: 1,
+    minHeight: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   gridActionHint: {
-    fontSize: 9.5,
+    fontSize: 10.5,
     fontWeight: '800',
   },
 
@@ -1323,12 +1436,12 @@ const styles = StyleSheet.create({
   },
   cardTopBadge: {
     paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingVertical: 3.5,
     borderRadius: 8,
     marginBottom: 10,
   },
   cardBadgeText: {
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '800',
     letterSpacing: 0.8,
   },
@@ -1345,19 +1458,19 @@ const styles = StyleSheet.create({
     fontSize: 26,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 16.5,
     fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 2,
+    marginBottom: 3,
   },
   cardTagline: {
-    fontSize: 11.5,
+    fontSize: 12,
     textAlign: 'center',
     marginBottom: 10,
   },
   carouselLivePill: {
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 4.5,
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 12,
@@ -1384,7 +1497,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cardTapHint: {
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '700',
     marginTop: 'auto',
   },
@@ -1414,7 +1527,7 @@ const styles = StyleSheet.create({
   bottomSection: {
     alignItems: 'center',
     width: '100%',
-    marginTop: 8,
+    marginTop: 12,
   },
   continueButton: {
     width: '100%',
@@ -1426,6 +1539,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 5,
+    minHeight: 48,
   },
   continueButtonText: {
     color: '#FFFFFF',
@@ -1434,94 +1548,145 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Parental PIN Modal Styles
-  pinBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  pinCard: {
+  // OTA Updates Section Styles
+  otaContainer: {
     width: '100%',
-    maxWidth: 340,
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 24,
-    alignItems: 'center',
-  },
-  pinHeader: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  pinIcon: {
-    fontSize: 32,
+    marginTop: 18,
     marginBottom: 8,
   },
-  pinTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 6,
-    textAlign: 'center',
+  otaCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  pinSubtitle: {
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: 'center',
-  },
-  pinDotsRow: {
+  otaHeaderRow: {
     flexDirection: 'row',
-    gap: 16,
-    marginBottom: 16,
-  },
-  pinDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-  },
-  pinErrorText: {
-    color: '#EF4444',
-    fontSize: 12,
-    fontWeight: '700',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 12,
   },
-  keypad: {
-    width: '100%',
-    gap: 8,
-  },
-  keypadRow: {
+  otaHeaderLeft: {
     flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  otaIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  otaIconText: {
+    fontSize: 16,
+  },
+  otaTitleCol: {
+    flex: 1,
+  },
+  otaTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  otaSubtitle: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  otaStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  otaStatusBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  otaActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 12,
+  },
+  otaInfoPill: {
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+  },
+  otaInfoPillText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+  },
+  otaCheckBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
+  },
+  otaCheckBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  otaServerSection: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(150, 150, 150, 0.15)',
+  },
+  otaServerLabel: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  otaInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  keypadBtn: {
+  otaServerInput: {
     flex: 1,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  keypadBtnCancel: {
+    height: 36,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    paddingHorizontal: 10,
+    fontSize: 12,
   },
-  keypadBtnText: {
-    fontSize: 18,
+  otaSaveBtn: {
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otaSaveBtnText: {
+    fontSize: 12,
     fontWeight: '700',
   },
-  cancelText: {
-    fontSize: 11,
-    fontWeight: '800',
+  otaRevertBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    marginTop: 8,
   },
-  pinHelpBtn: {
-    marginTop: 12,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  pinHelpText: {
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
+  otaRevertBtnText: {
+    fontSize: 11.5,
+    fontWeight: '700',
   },
 });

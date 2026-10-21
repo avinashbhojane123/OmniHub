@@ -1,4 +1,6 @@
 import { Category } from '../types';
+import { SETTINGS_KEYS } from '../constants/settingsKeys';
+import { DEFAULT_GOOGLE_SHEET_WEBHOOK_URL } from '../services/backup/GoogleSheetsSyncService';
 
 export const DEFAULT_CATEGORIES: Category[] = [
   {
@@ -52,100 +54,17 @@ export const DEFAULT_CATEGORIES: Category[] = [
   },
 ];
 
-export const DEFAULT_HABITS = [
-  {
-    id: 'habit-water',
-    name: 'Drink a glass of water',
-    description: '5 min',
-    icon: '🥛',
-    color: '#FF922B',
-    recurrenceRule: { type: 'daily' as const },
-    target: 1,
-    reminderTime: '08:00',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'habit-meditate',
-    name: 'Meditate to relax',
-    description: '15 min',
-    icon: '🧘',
-    color: '#51CF66',
-    recurrenceRule: { type: 'daily' as const },
-    target: 1,
-    reminderTime: '08:30',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'habit-stretch',
-    name: 'Stretch for 10 minutes',
-    description: '10 min',
-    icon: '🤸',
-    color: '#F06595',
-    recurrenceRule: { type: 'daily' as const },
-    target: 1,
-    reminderTime: '09:00',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'habit-walk',
-    name: 'Go for a short walk',
-    description: '15 min',
-    icon: '👟',
-    color: '#FF922B',
-    recurrenceRule: { type: 'daily' as const },
-    target: 1,
-    reminderTime: '09:30',
-    createdAt: new Date().toISOString(),
-  },
-];
-
 export const DEFAULT_SETTINGS: Record<string, string> = {
   notificationsEnabled: 'true',
   notificationSound: 'true',
   notificationVibration: 'true',
   defaultReminderMinutes: '10',
   defaultSnoozeMinutes: '10',
-  calendarSyncEnabled: 'false',
-  selectedCalendarIds: '[]',
-  userName: 'Avinash',
-  birthDate: '2002-08-15',
-  birthTime: '08:30 AM',
+  userName: '',
+  birthDate: '',
+  birthTime: '',
+  [SETTINGS_KEYS.GOOGLE_SHEET_WEBHOOK_URL]: DEFAULT_GOOGLE_SHEET_WEBHOOK_URL,
+  [SETTINGS_KEYS.GOOGLE_SHEET_AUTO_SYNC]: 'true',
 };
 
-import { format } from 'date-fns';
-
-const todayDate = format(new Date(), 'yyyy-MM-dd');
-
-export const DEFAULT_TASKS = [
-  {
-    id: 'task-keep-demo-1',
-    title: 'Study React Native Architecture',
-    description: 'Deep dive into New Architecture and SQLite',
-    date: todayDate,
-    startTime: '18:00',
-    endTime: '19:30',
-    priority: 'high' as const,
-    categoryId: 'cat-study',
-    status: 'pending' as const,
-    reminderMinutes: 10,
-    notes: '• Review TurboModules & JSI bridges\n• Benchmark OP-SQLite transactions\n• Test Hermes garbage collection\n• Configure offline synchronization queue',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'task-keep-demo-2',
-    title: 'Weekly Grocery Shopping List',
-    description: 'Fresh produce & organic staples',
-    date: todayDate,
-    startTime: '20:00',
-    endTime: '21:00',
-    priority: 'medium' as const,
-    categoryId: 'cat-personal',
-    status: 'pending' as const,
-    reminderMinutes: 15,
-    notes: '• 2L Almond milk (unsweetened)\n• Fresh avocados & ripe bananas\n• Whole grain sourdough bread\n• Organic baby spinach & broccoli',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
 

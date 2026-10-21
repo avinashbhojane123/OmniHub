@@ -5,7 +5,7 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
+  TextInput,
 } from 'react-native';
 import { useAppTheme } from '../hooks/useTheme';
 import { radius, spacing, typography } from '../theme';
@@ -310,118 +310,168 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
               </View>
 
               {!isTimeNone && (
-                <>
+                <View style={styles.clockContainer}>
                   <Text style={[styles.subLabel, typography.caption, { color: colors.textSecondary }]}>
-                    QUICK PRESETS
+                    MANUAL TIME SETTING (12-HOUR CLOCK)
                   </Text>
-                  <View style={styles.quickTimeRow}>
-                    {[
-                      { label: '09:00 AM', h: 9, m: 0 },
-                      { label: '12:00 PM', h: 12, m: 0 },
-                      { label: '03:00 PM', h: 15, m: 0 },
-                      { label: '06:00 PM', h: 18, m: 0 },
-                      { label: '09:00 PM', h: 21, m: 0 },
-                    ].map((p) => {
-                      const isSel = pickedHour === p.h && pickedMinute === p.m;
-                      return (
+                  <View
+                    style={[
+                      styles.clockCard,
+                      {
+                        backgroundColor: colors.surfaceElevated,
+                        borderColor: colors.borderSubtle,
+                      },
+                    ]}
+                  >
+                    <View style={styles.clockRow}>
+                      {/* Hour Column */}
+                      <View style={styles.digitCol}>
                         <TouchableOpacity
-                          key={p.label}
                           onPress={() => {
-                            setPickedHour(p.h);
-                            setPickedMinute(p.m);
+                            const cur12 = pickedHour % 12 === 0 ? 12 : pickedHour % 12;
+                            const next12 = cur12 === 12 ? 1 : cur12 + 1;
+                            const isPm = pickedHour >= 12;
+                            let newH = next12;
+                            if (isPm && next12 < 12) newH += 12;
+                            if (!isPm && next12 === 12) newH = 0;
+                            setPickedHour(newH);
+                          }}
+                          style={styles.stepperArrow}
+                          activeOpacity={0.6}
+                          accessibilityLabel="Increment Hour"
+                        >
+                          <Text style={[styles.stepperArrowTxt, { color: colors.primary }]}>▲</Text>
+                        </TouchableOpacity>
+                        <View style={[styles.digitBox, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
+                          <TextInput
+                            style={[styles.digitInput, { color: colors.text }]}
+                            value={String(pickedHour % 12 === 0 ? 12 : pickedHour % 12).padStart(2, '0')}
+                            onChangeText={(txt) => {
+                              const cleaned = txt.replace(/[^0-9]/g, '').slice(0, 2);
+                              let h = parseInt(cleaned, 10);
+                              if (!isNaN(h)) {
+                                if (h < 1) h = 1;
+                                if (h > 12) h = 12;
+                                const isPm = pickedHour >= 12;
+                                let newH = h;
+                                if (isPm && h < 12) newH += 12;
+                                if (!isPm && h === 12) newH = 0;
+                                setPickedHour(newH);
+                              }
+                            }}
+                            keyboardType="number-pad"
+                            maxLength={2}
+                            selectTextOnFocus
+                            accessibilityLabel="Alarm Hour"
+                          />
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => {
+                            const cur12 = pickedHour % 12 === 0 ? 12 : pickedHour % 12;
+                            const prev12 = cur12 === 1 ? 12 : cur12 - 1;
+                            const isPm = pickedHour >= 12;
+                            let newH = prev12;
+                            if (isPm && prev12 < 12) newH += 12;
+                            if (!isPm && prev12 === 12) newH = 0;
+                            setPickedHour(newH);
+                          }}
+                          style={styles.stepperArrow}
+                          activeOpacity={0.6}
+                          accessibilityLabel="Decrement Hour"
+                        >
+                          <Text style={[styles.stepperArrowTxt, { color: colors.primary }]}>▼</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <Text style={[styles.timeColon, { color: colors.text }]}>:</Text>
+
+                      {/* Minute Column */}
+                      <View style={styles.digitCol}>
+                        <TouchableOpacity
+                          onPress={() => setPickedMinute((pickedMinute + 1) % 60)}
+                          style={styles.stepperArrow}
+                          activeOpacity={0.6}
+                          accessibilityLabel="Increment Minute"
+                        >
+                          <Text style={[styles.stepperArrowTxt, { color: colors.primary }]}>▲</Text>
+                        </TouchableOpacity>
+                        <View style={[styles.digitBox, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
+                          <TextInput
+                            style={[styles.digitInput, { color: colors.text }]}
+                            value={String(pickedMinute).padStart(2, '0')}
+                            onChangeText={(txt) => {
+                              const cleaned = txt.replace(/[^0-9]/g, '').slice(0, 2);
+                              let m = parseInt(cleaned, 10);
+                              if (!isNaN(m)) {
+                                if (m < 0) m = 0;
+                                if (m > 59) m = 59;
+                                setPickedMinute(m);
+                              }
+                            }}
+                            keyboardType="number-pad"
+                            maxLength={2}
+                            selectTextOnFocus
+                            accessibilityLabel="Alarm Minute"
+                          />
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => setPickedMinute((pickedMinute - 1 + 60) % 60)}
+                          style={styles.stepperArrow}
+                          activeOpacity={0.6}
+                          accessibilityLabel="Decrement Minute"
+                        >
+                          <Text style={[styles.stepperArrowTxt, { color: colors.primary }]}>▼</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* AM / PM Segmented Control */}
+                      <View style={[styles.ampmContainer, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (pickedHour >= 12) {
+                              setPickedHour(pickedHour - 12);
+                            }
                           }}
                           style={[
-                            styles.quickChip,
-                            {
-                              backgroundColor: isSel ? colors.primary : colors.surfaceElevated,
-                              borderColor: isSel ? colors.primary : colors.borderSubtle,
-                            },
+                            styles.ampmBtn,
+                            pickedHour < 12 && { backgroundColor: colors.primary },
                           ]}
+                          activeOpacity={0.7}
                         >
                           <Text
                             style={[
-                              styles.quickChipTxt,
-                              isSel ? styles.chipTxtActive : { color: colors.textSecondary },
+                              styles.ampmBtnTxt,
+                              pickedHour < 12 ? styles.ampmBtnTxtActive : { color: colors.textSecondary },
                             ]}
                           >
-                            {p.label}
+                            AM
                           </Text>
                         </TouchableOpacity>
-                      );
-                    })}
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (pickedHour < 12) {
+                              setPickedHour(pickedHour + 12);
+                            }
+                          }}
+                          style={[
+                            styles.ampmBtn,
+                            pickedHour >= 12 && { backgroundColor: colors.primary },
+                          ]}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.ampmBtnTxt,
+                              pickedHour >= 12 ? styles.ampmBtnTxtActive : { color: colors.textSecondary },
+                            ]}
+                          >
+                            PM
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                   </View>
-
-                  {/* Hours and Minutes Horizontal Pickers */}
-                  <Text style={[styles.subLabel, typography.caption, { color: colors.textSecondary, marginTop: spacing.sm }]}>
-                    HOUR (24-HOUR CLOCK)
-                  </Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.horizWheelScroll}
-                  >
-                    {Array.from({ length: 24 }, (_, i) => i).map((h) => {
-                      const isSel = pickedHour === h;
-                      return (
-                        <TouchableOpacity
-                          key={h}
-                          onPress={() => setPickedHour(h)}
-                          style={[
-                            styles.wheelItem,
-                            {
-                              backgroundColor: isSel ? colors.primary : colors.surfaceElevated,
-                              borderColor: isSel ? colors.primary : colors.borderSubtle,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.wheelTxt,
-                              isSel ? styles.chipTxtActive : { color: colors.text },
-                            ]}
-                          >
-                            {h.toString().padStart(2, '0')}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-
-                  <Text style={[styles.subLabel, typography.caption, { color: colors.textSecondary, marginTop: spacing.sm }]}>
-                    MINUTE
-                  </Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.horizWheelScroll}
-                  >
-                    {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => {
-                      const isSel = pickedMinute === m;
-                      return (
-                        <TouchableOpacity
-                          key={m}
-                          onPress={() => setPickedMinute(m)}
-                          style={[
-                            styles.wheelItem,
-                            {
-                              backgroundColor: isSel ? colors.primary : colors.surfaceElevated,
-                              borderColor: isSel ? colors.primary : colors.borderSubtle,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.wheelTxt,
-                              isSel ? styles.chipTxtActive : { color: colors.text },
-                            ]}
-                          >
-                            {m.toString().padStart(2, '0')}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </>
+                </View>
               )}
             </View>
           )}
@@ -612,27 +662,76 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 4,
   },
-  quickTimeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginBottom: spacing.xs,
+  clockContainer: {
+    paddingVertical: spacing.xs,
   },
-  horizWheelScroll: {
-    gap: 6,
-    paddingVertical: 4,
-  },
-  wheelItem: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
+  clockCard: {
+    padding: 12,
     borderRadius: radius.md,
     borderWidth: 1,
-    minWidth: 42,
-    alignItems: 'center',
+    marginTop: 4,
   },
-  wheelTxt: {
-    fontSize: 14,
-    fontWeight: '600',
+  clockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  digitCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 64,
+  },
+  stepperArrow: {
+    paddingVertical: 3,
+    paddingHorizontal: 12,
+  },
+  stepperArrowTxt: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  digitBox: {
+    width: 60,
+    height: 48,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  digitInput: {
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    padding: 0,
+    width: '100%',
+  },
+  timeColon: {
+    fontSize: 24,
+    fontWeight: '800',
+    marginHorizontal: 8,
+    marginTop: -2,
+  },
+  ampmContainer: {
+    marginLeft: 12,
+    borderRadius: radius.md,
+    padding: 3,
+    borderWidth: 1,
+    flexDirection: 'column',
+    gap: 3,
+  },
+  ampmBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ampmBtnTxt: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  ampmBtnTxtActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
   },
   footerRow: {
     flexDirection: 'row',

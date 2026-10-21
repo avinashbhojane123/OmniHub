@@ -2,6 +2,11 @@ import { Habit, HabitWithStreak, HabitLog, RecurrenceRule } from '../../types';
 import { habitRepository } from '../../database/repositories/HabitRepository';
 import { alarmService } from '../alarm/AlarmService';
 import { format } from 'date-fns';
+import {
+  toggleBulletInRawText,
+  parseBulletNotes,
+  serializeBulletNotes,
+} from '../../utils/bulletNotes';
 
 export class HabitService {
   async getHabitsWithStreaks(): Promise<HabitWithStreak[]> {
@@ -86,6 +91,33 @@ export class HabitService {
   async deleteHabit(habitId: string): Promise<boolean> {
     await alarmService.cancelHabitAlarm(habitId);
     return await habitRepository.delete(habitId);
+  }
+
+  async toggleHabitSubtask(habitId: string, subtaskIndex: number): Promise<Habit | null> {
+    const habit = await habitRepository.findById(habitId);
+    if (!habit) return null;
+    const rawText = habit.description || '';
+    const updated = toggleBulletInRawText(rawText, subtaskIndex);
+    return await this.updateHabit(habitId, { description: updated });
+  }
+
+  async addHabitSubtask(habitId: string, subtaskText: string): Promise<Habit | null> {
+    const habit = await habitRepository.findById(habitId);
+    if (!habit) return null;
+    const clean = subtaskText.trim();
+    if (!clean) return habit;
+    const existing = (habit.description || '').trim();
+    const newText = existing ? `${existing}\n[ ] ${clean}` : `[ ] ${clean}`;
+    return await this.updateHabit(habitId, { description: newText });
+  }
+
+  async deleteHabitSubtask(habitId: string, subtaskIndex: number): Promise<Habit | null> {
+    const habit = await habitRepository.findById(habitId);
+    if (!habit) return null;
+    const bullets = parseBulletNotes(habit.description);
+    bullets.splice(subtaskIndex, 1);
+    const updated = serializeBulletNotes(bullets, 'checklist');
+    return await this.updateHabit(habitId, { description: updated });
   }
 }
 

@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert } from 'react-native';
 import { Task, HabitWithStreak, CalendarEvent } from '../types';
 import { taskService } from '../services/tasks/TaskService';
 import { habitService } from '../services/habits/HabitService';
-import { calendarService } from '../services/calendar/CalendarService';
+import { calendarRepository } from '../database/repositories/CalendarRepository';
+import { alarmService } from '../services/alarm/AlarmService';
+import { format } from 'date-fns';
 
 export function useToday() {
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
@@ -15,16 +17,27 @@ export function useToday() {
   const [completionPercentage, setCompletionPercentage] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const refreshToday = useCallback(async () => {
+  const isFetchingRef = useRef<boolean>(false);
+  const lastFetchTimeRef = useRef<number>(0);
+
+  const refreshToday = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (isFetchingRef.current) return;
+    if (!force && now - lastFetchTimeRef.current < 1500) return;
+
     try {
+      isFetchingRef.current = true;
+      lastFetchTimeRef.current = now;
       setLoading(true);
 
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      await taskService.ensureUpcomingRecurrences(3);
       const [tasks, overdue, upcoming, habitList, calEvents] = await Promise.all([
         taskService.getTodayTasks(),
         taskService.getOverdueTasks(),
         taskService.getUpcomingTask(),
         habitService.getHabitsWithStreaks(),
-        calendarService.getTodayEvents(),
+        calendarRepository.findRecentAndUpcoming(todayStr, 7),
       ]);
 
       setTodayTasks(tasks);
@@ -33,47 +46,108 @@ export function useToday() {
       setHabits(habitList);
       setCalendarEvents(calEvents);
 
-      // Calculate completion %
-      const total = tasks.length;
-      const completed = tasks.filter((t) => t.status === 'completed').length;
+      // Calculate completion % for today's active tasks
+      const active = tasks.filter((t) => t.status !== 'cancelled');
+      const total = active.length;
+      const completed = active.filter((t) => t.status === 'completed').length;
       setCompletionPercentage(total > 0 ? Math.round((completed / total) * 100) : 0);
 
-      // Detect schedule conflicts among today's tasks and calendar events
-      const conflictResult = taskService.detectConflicts(tasks, calEvents);
-      setConflicts(conflictResult.conflicts);
+      // Detect schedule conflicts across tasks, calendar events, and scheduled habits
+      try {
+        const conflictResult = taskService.detectConflicts(tasks, calEvents, habitList);
+        setConflicts(conflictResult.conflicts);
+      } catch (err) {
+        console.warn('Conflict detection error:', err);
+        setConflicts([]);
+      }
     } catch (e) {
       console.error('Failed to load today data:', e);
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
     refreshToday();
-
-    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      if (nextState === 'active') {
-        refreshToday();
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
   }, [refreshToday]);
 
   const toggleTask = async (task: Task) => {
-    if (task.status === 'completed') {
-      await taskService.uncompleteTask(task.id);
-    } else {
-      await taskService.completeTask(task.id);
+    const isNowDone = task.status !== 'completed';
+    const nextStatus = isNowDone ? 'completed' : 'pending';
+
+    // Optimistic UI update
+    setTodayTasks((prev) => {
+      const updated = prev.map((t) =>
+        t.id === task.id
+          ? { ...t, status: nextStatus as any, completedAt: isNowDone ? new Date().toISOString() : undefined }
+          : t
+      );
+      const active = updated.filter((t) => t.status !== 'cancelled');
+      const total = active.length;
+      const completed = active.filter((t) => t.status === 'completed').length;
+      setCompletionPercentage(total > 0 ? Math.round((completed / total) * 100) : 0);
+      return updated;
+    });
+    setOverdueTasks((prev) =>
+      isNowDone
+        ? prev.filter((t) => t.id !== task.id)
+        : prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus as any } : t))
+    );
+    if (isNowDone) {
+      setUpcomingTask((prev) => (prev?.id === task.id ? null : prev));
     }
-    await refreshToday();
+
+    try {
+      if (task.status === 'completed') {
+        await taskService.uncompleteTask(task.id);
+      } else {
+        await taskService.completeTask(task.id);
+      }
+      // Re-fetch upcoming and overdue quietly in background
+      const [overdue, upcoming] = await Promise.all([
+        taskService.getOverdueTasks(),
+        taskService.getUpcomingTask(),
+      ]);
+      setOverdueTasks(overdue);
+      setUpcomingTask(upcoming);
+    } catch (err: any) {
+      console.error('Failed to toggle task:', err);
+      Alert.alert('Error', err.message || 'Failed to update task status');
+      await refreshToday(true);
+    }
   };
 
   const toggleHabit = async (habit: HabitWithStreak) => {
-    await habitService.toggleHabitToday(habit.id, habit.completedToday);
-    await refreshToday();
+    const nextCompleted = !habit.completedToday;
+    const todayIso = format(new Date(), 'yyyy-MM-dd');
+
+    // Optimistic UI update
+    setHabits((prev) =>
+      prev.map((h) => {
+        if (h.id !== habit.id) return h;
+        const updatedWeekly = { ...h.weeklyLogs, [todayIso]: nextCompleted };
+        const nextStreak = nextCompleted ? h.currentStreak + 1 : Math.max(0, h.currentStreak - 1);
+        const nextBest = nextCompleted ? Math.max(h.bestStreak, nextStreak) : h.bestStreak;
+        return {
+          ...h,
+          completedToday: nextCompleted,
+          currentStreak: nextStreak,
+          bestStreak: nextBest,
+          weeklyLogs: updatedWeekly,
+        };
+      })
+    );
+
+    try {
+      await habitService.toggleHabitToday(habit.id, habit.completedToday);
+      const habitsWithStreaks = await habitService.getHabitsWithStreaks();
+      setHabits(habitsWithStreaks);
+    } catch (err: any) {
+      console.error('Failed to toggle habit:', err);
+      Alert.alert('Error', err.message || 'Failed to update habit');
+      await refreshToday(true);
+    }
   };
 
   const toggleHabitDate = async (
@@ -81,18 +155,192 @@ export function useToday() {
     dateStr: string,
     currentCompleted: boolean
   ) => {
-    await habitService.toggleHabitForDate(habitId, dateStr, currentCompleted);
-    await refreshToday();
+    const nextCompleted = !currentCompleted;
+    const todayIso = format(new Date(), 'yyyy-MM-dd');
+    const isToday = dateStr === todayIso;
+
+    // Optimistic UI update
+    setHabits((prev) =>
+      prev.map((h) => {
+        if (h.id !== habitId) return h;
+        const nextStreak = isToday
+          ? (nextCompleted ? h.currentStreak + 1 : Math.max(0, h.currentStreak - 1))
+          : h.currentStreak;
+        const nextBest = isToday && nextCompleted
+          ? Math.max(h.bestStreak, nextStreak)
+          : h.bestStreak;
+        return {
+          ...h,
+          completedToday: isToday ? nextCompleted : h.completedToday,
+          currentStreak: nextStreak,
+          bestStreak: nextBest,
+          weeklyLogs: {
+            ...h.weeklyLogs,
+            [dateStr]: nextCompleted,
+          },
+        };
+      })
+    );
+
+    try {
+      await habitService.toggleHabitForDate(habitId, dateStr, currentCompleted);
+      const habitsWithStreaks = await habitService.getHabitsWithStreaks();
+      setHabits(habitsWithStreaks);
+    } catch (err: any) {
+      console.error('Failed to toggle habit date:', err);
+      Alert.alert('Error', err.message || 'Failed to update habit log');
+      await refreshToday(true);
+    }
   };
 
   const deleteHabit = async (habitId: string) => {
-    await habitService.deleteHabit(habitId);
-    await refreshToday();
+    // Optimistic removal from in-memory state
+    setHabits((prev) => prev.filter((h) => h.id !== habitId));
+
+    try {
+      await habitService.deleteHabit(habitId);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.error('Failed to delete habit:', err);
+      Alert.alert('Error', err.message || 'Failed to delete habit');
+      await refreshToday(true);
+    }
   };
 
-  const snoozeTask = async (taskId: string) => {
-    await taskService.snoozeTask(taskId, 10);
-    await refreshToday();
+  const snoozeTask = async (taskId: string, minutes = 10) => {
+    // Optimistic snooze timestamp update
+    const snoozeUntilIso = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+    setTodayTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, snoozeUntil: snoozeUntilIso } : t))
+    );
+    setOverdueTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setUpcomingTask((prev) => (prev?.id === taskId ? null : prev));
+
+    try {
+      await taskService.snoozeTask(taskId, minutes as any);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.error('Failed to snooze task:', err);
+      Alert.alert('Error', err.message || 'Failed to snooze task');
+      await refreshToday(true);
+    }
+  };
+
+  const deleteTask = async (taskId: string) => {
+    // Optimistic removal from in-memory state
+    setTodayTasks((prev) => {
+      const updated = prev.filter((t) => t.id !== taskId);
+      const active = updated.filter((t) => t.status !== 'cancelled');
+      const total = active.length;
+      const completed = active.filter((t) => t.status === 'completed').length;
+      setCompletionPercentage(total > 0 ? Math.round((completed / total) * 100) : 0);
+      return updated;
+    });
+    setOverdueTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setUpcomingTask((prev) => (prev?.id === taskId ? null : prev));
+
+    try {
+      await taskService.deleteTask(taskId);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.error('Failed to delete task:', err);
+      Alert.alert('Error', err.message || 'Failed to delete task');
+      await refreshToday(true);
+    }
+  };
+
+  const deleteCalendarEvent = async (eventId: string) => {
+    setCalendarEvents((prev) => prev.filter((e) => e.id !== eventId));
+    try {
+      await alarmService.cancelEventAlarm(eventId);
+      await calendarRepository.delete(eventId);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.error('Failed to delete calendar event:', err);
+      Alert.alert('Error', err.message || 'Failed to delete event');
+      await refreshToday(true);
+    }
+  };
+
+  const toggleEventStatus = async (event: CalendarEvent) => {
+    const nextStatus = event.status === 'completed' ? 'active' : 'completed';
+    setCalendarEvents((prev) =>
+      prev.map((e) => (e.id === event.id ? { ...e, status: nextStatus } : e))
+    );
+    try {
+      await calendarRepository.update(event.id, { status: nextStatus });
+      if (nextStatus === 'completed') {
+        await alarmService.cancelEventAlarm(event.id);
+      } else if (event.ringAlarm) {
+        await alarmService.scheduleEventAlarm(event.id, event.title, event.date, event.time, event.description);
+      }
+      await refreshToday(true);
+    } catch (err: any) {
+      console.error('Failed to update event status:', err);
+      Alert.alert('Error', err.message || 'Failed to update event');
+      await refreshToday();
+    }
+  };
+
+  const completeAllPendingToday = async () => {
+    const pending = todayTasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled');
+    if (pending.length === 0) return;
+
+    // Optimistic UI update
+    setTodayTasks((prev) =>
+      prev.map((t) =>
+        t.status !== 'completed' && t.status !== 'cancelled'
+          ? { ...t, status: 'completed' as any, completedAt: new Date().toISOString() }
+          : t
+      )
+    );
+    setCompletionPercentage(100);
+    setUpcomingTask(null);
+
+    try {
+      await Promise.all(pending.map((t) => taskService.completeTask(t.id)));
+      await refreshToday(true);
+    } catch (err: any) {
+      console.error('Failed to complete all tasks:', err);
+      Alert.alert('Error', err.message || 'Failed to complete all tasks');
+      await refreshToday(true);
+    }
+  };
+
+  const toggleSubtask = async (taskId: string, subtaskIndex: number) => {
+    try {
+      await taskService.toggleSubtask(taskId, subtaskIndex);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.warn('Failed to toggle subtask:', err);
+    }
+  };
+
+  const toggleHabitSubtask = async (habitId: string, subtaskIndex: number) => {
+    try {
+      await habitService.toggleHabitSubtask(habitId, subtaskIndex);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.warn('Failed to toggle habit subtask:', err);
+    }
+  };
+
+  const addHabitSubtask = async (habitId: string, subtaskText: string) => {
+    try {
+      await habitService.addHabitSubtask(habitId, subtaskText);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.warn('Failed to add habit subtask:', err);
+    }
+  };
+
+  const deleteHabitSubtask = async (habitId: string, subtaskIndex: number) => {
+    try {
+      await habitService.deleteHabitSubtask(habitId, subtaskIndex);
+      await refreshToday(true);
+    } catch (err: any) {
+      console.warn('Failed to delete habit subtask:', err);
+    }
   };
 
   return {
@@ -109,6 +357,14 @@ export function useToday() {
     toggleHabit,
     toggleHabitDate,
     deleteHabit,
+    deleteTask,
     snoozeTask,
+    deleteCalendarEvent,
+    toggleEventStatus,
+    completeAllPendingToday,
+    toggleSubtask,
+    toggleHabitSubtask,
+    addHabitSubtask,
+    deleteHabitSubtask,
   };
 }

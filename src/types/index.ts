@@ -1,3 +1,5 @@
+import { KeepNote } from './keepNote';
+
 export type TaskPriority = 'low' | 'medium' | 'high';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'overdue' | 'cancelled';
@@ -11,11 +13,23 @@ export type RecurrenceType =
   | 'monthly'
   | 'custom';
 
+export type EisenhowerQuadrant = 'q1' | 'q2' | 'q3' | 'q4';
+export type GtdEnergyLevel = 'low' | 'medium' | 'high';
+export type GtdContext = '@computer' | '@phone' | '@errands' | '@home' | '@office' | '@review';
+
 export interface RecurrenceRule {
   type: RecurrenceType;
   interval?: number; // e.g. every 2 weeks
   daysOfWeek?: number[]; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
   endDate?: string; // YYYY-MM-DD
+  startDate?: string; // GTD Deferred start date YYYY-MM-DD
+  eisenhowerQuadrant?: EisenhowerQuadrant;
+  gtdContext?: string;
+  energyLevel?: GtdEnergyLevel;
+  accentColor?: string;
+  estimatedMinutes?: number;
+  isOvernight?: boolean;
+  isLoudAlarm?: boolean;
 }
 
 export interface Task {
@@ -80,23 +94,33 @@ export interface Category {
   createdAt: string;
 }
 
-export type CalendarSource = 'local' | 'android_calendar' | 'device';
-
 export interface CalendarEvent {
   id: string;
-  externalId?: string;
-  calendarId?: string;
   title: string;
   description?: string;
-  startTime: string; // ISO string
-  endTime: string; // ISO string
-  location?: string;
-  source: CalendarSource;
-  isAllDay: boolean;
-  color?: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm (24-hour)
+  ringAlarm: boolean;
+  status: 'active' | 'dismissed' | 'completed';
   createdAt: string;
   updatedAt: string;
-  syncedAt?: string;
+}
+
+export interface CreateCalendarEventDTO {
+  title: string;
+  description?: string;
+  date: string;
+  time: string;
+  ringAlarm?: boolean;
+}
+
+export interface UpdateCalendarEventDTO {
+  title?: string;
+  description?: string;
+  date?: string;
+  time?: string;
+  ringAlarm?: boolean;
+  status?: 'active' | 'dismissed' | 'completed';
 }
 
 export interface Habit {
@@ -129,23 +153,9 @@ export interface HabitWithStreak extends Habit {
   weeklyLogs: { [date: string]: boolean };
 }
 
-export interface Goal {
-  id: string;
-  title: string;
-  description?: string;
-  deadline?: string; // YYYY-MM-DD
-  progress: number; // 0 to 100
-  color?: string;
-  category?: string;
-  createdAt: string;
-  updatedAt: string;
-  tasksCount?: number;
-  completedTasksCount?: number;
-}
-
 export interface Note {
   id: string;
-  entityType: 'task' | 'calendar_event' | 'habit' | 'goal' | 'general';
+  entityType: 'task' | 'habit' | 'general';
   entityId?: string;
   title?: string;
   content: string;
@@ -167,7 +177,7 @@ export interface NotificationSchedule {
   id: string;
   notificationId: string;
   entityId: string;
-  type: 'task' | 'habit' | 'event';
+  type: 'task' | 'habit';
   scheduledAt: string; // ISO string
   title: string;
   body: string;
@@ -179,13 +189,12 @@ export interface NotificationSchedule {
 export interface AppSettings {
   notificationsEnabled: boolean;
   notificationSound: boolean;
+  notificationSoundTone?: 'standard' | 'loud' | 'gentle';
   notificationVibration: boolean;
   defaultReminderMinutes: number;
   defaultSnoozeMinutes: number;
-  calendarSyncEnabled: boolean;
-  selectedCalendarIds: string[];
-  lastCalendarSyncAt?: string;
   theme: 'system' | 'light' | 'dark';
+  companionAutoSync?: boolean;
 }
 
 export interface ProductivityStats {
@@ -203,18 +212,28 @@ export interface ProductivityStats {
   weeklyCompletionRate: number;
 }
 
+export interface SyncTombstone {
+  id: string;
+  entityType: 'task' | 'habit' | 'keepNote' | 'calendarEvent' | 'category' | 'note';
+  deletedAt: string;
+}
+
 export interface BackupData {
   version: number;
   createdAt: string;
   tasks: Task[];
   categories: Category[];
-  calendarEvents: CalendarEvent[];
+  calendarEvents?: CalendarEvent[];
   habits: Habit[];
   habitLogs: HabitLog[];
-  goals: Goal[];
-  goalTasks?: { id?: string; goalId: string; taskId: string }[];
   notes: Note[];
+  keepNotes?: KeepNote[];
   settings: Record<string, any>;
+  tombstones?: SyncTombstone[];
 }
 
 export type SnoozeDurationOption = 5 | 10 | 15 | 30 | 60;
+
+export * from './keepNote';
+export * from './chat';
+export * from './movie';
