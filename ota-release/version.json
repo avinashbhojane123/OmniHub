@@ -1,8 +1,8 @@
 {
-  "version": 1792528286435,
-  "buildTime": "02:01:26 am",
-  "sizeBytes": 2486966,
-  "sizeMb": "2.37",
+  "version": 1792563453714,
+  "buildTime": "11:47:33 am",
+  "sizeBytes": 2491882,
+  "sizeMb": "2.38",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "Scroll directly to new message immediately"
+  "notes": "OTA update 2026-10-21 11:46"
 }
