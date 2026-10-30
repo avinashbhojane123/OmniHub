@@ -1,8 +1,8 @@
 {
-  "version": 1792563453714,
-  "buildTime": "11:47:33 am",
-  "sizeBytes": 2491882,
-  "sizeMb": "2.38",
+  "version": 1793334696440,
+  "buildTime": "10:01:36 am",
+  "sizeBytes": 2616519,
+  "sizeMb": "2.50",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "OTA update 2026-10-21 11:46"
+  "notes": "fix: harden habit icons, subtasks, and time utilities"
 }
