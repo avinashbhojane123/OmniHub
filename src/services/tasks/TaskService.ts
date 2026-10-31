@@ -8,9 +8,34 @@ import {
 } from '../../types';
 import { taskRepository } from '../../database/repositories/TaskRepository';
 import { notificationService } from '../notifications/NotificationService';
-import { format, parseISO, addDays, addMonths, isValid } from 'date-fns';
-import { normalizeTimeTo24H, parseTimeToMinutes } from '../../utils/time';
+import { format, parseISO, addDays, isValid } from 'date-fns';
+import { normalizeTimeTo24H, parseTimeToMinutes, isTimeValid } from '../../utils/time';
 import { toggleBulletInRawText, resetBulletsInRawText } from '../../utils/bulletNotes';
+
+/**
+ * Sanitizes and normalizes an input date string to YYYY-MM-DD.
+ * Handles dates containing ISO timestamp suffixes or whitespace.
+ */
+function sanitizeDateString(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  const trimmed = dateStr.trim();
+  if (!trimmed) return '';
+  if (trimmed.includes('T')) {
+    return trimmed.split('T')[0].trim();
+  }
+  return trimmed;
+}
+
+/**
+ * Checks if a task should have a scheduled notification reminder.
+ * True for tasks with a date, non-disabled reminder, and either a start time
+ * or an untimed all-day reminder (> 0 minutes).
+ */
+function shouldScheduleReminder(task?: Task | null): boolean {
+  if (!task || !task.date || task.reminderMinutes === -1) return false;
+  if (task.status === 'completed' || task.status === 'cancelled') return false;
+  return Boolean(task.startTime) || (task.reminderMinutes !== undefined && task.reminderMinutes > 0);
+}
 
 export class TaskService {
   async createTask(dto: CreateTaskDTO): Promise<Task> {
@@ -19,6 +44,21 @@ export class TaskService {
       throw new Error('Task title cannot be empty.');
     }
 
+    // 2. Validate time format if explicitly provided as non-empty
+    if (dto.startTime !== undefined && dto.startTime !== null) {
+      const str = String(dto.startTime).trim();
+      if (str.length > 0 && !isTimeValid(str)) {
+        throw new Error('Invalid start time format.');
+      }
+    }
+    if (dto.endTime !== undefined && dto.endTime !== null) {
+      const str = String(dto.endTime).trim();
+      if (str.length > 0 && !isTimeValid(str)) {
+        throw new Error('Invalid end time format.');
+      }
+    }
+
+    const cleanDate = sanitizeDateString(dto.date);
     const normStart = normalizeTimeTo24H(dto.startTime);
     const normEnd = normalizeTimeTo24H(dto.endTime);
     const isOvernight =
@@ -26,7 +66,7 @@ export class TaskService {
         ? Boolean(dto.isOvernight)
         : Boolean(dto.recurrenceRule?.isOvernight);
 
-    // 2. Start/End Time Validation (Non-overnight tasks cannot end before start)
+    // 3. Start/End Time Validation (Non-overnight tasks cannot end before start)
     if (normStart && normEnd && !isOvernight) {
       const startMin = parseTimeToMinutes(normStart);
       const endMin = parseTimeToMinutes(normEnd);
@@ -57,23 +97,35 @@ export class TaskService {
         ? dto.recurrenceRule.estimatedMinutes
         : undefined;
 
+    // Anchor monthDay if monthly or yearly recurrence
+    const recurrenceRule = dto.recurrenceRule
+      ? {
+          ...dto.recurrenceRule,
+          ...((dto.recurrenceRule.type === 'monthly' || dto.recurrenceRule.type === 'yearly') &&
+          !dto.recurrenceRule.monthDay &&
+          cleanDate
+            ? { monthDay: parseISO(cleanDate).getDate() || new Date().getDate() }
+            : {}),
+        }
+      : undefined;
+
     const newTask: Task = {
       id,
       seriesId,
       title: dto.title.trim(),
       description: dto.description?.trim() || undefined,
-      date: dto.date,
+      date: cleanDate,
       startTime: normStart || undefined,
       endTime: normEnd || undefined,
       priority: dto.priority || 'medium',
       categoryId: dto.categoryId || undefined,
       status: 'pending',
-      recurrenceRule: dto.recurrenceRule,
+      recurrenceRule,
       reminderMinutes,
       notes: dto.notes?.trim() || undefined,
       eisenhowerQuadrant:
-        dto.eisenhowerQuadrant || dto.recurrenceRule?.eisenhowerQuadrant || undefined,
-      accentColor: dto.accentColor || dto.recurrenceRule?.accentColor || undefined,
+        dto.eisenhowerQuadrant || recurrenceRule?.eisenhowerQuadrant || undefined,
+      accentColor: dto.accentColor || recurrenceRule?.accentColor || undefined,
       isOvernight,
       isLoudAlarm,
       estimatedMinutes,
@@ -84,7 +136,7 @@ export class TaskService {
     const saved = await taskRepository.create(newTask);
 
     // Schedule notification reminder if task has a valid scheduled date/time and reminder is enabled
-    if (saved && saved.date && saved.startTime && saved.reminderMinutes !== -1) {
+    if (saved && shouldScheduleReminder(saved)) {
       try {
         await notificationService.scheduleTaskReminder(saved);
       } catch (err) {
@@ -100,6 +152,20 @@ export class TaskService {
 
     if (dto.title !== undefined && dto.title.trim().length === 0) {
       throw new Error('Task title cannot be empty.');
+    }
+
+    // Validate time format if explicitly provided as non-empty
+    if (dto.startTime !== undefined && dto.startTime !== null) {
+      const str = String(dto.startTime).trim();
+      if (str.length > 0 && !isTimeValid(str)) {
+        throw new Error('Invalid start time format.');
+      }
+    }
+    if (dto.endTime !== undefined && dto.endTime !== null) {
+      const str = String(dto.endTime).trim();
+      if (str.length > 0 && !isTimeValid(str)) {
+        throw new Error('Invalid end time format.');
+      }
     }
 
     const existing = await taskRepository.findById(id);
@@ -127,15 +193,31 @@ export class TaskService {
       }
     }
 
+    const cleanDate = dto.date !== undefined ? sanitizeDateString(dto.date) : existing.date;
+
+    // Anchor monthDay if recurrence rule is updated to monthly/yearly without monthDay
+    const updatedRecurrenceRule = dto.recurrenceRule
+      ? {
+          ...dto.recurrenceRule,
+          ...((dto.recurrenceRule.type === 'monthly' || dto.recurrenceRule.type === 'yearly') &&
+          !dto.recurrenceRule.monthDay &&
+          cleanDate
+            ? { monthDay: parseISO(cleanDate).getDate() || new Date().getDate() }
+            : {}),
+        }
+      : dto.recurrenceRule;
+
     const updatePayload: UpdateTaskDTO = {
       ...dto,
       ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
+      ...(dto.date !== undefined ? { date: cleanDate } : {}),
+      ...(dto.recurrenceRule !== undefined ? { recurrenceRule: updatedRecurrenceRule } : {}),
       ...(dto.description !== undefined
         ? { description: dto.description ? dto.description.trim() : null }
         : {}),
       ...(dto.notes !== undefined ? { notes: dto.notes ? dto.notes.trim() : null } : {}),
-      ...(dto.startTime !== undefined ? { startTime: normStart } : {}),
-      ...(dto.endTime !== undefined ? { endTime: normEnd } : {}),
+      ...(dto.startTime !== undefined ? { startTime: normStart || null } : {}),
+      ...(dto.endTime !== undefined ? { endTime: normEnd || null } : {}),
       ...(dto.eisenhowerQuadrant !== undefined ? { eisenhowerQuadrant: dto.eisenhowerQuadrant } : {}),
       ...(dto.accentColor !== undefined ? { accentColor: dto.accentColor } : {}),
       ...(dto.isOvernight !== undefined
@@ -161,13 +243,13 @@ export class TaskService {
     // Synchronize notification reminder state
     if (updated.status === 'completed' || updated.status === 'cancelled') {
       await notificationService.cancelTaskReminder(id);
-    } else if (updated.date && updated.startTime && updated.reminderMinutes !== -1) {
+    } else if (shouldScheduleReminder(updated)) {
       try {
         await notificationService.scheduleTaskReminder(updated);
       } catch (err) {
         console.warn('Failed to update task reminder:', err);
       }
-    } else if (updated.reminderMinutes === -1 || !updated.date || !updated.startTime) {
+    } else {
       await notificationService.cancelTaskReminder(id);
     }
 
@@ -203,8 +285,8 @@ export class TaskService {
     const task = await taskRepository.findById(id);
     if (!task) return null;
 
-    // Prevent duplicate spawning if task is already cancelled
-    if (task.status === 'cancelled') {
+    // Prevent duplicate spawning if task is already cancelled or completed
+    if (task.status === 'cancelled' || task.status === 'completed') {
       return task;
     }
 
@@ -254,6 +336,75 @@ export class TaskService {
     return updated;
   }
 
+  private advanceStep(d: Date, rule: NonNullable<Task['recurrenceRule']>, baseDate: Date): Date {
+    switch (rule.type) {
+      case 'daily':
+        return addDays(d, rule.interval && rule.interval > 0 ? rule.interval : 1);
+      case 'weekdays': {
+        const interval = rule.interval && rule.interval > 0 ? rule.interval : 1;
+        let temp = d;
+        for (let i = 0; i < interval; i++) {
+          temp = addDays(temp, 1);
+          while (temp.getDay() === 0 || temp.getDay() === 6) {
+            temp = addDays(temp, 1);
+          }
+        }
+        return temp;
+      }
+      case 'weekends': {
+        const interval = rule.interval && rule.interval > 0 ? rule.interval : 1;
+        let temp = d;
+        for (let i = 0; i < interval; i++) {
+          temp = addDays(temp, 1);
+          while (temp.getDay() !== 0 && temp.getDay() !== 6) {
+            temp = addDays(temp, 1);
+          }
+        }
+        return temp;
+      }
+      case 'weekly':
+      case 'custom': {
+        if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
+          const sortedDays = [...rule.daysOfWeek].sort((a, b) => a - b);
+          const currentDay = d.getDay();
+          const nextDayThisWeek = sortedDays.find((day) => day > currentDay);
+          if (nextDayThisWeek !== undefined) {
+            return addDays(d, nextDayThisWeek - currentDay);
+          }
+          const firstDayNextWeek = sortedDays[0];
+          const intervalWeeks = rule.interval && rule.interval > 1 ? rule.interval : 1;
+          const daysToSunday = 7 - currentDay;
+          const daysToAdd = daysToSunday + (intervalWeeks - 1) * 7 + firstDayNextWeek;
+          return addDays(d, daysToAdd);
+        }
+        return addDays(d, (rule.interval && rule.interval > 0 ? rule.interval : 1) * 7);
+      }
+      case 'monthly': {
+        const originalDay = rule.monthDay || baseDate.getDate();
+        const intervalMonths = rule.interval && rule.interval > 0 ? rule.interval : 1;
+        const currentYear = d.getFullYear();
+        const currentMonth = d.getMonth();
+        const targetTotalMonth = currentMonth + intervalMonths;
+        const targetYear = currentYear + Math.floor(targetTotalMonth / 12);
+        const targetMonth = ((targetTotalMonth % 12) + 12) % 12;
+        const maxDaysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+        const safeDay = Math.min(originalDay, maxDaysInTargetMonth);
+        return new Date(targetYear, targetMonth, safeDay, d.getHours(), d.getMinutes());
+      }
+      case 'yearly': {
+        const originalDay = rule.monthDay || baseDate.getDate();
+        const intervalYears = rule.interval && rule.interval > 0 ? rule.interval : 1;
+        const targetYear = d.getFullYear() + intervalYears;
+        const targetMonth = d.getMonth();
+        const maxDaysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+        const safeDay = Math.min(originalDay, maxDaysInTargetMonth);
+        return new Date(targetYear, targetMonth, safeDay, d.getHours(), d.getMinutes());
+      }
+      default:
+        return addDays(d, 1);
+    }
+  }
+
   private async spawnNextRecurrence(task: Task): Promise<Task | null> {
     const rule = task.recurrenceRule;
     if (!rule || rule.type === 'none') return null;
@@ -261,76 +412,13 @@ export class TaskService {
     const baseDate = parseISO(task.date);
     if (!isValid(baseDate)) return null;
 
-    const advanceStep = (d: Date): Date => {
-      switch (rule.type) {
-        case 'daily':
-          return addDays(d, rule.interval && rule.interval > 0 ? rule.interval : 1);
-        case 'weekdays': {
-          let temp = addDays(d, 1);
-          while (temp.getDay() === 0 || temp.getDay() === 6) {
-            temp = addDays(temp, 1);
-          }
-          return temp;
-        }
-        case 'weekends': {
-          let temp = addDays(d, 1);
-          while (temp.getDay() !== 0 && temp.getDay() !== 6) {
-            temp = addDays(temp, 1);
-          }
-          return temp;
-        }
-        case 'weekly':
-        case 'custom': {
-          if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
-            const sortedDays = [...rule.daysOfWeek].sort((a, b) => a - b);
-            const currentDay = d.getDay();
-            const nextDayThisWeek = sortedDays.find((day) => day > currentDay);
-            if (nextDayThisWeek !== undefined) {
-              return addDays(d, nextDayThisWeek - currentDay);
-            }
-            const firstDayNextWeek = sortedDays[0];
-            const intervalWeeks = rule.interval && rule.interval > 1 ? rule.interval : 1;
-            const daysToSunday = 7 - currentDay;
-            const daysToAdd = daysToSunday + (intervalWeeks - 1) * 7 + firstDayNextWeek;
-            return addDays(d, daysToAdd);
-          }
-          return addDays(d, (rule.interval && rule.interval > 0 ? rule.interval : 1) * 7);
-        }
-        case 'monthly': {
-          const originalDay = rule.monthDay || baseDate.getDate();
-          const targetMonthDate = addMonths(d, rule.interval && rule.interval > 0 ? rule.interval : 1);
-          const maxDays = new Date(
-            targetMonthDate.getFullYear(),
-            targetMonthDate.getMonth() + 1,
-            0
-          ).getDate();
-          targetMonthDate.setDate(Math.min(originalDay, maxDays));
-          return targetMonthDate;
-        }
-        case 'yearly': {
-          const originalDay = rule.monthDay || baseDate.getDate();
-          const intervalYears = rule.interval && rule.interval > 0 ? rule.interval : 1;
-          const targetYearDate = addMonths(d, intervalYears * 12);
-          const maxDays = new Date(
-            targetYearDate.getFullYear(),
-            targetYearDate.getMonth() + 1,
-            0
-          ).getDate();
-          targetYearDate.setDate(Math.min(originalDay, maxDays));
-          return targetYearDate;
-        }
-        default:
-          return addDays(d, 1);
-      }
-    };
-
-    let nextDate = advanceStep(baseDate);
+    let nextDate = this.advanceStep(baseDate, rule, baseDate);
     const todayStr = format(new Date(), 'yyyy-MM-dd');
 
     // If base date was overdue in the past, advance nextDate forward until today or future
     let advanceLimit = 0;
     while (format(nextDate, 'yyyy-MM-dd') < todayStr && advanceLimit < 365) {
-      nextDate = advanceStep(nextDate);
+      nextDate = this.advanceStep(nextDate, rule, baseDate);
       advanceLimit++;
     }
 
@@ -343,7 +431,7 @@ export class TaskService {
     const existingOnDate = await taskRepository.findByDate(nextDateStr);
     const alreadyExists = existingOnDate.some((t) => {
       if (t.status === 'cancelled') return false;
-      if (task.seriesId && t.seriesId) {
+      if (task.seriesId) {
         return t.seriesId === task.seriesId;
       }
       return t.title.toLowerCase().trim() === task.title.toLowerCase().trim();
@@ -373,6 +461,14 @@ export class TaskService {
         ? Boolean(task.isOvernight)
         : Boolean(task.recurrenceRule?.isOvernight);
 
+    // Preserve monthDay anchor across future occurrences
+    const preservedRule = {
+      ...rule,
+      ...(rule.type === 'monthly' || rule.type === 'yearly'
+        ? { monthDay: rule.monthDay || baseDate.getDate() }
+        : {}),
+    };
+
     return await this.createTask({
       seriesId,
       title: task.title,
@@ -382,7 +478,7 @@ export class TaskService {
       endTime: task.endTime,
       priority: task.priority,
       categoryId: task.categoryId,
-      recurrenceRule: task.recurrenceRule,
+      recurrenceRule: preservedRule,
       reminderMinutes,
       notes: cleanNotes || undefined,
       eisenhowerQuadrant:
@@ -428,19 +524,40 @@ export class TaskService {
       }
 
       for (const [, instances] of seriesMap.entries()) {
-        instances.sort((a, b) => a.date.localeCompare(b.date));
+        instances.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         const latest = instances[instances.length - 1];
         if (!latest || !latest.recurrenceRule || latest.recurrenceRule.type === 'none') continue;
 
         let currentCursor = latest;
         let safetyCounter = 0;
 
-        while (currentCursor.date < horizonDateStr && safetyCounter < 10) {
+        while ((currentCursor.date || '') < horizonDateStr && safetyCounter < 10) {
           safetyCounter++;
           const spawned = await this.spawnNextRecurrence(currentCursor);
-          if (!spawned) break;
-          spawnedCount++;
-          currentCursor = spawned;
+          if (spawned) {
+            spawnedCount++;
+            currentCursor = spawned;
+          } else {
+            // If already exists on the next date step, advance cursor across that existing task
+            const baseDate = parseISO(currentCursor.date);
+            if (!isValid(baseDate)) break;
+            const nextDate = this.advanceStep(baseDate, currentCursor.recurrenceRule!, baseDate);
+            const nextDateStr = format(nextDate, 'yyyy-MM-dd');
+            if (nextDateStr <= currentCursor.date) break;
+
+            const existingTasksOnDate = await taskRepository.findByDate(nextDateStr);
+            const existingInstance = existingTasksOnDate.find((t) =>
+              currentCursor.seriesId
+                ? t.seriesId === currentCursor.seriesId
+                : t.title.toLowerCase().trim() === currentCursor.title.toLowerCase().trim()
+            );
+
+            if (existingInstance && (existingInstance.date || '') > (currentCursor.date || '')) {
+              currentCursor = existingInstance;
+            } else {
+              break;
+            }
+          }
         }
       }
 
@@ -456,6 +573,8 @@ export class TaskService {
    * Prioritizes whichever field actually contains checkbox syntax to prevent swallowing edits.
    */
   async toggleSubtask(taskId: string, subtaskIndex: number): Promise<Task | null> {
+    if (!taskId || subtaskIndex < 0) return null;
+
     const task = await taskRepository.findById(taskId);
     if (!task) return null;
 
@@ -464,15 +583,19 @@ export class TaskService {
 
     if (hasNotesChecklist) {
       const updatedNotes = toggleBulletInRawText(task.notes!, subtaskIndex);
+      if (updatedNotes === task.notes) return task;
       return await this.updateTask(taskId, { notes: updatedNotes });
     } else if (hasDescChecklist) {
       const updatedDesc = toggleBulletInRawText(task.description!, subtaskIndex);
+      if (updatedDesc === task.description) return task;
       return await this.updateTask(taskId, { description: updatedDesc });
     } else if (task.notes && task.notes.trim().length > 0) {
       const updatedNotes = toggleBulletInRawText(task.notes, subtaskIndex);
+      if (updatedNotes === task.notes) return task;
       return await this.updateTask(taskId, { notes: updatedNotes });
     } else if (task.description && task.description.trim().length > 0) {
       const updatedDesc = toggleBulletInRawText(task.description, subtaskIndex);
+      if (updatedDesc === task.description) return task;
       return await this.updateTask(taskId, { description: updatedDesc });
     }
 
@@ -484,6 +607,11 @@ export class TaskService {
 
     const original = await taskRepository.findById(id);
     if (!original) return null;
+
+    // Idempotent: If task is not completed, no state change or series deletion needed
+    if (original.status !== 'completed') {
+      return original;
+    }
 
     const updated = await taskRepository.update(id, {
       status: 'pending',
@@ -507,7 +635,7 @@ export class TaskService {
       }
     }
 
-    if (updated && updated.date && updated.startTime && updated.reminderMinutes !== -1) {
+    if (updated && shouldScheduleReminder(updated)) {
       try {
         await notificationService.scheduleTaskReminder(updated);
       } catch (err) {
@@ -519,7 +647,17 @@ export class TaskService {
 
   async snoozeTask(id: string, minutes: SnoozeDurationOption = 10): Promise<Task | null> {
     if (!id) return null;
-    await notificationService.snoozeTaskReminder(id, minutes);
+    const existing = await taskRepository.findById(id);
+    if (!existing) return null;
+
+    const safeMinutes = typeof minutes === 'number' && minutes > 0 ? minutes : 10;
+    try {
+      await notificationService.snoozeTaskReminder(id, safeMinutes);
+    } catch (err) {
+      console.warn('Failed to snooze task reminder in notification service:', err);
+      const snoozeTarget = new Date(Date.now() + safeMinutes * 60 * 1000).toISOString();
+      await taskRepository.update(id, { snoozeUntil: snoozeTarget });
+    }
     return await taskRepository.findById(id);
   }
 
@@ -529,28 +667,37 @@ export class TaskService {
     const existing = await taskRepository.findById(id);
     if (!existing) return null;
 
+    if (newTime !== undefined && newTime !== null) {
+      const str = String(newTime).trim();
+      if (str.length > 0 && !isTimeValid(str)) {
+        throw new Error('Invalid start time format.');
+      }
+    }
+
+    const cleanDate = sanitizeDateString(newDate) || existing.date;
     const normTime = newTime !== undefined ? normalizeTimeTo24H(newTime) : existing.startTime;
     const isOvernight = Boolean(existing.isOvernight || existing.recurrenceRule?.isOvernight);
 
     // Validate that end time does not precede new start time unless overnight
-    let adjustedEndTime = existing.endTime;
+    let adjustedEndTime: string | null | undefined = existing.endTime;
     if (normTime && existing.endTime && !isOvernight) {
       const startMin = parseTimeToMinutes(normTime);
       const endMin = parseTimeToMinutes(existing.endTime);
       if (startMin !== null && endMin !== null && endMin < startMin) {
-        adjustedEndTime = undefined;
+        // Pass null so TaskRepository clears it in the database
+        adjustedEndTime = null;
       }
     }
 
     const updated = await taskRepository.update(id, {
-      date: newDate,
+      date: cleanDate,
       startTime: normTime,
       endTime: adjustedEndTime,
       status: 'pending',
       snoozeUntil: null as any,
     });
 
-    if (updated && updated.date && updated.startTime && updated.reminderMinutes !== -1) {
+    if (updated && shouldScheduleReminder(updated)) {
       try {
         await notificationService.scheduleTaskReminder(updated);
       } catch (err) {
@@ -578,35 +725,55 @@ export class TaskService {
   }
 
   async getBacklogTasks(): Promise<Task[]> {
-    return await taskRepository.findByDate('');
+    const all = await taskRepository.findAll();
+    return all.filter((t) => !t.date || t.date.trim().length === 0);
   }
 
   async getOverdueTasks(): Promise<Task[]> {
     const now = new Date();
     const todayStr = format(now, 'yyyy-MM-dd');
     const currentTimeStr = format(now, 'HH:mm');
-    return await taskRepository.findOverdue(todayStr, currentTimeStr);
+    const overdue = await taskRepository.findOverdue(todayStr, currentTimeStr);
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+
+    // Guard: Yesterday's overnight task that is actively in progress right now is not yet overdue
+    const yesterdayStr = format(addDays(now, -1), 'yyyy-MM-dd');
+    return overdue.filter((t) => {
+      if (t.date === yesterdayStr && (t.isOvernight || t.recurrenceRule?.isOvernight) && t.startTime && t.endTime) {
+        const startMin = parseTimeToMinutes(t.startTime);
+        const endMin = parseTimeToMinutes(t.endTime);
+        if (startMin !== null && endMin !== null && endMin < startMin && nowMin < endMin) {
+          return false; // Still actively running in overnight morning window
+        }
+      }
+      return true;
+    });
   }
 
   async getTasksByDate(date: string): Promise<Task[]> {
     if (date === undefined || date === null) return [];
-    return await taskRepository.findByDate(date);
+    const clean = sanitizeDateString(date);
+    return await taskRepository.findByDate(clean);
   }
 
   async getTasksByDateRange(startDate: string, endDate: string): Promise<Task[]> {
-    if (!startDate || !endDate) return [];
-    return await taskRepository.findByDateRange(startDate, endDate);
+    const cleanStart = sanitizeDateString(startDate);
+    const cleanEnd = sanitizeDateString(endDate);
+    if (!cleanStart || !cleanEnd) return [];
+    const [start, end] = cleanStart <= cleanEnd ? [cleanStart, cleanEnd] : [cleanEnd, cleanStart];
+    return await taskRepository.findByDateRange(start, end);
   }
 
   async getTasksByCategory(categoryId: string): Promise<Task[]> {
-    if (!categoryId) return [];
+    if (!categoryId || categoryId.trim().length === 0) return [];
+    const cleanId = categoryId.trim();
     const all = await taskRepository.findAll();
-    return all.filter((t) => t.categoryId === categoryId);
+    return all.filter((t) => t.categoryId === cleanId);
   }
 
   async getTasksBySeriesId(seriesId: string): Promise<Task[]> {
-    if (!seriesId) return [];
-    return await taskRepository.findBySeriesId(seriesId);
+    if (!seriesId || seriesId.trim().length === 0) return [];
+    return await taskRepository.findBySeriesId(seriesId.trim());
   }
 
   async searchTasks(query: string): Promise<Task[]> {
@@ -628,6 +795,10 @@ export class TaskService {
       const yesterdayTasks = await taskRepository.findByDate(yesterdayStr);
       const activeOvernightFromYesterday = yesterdayTasks.find((t) => {
         if (t.status === 'completed' || t.status === 'cancelled') return false;
+        if (t.snoozeUntil) {
+          const sDate = new Date(t.snoozeUntil);
+          if (isValid(sDate) && sDate.getTime() > nowTimestamp) return false;
+        }
         const isOvernight = Boolean(t.isOvernight || t.recurrenceRule?.isOvernight);
         if (!isOvernight || !t.startTime || !t.endTime) return false;
         const startMin = parseTimeToMinutes(t.startTime);
@@ -645,7 +816,12 @@ export class TaskService {
     const pendingTasks = todayTasks.filter(
       (t) => t.status !== 'completed' && t.status !== 'cancelled'
     );
-    if (pendingTasks.length === 0) return null;
+
+    // Fallback: If no pending tasks today, return top overdue task if available
+    if (pendingTasks.length === 0) {
+      const overdue = await this.getOverdueTasks();
+      return overdue.length > 0 ? overdue[0] : null;
+    }
 
     // 2. Check for tasks currently IN PROGRESS (active right now today)
     const activeTasks = pendingTasks.filter((t) => {
@@ -666,6 +842,8 @@ export class TaskService {
         } else {
           endMin = Math.max(parsedEnd, startMin + 1);
         }
+      } else if (t.estimatedMinutes && t.estimatedMinutes > 0) {
+        endMin = startMin + t.estimatedMinutes;
       } else {
         endMin = startMin + 60;
       }
@@ -698,7 +876,8 @@ export class TaskService {
           if (t.snoozeUntil) {
             const sDate = new Date(t.snoozeUntil);
             if (isValid(sDate) && sDate.getTime() > nowTimestamp) {
-              return sDate.getHours() * 60 + sDate.getMinutes();
+              const diffMins = Math.round((sDate.getTime() - nowTimestamp) / 60000);
+              return nowMin + diffMins;
             }
           }
           return parseTimeToMinutes(t.startTime || '') ?? 9999;
@@ -708,8 +887,12 @@ export class TaskService {
       return upcomingTimedTasks[0];
     }
 
-    // 4. Check for overdue timed tasks earlier today that are still pending
+    // 4. Check for overdue timed tasks earlier today that are still pending (and not future-snoozed)
     const overdueTimedTasks = pendingTasks.filter((t) => {
+      if (t.snoozeUntil) {
+        const sDate = new Date(t.snoozeUntil);
+        if (isValid(sDate) && sDate.getTime() > nowTimestamp) return false;
+      }
       if (!t.startTime) return false;
       const tMin = parseTimeToMinutes(t.startTime);
       return tMin !== null && tMin < nowMin;
@@ -750,9 +933,14 @@ export class TaskService {
     const safeHabits = Array.isArray(habits) ? habits : [];
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const effectiveDate = targetDate || safeTasks.find((t) => Boolean(t.date))?.date || todayStr;
+    const effectiveDate =
+      targetDate ||
+      safeTasks.find((t) => Boolean(t.date))?.date ||
+      safeEvents.find((e) => Boolean(e.date))?.date ||
+      todayStr;
     const targetDateObj = parseISO(effectiveDate);
     const targetDayOfWeek = isValid(targetDateObj) ? targetDateObj.getDay() : new Date().getDay();
+    const yesterdayDateStr = format(addDays(targetDateObj, -1), 'yyyy-MM-dd');
 
     const scheduledItems: Array<{
       title: string;
@@ -762,12 +950,33 @@ export class TaskService {
       endMin: number;
     }> = [];
 
-    // 1. Scheduled tasks on target date
+    // 1. Scheduled tasks on target date (and active overnight tasks extending from yesterday)
     for (const t of safeTasks) {
       if (t.startTime && t.status !== 'completed' && t.status !== 'cancelled') {
+        // Check for yesterday's overnight task spilling into effectiveDate
+        if (t.date === yesterdayDateStr) {
+          const isOvernight = Boolean(t.isOvernight || t.recurrenceRule?.isOvernight);
+          if (isOvernight && t.endTime) {
+            const startMin = parseTimeToMinutes(t.startTime);
+            const endMin = parseTimeToMinutes(t.endTime);
+            if (startMin !== null && endMin !== null && endMin < startMin) {
+              scheduledItems.push({
+                title: `🌙 ${t.title} (Overnight)`,
+                start: '00:00',
+                end: t.endTime,
+                startMin: 0,
+                endMin,
+              });
+            }
+          }
+          continue;
+        }
+
         if (t.date && t.date !== effectiveDate) continue;
 
-        const startMin = parseTimeToMinutes(t.startTime) ?? 0;
+        const parsedStart = parseTimeToMinutes(t.startTime);
+        if (parsedStart === null) continue;
+        const startMin = parsedStart;
         const isOvernight = Boolean(t.isOvernight || t.recurrenceRule?.isOvernight);
         let endMin: number;
 
@@ -782,6 +991,8 @@ export class TaskService {
           } else {
             endMin = startMin + 30;
           }
+        } else if (t.estimatedMinutes && t.estimatedMinutes > 0) {
+          endMin = startMin + t.estimatedMinutes;
         } else {
           endMin = startMin + 30;
         }
@@ -796,17 +1007,26 @@ export class TaskService {
       }
     }
 
-    // 2. Active calendar events for target date
+    // 2. Active calendar events for target date (respecting explicit endTime if provided)
     for (const ev of safeEvents) {
       if (ev.time && ev.status !== 'completed' && ev.status !== 'dismissed') {
         if (ev.date && ev.date !== effectiveDate) continue;
 
-        const startMin = parseTimeToMinutes(ev.time) ?? 0;
-        const endMin = startMin + 45;
+        const parsedEvStart = parseTimeToMinutes(ev.time);
+        if (parsedEvStart === null) continue;
+        const startMin = parsedEvStart;
+        let endMin: number;
+        if (ev.endTime) {
+          const parsedEnd = parseTimeToMinutes(ev.endTime);
+          endMin = parsedEnd !== null ? Math.max(parsedEnd, startMin + 1) : startMin + 45;
+        } else {
+          endMin = startMin + 45;
+        }
+
         scheduledItems.push({
           title: `📅 ${ev.title}`,
           start: ev.time,
-          end: ev.time,
+          end: ev.endTime || ev.time,
           startMin,
           endMin,
         });
@@ -828,8 +1048,11 @@ export class TaskService {
             : Boolean(h.weeklyLogs?.[effectiveDate]);
         if (isCompleted) continue;
 
-        const startMin = parseTimeToMinutes(h.reminderTime) ?? 0;
+        const parsedStart = parseTimeToMinutes(h.reminderTime);
+        if (parsedStart === null) continue;
+        const startMin = parsedStart;
         const endMin = startMin + 20;
+
         scheduledItems.push({
           title: `🌱 ${h.name}`,
           start: h.reminderTime,
@@ -857,7 +1080,7 @@ export class TaskService {
         const a = scheduledItems[i];
         const b = scheduledItems[j];
         if (a.startMin < b.endMin && b.startMin < a.endMin) {
-          const pairKey = [a.title, b.title].sort().join(':::');
+          const pairKey = [`${a.title}@${a.startMin}`, `${b.title}@${b.startMin}`].sort().join(':::');
           if (!seenPairs.has(pairKey)) {
             seenPairs.add(pairKey);
             const overlapStart = Math.max(a.startMin, b.startMin);

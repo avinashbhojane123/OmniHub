@@ -1,8 +1,8 @@
 {
-  "version": 1793415708617,
-  "buildTime": "08:31:48 am",
-  "sizeBytes": 2656028,
-  "sizeMb": "2.53",
+  "version": 1793418232893,
+  "buildTime": "09:13:52 am",
+  "sizeBytes": 2660244,
+  "sizeMb": "2.54",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "Update OmniHub bundle with latest features and fixes"
+  "notes": "Fix TaskService edge cases, conflict detection, and recurrence month-day anchor"
 }

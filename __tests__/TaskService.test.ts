@@ -450,5 +450,229 @@ describe('TaskService Comprehensive Production Suite', () => {
       expect(searched.length).toBe(1);
       expect(searched[0].title).toBe('Grocery Shopping');
     });
+
+    it('rescheduleTask should clear endTime in database when new startTime exceeds existing endTime', async () => {
+      const task = await taskService.createTask({
+        title: 'Interview',
+        date: '2026-10-31',
+        startTime: '10:00',
+        endTime: '11:00',
+        isOvernight: false,
+      });
+
+      // Reschedule to 12:00 without specifying new endTime -> should invalidate and clear old 11:00 endTime
+      const rescheduled = await taskService.rescheduleTask(task.id, '2026-11-01', '12:00');
+      expect(rescheduled).not.toBeNull();
+      expect(rescheduled?.startTime).toBe('12:00');
+      expect(rescheduled?.endTime).toBeUndefined();
+
+      // Verify directly from repository that database field is null
+      const reloaded = await taskService.getTaskById(task.id);
+      expect(reloaded?.endTime).toBeUndefined();
+    });
+
+    it('getTasksByDateRange should handle inverted date order seamlessly', async () => {
+      await taskService.createTask({
+        title: 'Event in range',
+        date: '2026-11-03',
+      });
+
+      const tasks = await taskService.getTasksByDateRange('2026-11-05', '2026-11-01');
+      expect(tasks.length).toBe(1);
+      expect(tasks[0].title).toBe('Event in range');
+    });
+
+    it('detectConflicts should respect calendar event explicit endTime', () => {
+      const events: CalendarEvent[] = [
+        {
+          id: 'ev1',
+          title: 'Board Meeting',
+          date: '2026-10-31',
+          time: '14:00',
+          endTime: '16:00',
+          ringAlarm: false,
+          status: 'active',
+          createdAt: '',
+          updatedAt: '',
+        },
+      ];
+
+      const tasks: Task[] = [
+        {
+          id: 't1',
+          title: 'Design Review',
+          date: '2026-10-31',
+          startTime: '15:15',
+          endTime: '15:45',
+          priority: 'high',
+          status: 'pending',
+          createdAt: '',
+          updatedAt: '',
+        },
+      ];
+
+      // Overlap occurs at 15:15 - 15:45 (which would be missed if hardcoded to 45 mins from 14:00)
+      const result = taskService.detectConflicts(tasks, events, [], '2026-10-31');
+      expect(result.hasConflict).toBe(true);
+      expect(result.conflicts.length).toBe(1);
+      expect([result.conflicts[0].itemA, result.conflicts[0].itemB]).toEqual(
+        expect.arrayContaining(['Design Review', expect.stringContaining('Board Meeting')])
+      );
+    });
+
+    it('detectConflicts should respect task estimatedMinutes when endTime is missing', () => {
+      const tasks: Task[] = [
+        {
+          id: 't1',
+          title: 'Deep Coding Session',
+          date: '2026-10-31',
+          startTime: '09:00',
+          estimatedMinutes: 120, // 09:00 to 11:00
+          priority: 'high',
+          status: 'pending',
+          createdAt: '',
+          updatedAt: '',
+        },
+        {
+          id: 't2',
+          title: 'Standup Sync',
+          date: '2026-10-31',
+          startTime: '10:00',
+          endTime: '10:30',
+          priority: 'medium',
+          status: 'pending',
+          createdAt: '',
+          updatedAt: '',
+        },
+      ];
+
+      const result = taskService.detectConflicts(tasks, [], [], '2026-10-31');
+      expect(result.hasConflict).toBe(true);
+      expect(result.conflicts.length).toBe(1);
+    });
+
+    it('monthly recurrence should preserve monthDay anchor across month boundaries', async () => {
+      const task = await taskService.createTask({
+        title: 'Monthly Rent Payment',
+        date: '2027-01-31',
+        recurrenceRule: {
+          type: 'monthly',
+          interval: 1,
+        },
+      });
+
+      // Complete Jan 31, 2027 -> spawns Feb 28, 2027
+      const febSpawned = await taskService.completeTask(task.id);
+      expect(febSpawned).not.toBeNull();
+
+      const seriesTasks = await taskService.getTasksBySeriesId(task.seriesId!);
+      const febTask = seriesTasks.find((t) => t.id !== task.id);
+      expect(febTask).toBeDefined();
+      expect(febTask?.date).toBe('2027-02-28');
+      expect(febTask?.recurrenceRule?.monthDay).toBe(31);
+
+      // Complete Feb 28, 2027 -> should spawn Mar 31, 2027 (recovering the 31st, not drifting to 28th)
+      await taskService.completeTask(febTask!.id);
+      const updatedSeries = await taskService.getTasksBySeriesId(task.seriesId!);
+      const marTask = updatedSeries.find((t) => t.date.startsWith('2027-03'));
+      expect(marTask).toBeDefined();
+      expect(marTask?.date).toBe('2027-03-31');
+    });
+
+    it('getUpcomingTask should fallback to overdue task when today has no pending tasks', async () => {
+      // Create an overdue task from yesterday
+      const yesterday = format(addDays(new Date(), -1), 'yyyy-MM-dd');
+      await taskService.createTask({
+        title: 'Overdue Project Report',
+        date: yesterday,
+        priority: 'high',
+      });
+
+      const upcoming = await taskService.getUpcomingTask();
+      expect(upcoming).not.toBeNull();
+      expect(upcoming?.title).toBe('Overdue Project Report');
+    });
+
+    it('createTask and updateTask should reject invalid non-empty time formats', async () => {
+      await expect(
+        taskService.createTask({
+          title: 'Malformed Time Task',
+          date: '2026-10-31',
+          startTime: 'not-a-valid-time',
+        })
+      ).rejects.toThrow('Invalid start time format.');
+
+      const created = await taskService.createTask({
+        title: 'Valid Task',
+        date: '2026-10-31',
+      });
+
+      await expect(
+        taskService.updateTask(created.id, {
+          endTime: '29:99',
+        })
+      ).rejects.toThrow('Invalid end time format.');
+    });
+
+    it('detectConflicts should detect spillover conflict from yesterdays overnight task into today', () => {
+      const today = '2026-10-31';
+      const yesterday = '2026-10-30';
+      const tasks: Task[] = [
+        {
+          id: 't_yest_overnight',
+          title: 'Night Shift',
+          date: yesterday,
+          startTime: '23:00',
+          endTime: '07:00', // Spills over from 00:00 to 07:00 on today
+          isOvernight: true,
+          status: 'pending',
+          priority: 'high',
+          createdAt: '',
+          updatedAt: '',
+        },
+        {
+          id: 't_today_morning',
+          title: 'Early Morning Standup',
+          date: today,
+          startTime: '06:00',
+          endTime: '06:45',
+          status: 'pending',
+          priority: 'medium',
+          createdAt: '',
+          updatedAt: '',
+        },
+      ];
+
+      const result = taskService.detectConflicts(tasks, [], [], today);
+      expect(result.hasConflict).toBe(true);
+      expect(result.conflicts.length).toBe(1);
+      expect([result.conflicts[0].itemA, result.conflicts[0].itemB]).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Early Morning Standup'),
+          expect.stringContaining('Night Shift'),
+        ])
+      );
+    });
+
+    it('skipRecurringTask should not spawn duplicates if task is already completed', async () => {
+      const task = await taskService.createTask({
+        title: 'Weekly Sync',
+        date: '2026-10-31',
+        recurrenceRule: {
+          type: 'weekly',
+          interval: 1,
+        },
+      });
+
+      // Complete once (spawns 1 future recurrence)
+      await taskService.completeTask(task.id);
+      let seriesTasks = await taskService.getTasksBySeriesId(task.seriesId!);
+      expect(seriesTasks.length).toBe(2);
+
+      // Attempting to skip an already completed task should not spawn another
+      await taskService.skipRecurringTask(task.id);
+      seriesTasks = await taskService.getTasksBySeriesId(task.seriesId!);
+      expect(seriesTasks.length).toBe(2);
+    });
   });
 });
