@@ -674,5 +674,174 @@ describe('TaskService Comprehensive Production Suite', () => {
       seriesTasks = await taskService.getTasksBySeriesId(task.seriesId!);
       expect(seriesTasks.length).toBe(2);
     });
+
+    it('createTask should normalize unpadded dates, slashes, and ISO timestamps to standard YYYY-MM-DD', async () => {
+      // 1. Unpadded date with dashes
+      const t1 = await taskService.createTask({
+        title: 'Task 1',
+        date: '2026-3-5',
+      });
+      expect(t1.date).toBe('2026-03-05');
+
+      // 2. Slashes with unpadded components
+      const t2 = await taskService.createTask({
+        title: 'Task 2',
+        date: '2026/4/9',
+      });
+      expect(t2.date).toBe('2026-04-09');
+
+      // 3. Space separated timestamp
+      const t3 = await taskService.createTask({
+        title: 'Task 3',
+        date: '2026-11-15 14:30:00',
+      });
+      expect(t3.date).toBe('2026-11-15');
+    });
+
+    it('getUpcomingTask should break ties using priority when tasks start at identical times', async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      await taskService.createTask({
+        title: 'Low Priority Review',
+        date: today,
+        startTime: '10:00',
+        endTime: '11:00',
+        priority: 'low',
+      });
+      await taskService.createTask({
+        title: 'High Priority Incident',
+        date: today,
+        startTime: '10:00',
+        endTime: '11:00',
+        priority: 'high',
+      });
+
+      const upcoming = await taskService.getUpcomingTask();
+      expect(upcoming).not.toBeNull();
+      expect(upcoming?.title).toBe('High Priority Incident');
+    });
+
+    it('createTask, updateTask, and rescheduleTask should reject invalid non-empty date formats', async () => {
+      await expect(
+        taskService.createTask({
+          title: 'Invalid Date Task',
+          date: '2026-02-31',
+        })
+      ).rejects.toThrow('Invalid date format.');
+
+      await expect(
+        taskService.createTask({
+          title: 'Malformed String Task',
+          date: 'not-a-real-date',
+        })
+      ).rejects.toThrow('Invalid date format.');
+
+      const validTask = await taskService.createTask({
+        title: 'Valid Date Task',
+        date: '2026-10-31',
+      });
+
+      await expect(
+        taskService.updateTask(validTask.id, {
+          date: '2026-13-45',
+        })
+      ).rejects.toThrow('Invalid date format.');
+
+      await expect(
+        taskService.rescheduleTask(validTask.id, 'completely-invalid')
+      ).rejects.toThrow('Invalid date format.');
+    });
+
+    it('updateTask should auto-generate seriesId when converting non-recurring task to recurring', async () => {
+      const task = await taskService.createTask({
+        title: 'One-Off Standup',
+        date: '2026-10-31',
+      });
+      expect(task.seriesId).toBeUndefined();
+
+      const updated = await taskService.updateTask(task.id, {
+        recurrenceRule: {
+          type: 'daily',
+          interval: 1,
+        },
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated?.seriesId).toBeDefined();
+      expect(updated?.seriesId).toMatch(/^series_/);
+    });
+
+    it('clearing startTime in updateTask or rescheduleTask should clear orphaned endTime', async () => {
+      const task = await taskService.createTask({
+        title: 'Timed Meeting',
+        date: '2026-10-31',
+        startTime: '10:00',
+        endTime: '11:00',
+      });
+      expect(task.startTime).toBe('10:00');
+      expect(task.endTime).toBe('11:00');
+
+      // Clear startTime via updateTask without passing endTime
+      const updated = await taskService.updateTask(task.id, {
+        startTime: null,
+      });
+      expect(updated?.startTime).toBeUndefined();
+      expect(updated?.endTime).toBeUndefined();
+
+      // Reset times
+      await taskService.updateTask(task.id, {
+        startTime: '14:00',
+        endTime: '15:00',
+      });
+
+      // Clear startTime via rescheduleTask
+      const rescheduled = await taskService.rescheduleTask(task.id, '2026-11-01', '');
+      expect(rescheduled?.startTime).toBeUndefined();
+      expect(rescheduled?.endTime).toBeUndefined();
+    });
+
+    it('rescheduling a completed task should reset completedAt to null', async () => {
+      const task = await taskService.createTask({
+        title: 'Finish Report',
+        date: '2026-10-31',
+      });
+
+      const completed = await taskService.completeTask(task.id);
+      expect(completed?.status).toBe('completed');
+      expect(completed?.completedAt).toBeDefined();
+
+      const rescheduled = await taskService.rescheduleTask(task.id, '2026-11-05');
+      expect(rescheduled?.status).toBe('pending');
+      expect(rescheduled?.completedAt).toBeUndefined();
+    });
+
+    it('detectConflicts should not crash when given invalid targetDate string', () => {
+      const result = taskService.detectConflicts([], [], [], 'invalid-target-date');
+      expect(result).toBeDefined();
+      expect(result.hasConflict).toBe(false);
+      expect(Array.isArray(result.conflicts)).toBe(true);
+    });
+
+    it('ensureUpcomingRecurrences should not re-spawn skipped recurrence instance', async () => {
+      const task = await taskService.createTask({
+        title: 'Daily Calisthenics',
+        date: '2026-10-31',
+        recurrenceRule: {
+          type: 'daily',
+          interval: 1,
+        },
+      });
+
+      // Skip today's recurrence (spawns tomorrow 2026-11-01)
+      const skipped = await taskService.skipRecurringTask(task.id);
+      expect(skipped?.status).toBe('cancelled');
+
+      const seriesTasks = await taskService.getTasksBySeriesId(task.seriesId!);
+      expect(seriesTasks.length).toBe(2);
+
+      // Running ensureUpcomingRecurrences should not spawn duplicate of today or tomorrow
+      await taskService.ensureUpcomingRecurrences(1, true);
+      const afterEnsure = await taskService.getTasksBySeriesId(task.seriesId!);
+      expect(afterEnsure.length).toBe(2);
+    });
   });
 });

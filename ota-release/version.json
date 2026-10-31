@@ -1,8 +1,8 @@
 {
-  "version": 1793418232893,
-  "buildTime": "09:13:52 am",
-  "sizeBytes": 2660244,
+  "version": 1793419489917,
+  "buildTime": "09:34:49 am",
+  "sizeBytes": 2662735,
   "sizeMb": "2.54",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "Fix TaskService edge cases, conflict detection, and recurrence month-day anchor"
+  "notes": "OTA update from Antigravity"
 }

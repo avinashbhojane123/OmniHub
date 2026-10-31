@@ -14,16 +14,43 @@ import { toggleBulletInRawText, resetBulletsInRawText } from '../../utils/bullet
 
 /**
  * Sanitizes and normalizes an input date string to YYYY-MM-DD.
- * Handles dates containing ISO timestamp suffixes or whitespace.
+ * Handles dates containing ISO timestamp suffixes, slashes, unpadded components, or timezone offsets.
+ * Returns empty string if the date is invalid or empty.
  */
 function sanitizeDateString(dateStr?: string | null): string {
   if (!dateStr) return '';
   const trimmed = dateStr.trim();
   if (!trimmed) return '';
-  if (trimmed.includes('T')) {
-    return trimmed.split('T')[0].trim();
+
+  // 1. Match date components directly (YYYY-MM-DD, YYYY/MM/DD, YYYY-M-D)
+  const dateOnlyMatch = trimmed.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (dateOnlyMatch) {
+    const y = dateOnlyMatch[1];
+    const m = dateOnlyMatch[2].padStart(2, '0');
+    const d = dateOnlyMatch[3].padStart(2, '0');
+    const candidate = `${y}-${m}-${d}`;
+    if (isValid(parseISO(candidate))) {
+      return candidate;
+    }
+    return '';
   }
-  return trimmed;
+
+  // 2. Full ISO timestamp or Date string with timezone: convert to local calendar date
+  const parsed = parseISO(trimmed);
+  if (isValid(parsed)) {
+    return format(parsed, 'yyyy-MM-dd');
+  }
+
+  // 3. Fallback: split by 'T' or whitespace and normalize components
+  const splitPart = trimmed.split(/[T\s]+/)[0].trim();
+  const splitMatch = splitPart.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (splitMatch) {
+    const candidate = `${splitMatch[1]}-${splitMatch[2].padStart(2, '0')}-${splitMatch[3].padStart(2, '0')}`;
+    if (isValid(parseISO(candidate))) {
+      return candidate;
+    }
+  }
+  return '';
 }
 
 /**
@@ -58,7 +85,18 @@ export class TaskService {
       }
     }
 
-    const cleanDate = sanitizeDateString(dto.date);
+    // 3. Validate date format if explicitly provided as non-empty
+    let cleanDate = '';
+    if (dto.date !== undefined && dto.date !== null) {
+      const dateStr = String(dto.date).trim();
+      if (dateStr.length > 0) {
+        cleanDate = sanitizeDateString(dateStr);
+        if (!cleanDate) {
+          throw new Error('Invalid date format.');
+        }
+      }
+    }
+
     const normStart = normalizeTimeTo24H(dto.startTime);
     const normEnd = normalizeTimeTo24H(dto.endTime);
     const isOvernight =
@@ -66,7 +104,7 @@ export class TaskService {
         ? Boolean(dto.isOvernight)
         : Boolean(dto.recurrenceRule?.isOvernight);
 
-    // 3. Start/End Time Validation (Non-overnight tasks cannot end before start)
+    // 4. Start/End Time Validation (Non-overnight tasks cannot end before start)
     if (normStart && normEnd && !isOvernight) {
       const startMin = parseTimeToMinutes(normStart);
       const endMin = parseTimeToMinutes(normEnd);
@@ -97,14 +135,19 @@ export class TaskService {
         ? dto.recurrenceRule.estimatedMinutes
         : undefined;
 
-    // Anchor monthDay if monthly or yearly recurrence
+    // Anchor monthDay safely if monthly or yearly recurrence
+    const anchoredMonthDay =
+      cleanDate && cleanDate.includes('-')
+        ? parseInt(cleanDate.split('-')[2], 10) || (isValid(parseISO(cleanDate)) ? parseISO(cleanDate).getDate() : new Date().getDate())
+        : new Date().getDate();
+
     const recurrenceRule = dto.recurrenceRule
       ? {
           ...dto.recurrenceRule,
           ...((dto.recurrenceRule.type === 'monthly' || dto.recurrenceRule.type === 'yearly') &&
           !dto.recurrenceRule.monthDay &&
           cleanDate
-            ? { monthDay: parseISO(cleanDate).getDate() || new Date().getDate() }
+            ? { monthDay: anchoredMonthDay }
             : {}),
         }
       : undefined;
@@ -171,10 +214,31 @@ export class TaskService {
     const existing = await taskRepository.findById(id);
     if (!existing) return null;
 
+    // Validate date format if explicitly provided as non-empty
+    let cleanDate = existing.date;
+    if (dto.date !== undefined && dto.date !== null) {
+      const dateStr = String(dto.date).trim();
+      if (dateStr.length > 0) {
+        cleanDate = sanitizeDateString(dateStr);
+        if (!cleanDate) {
+          throw new Error('Invalid date format.');
+        }
+      } else {
+        cleanDate = '';
+      }
+    } else if (dto.date === null) {
+      cleanDate = '';
+    }
+
     const rawStart = dto.startTime !== undefined ? dto.startTime : existing.startTime;
     const rawEnd = dto.endTime !== undefined ? dto.endTime : existing.endTime;
     const normStart = normalizeTimeTo24H(rawStart);
-    const normEnd = normalizeTimeTo24H(rawEnd);
+    let normEnd: string | null | undefined = normalizeTimeTo24H(rawEnd);
+
+    // If startTime is explicitly cleared to null/empty and endTime was not explicitly supplied, clear endTime
+    if (dto.startTime !== undefined && !normStart && dto.endTime === undefined) {
+      normEnd = null;
+    }
 
     const isOvernight =
       dto.isOvernight !== undefined
@@ -193,7 +257,10 @@ export class TaskService {
       }
     }
 
-    const cleanDate = dto.date !== undefined ? sanitizeDateString(dto.date) : existing.date;
+    const anchoredMonthDay =
+      cleanDate && cleanDate.includes('-')
+        ? parseInt(cleanDate.split('-')[2], 10) || (isValid(parseISO(cleanDate)) ? parseISO(cleanDate).getDate() : new Date().getDate())
+        : new Date().getDate();
 
     // Anchor monthDay if recurrence rule is updated to monthly/yearly without monthDay
     const updatedRecurrenceRule = dto.recurrenceRule
@@ -202,13 +269,24 @@ export class TaskService {
           ...((dto.recurrenceRule.type === 'monthly' || dto.recurrenceRule.type === 'yearly') &&
           !dto.recurrenceRule.monthDay &&
           cleanDate
-            ? { monthDay: parseISO(cleanDate).getDate() || new Date().getDate() }
+            ? { monthDay: anchoredMonthDay }
             : {}),
         }
       : dto.recurrenceRule;
 
+    // Auto-generate seriesId if task is made recurring without an existing seriesId
+    let seriesId = dto.seriesId !== undefined ? dto.seriesId : existing.seriesId;
+    if (
+      updatedRecurrenceRule &&
+      updatedRecurrenceRule.type !== 'none' &&
+      !seriesId
+    ) {
+      seriesId = `series_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    }
+
     const updatePayload: UpdateTaskDTO = {
       ...dto,
+      seriesId,
       ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
       ...(dto.date !== undefined ? { date: cleanDate } : {}),
       ...(dto.recurrenceRule !== undefined ? { recurrenceRule: updatedRecurrenceRule } : {}),
@@ -217,7 +295,9 @@ export class TaskService {
         : {}),
       ...(dto.notes !== undefined ? { notes: dto.notes ? dto.notes.trim() : null } : {}),
       ...(dto.startTime !== undefined ? { startTime: normStart || null } : {}),
-      ...(dto.endTime !== undefined ? { endTime: normEnd || null } : {}),
+      ...(dto.endTime !== undefined || (dto.startTime !== undefined && !normStart)
+        ? { endTime: normEnd || null }
+        : {}),
       ...(dto.eisenhowerQuadrant !== undefined ? { eisenhowerQuadrant: dto.eisenhowerQuadrant } : {}),
       ...(dto.accentColor !== undefined ? { accentColor: dto.accentColor } : {}),
       ...(dto.isOvernight !== undefined
@@ -389,7 +469,8 @@ export class TaskService {
         const targetMonth = ((targetTotalMonth % 12) + 12) % 12;
         const maxDaysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
         const safeDay = Math.min(originalDay, maxDaysInTargetMonth);
-        return new Date(targetYear, targetMonth, safeDay, d.getHours(), d.getMinutes());
+        // Midday (12:00) prevents DST midnight shift anomalies
+        return new Date(targetYear, targetMonth, safeDay, 12, 0);
       }
       case 'yearly': {
         const originalDay = rule.monthDay || baseDate.getDate();
@@ -398,7 +479,8 @@ export class TaskService {
         const targetMonth = d.getMonth();
         const maxDaysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
         const safeDay = Math.min(originalDay, maxDaysInTargetMonth);
-        return new Date(targetYear, targetMonth, safeDay, d.getHours(), d.getMinutes());
+        // Midday (12:00) prevents DST midnight shift anomalies
+        return new Date(targetYear, targetMonth, safeDay, 12, 0);
       }
       default:
         return addDays(d, 1);
@@ -417,7 +499,10 @@ export class TaskService {
 
     // If base date was overdue in the past, advance nextDate forward until today or future
     let advanceLimit = 0;
-    while (format(nextDate, 'yyyy-MM-dd') < todayStr && advanceLimit < 365) {
+    while (format(nextDate, 'yyyy-MM-dd') < todayStr && advanceLimit < 1000) {
+      if (rule.endDate && format(nextDate, 'yyyy-MM-dd') > rule.endDate) {
+        return null;
+      }
       nextDate = this.advanceStep(nextDate, rule, baseDate);
       advanceLimit++;
     }
@@ -427,12 +512,22 @@ export class TaskService {
       return null;
     }
 
+    // Ensure seriesId is persisted back to parent task if it was previously undefined
+    let seriesId = task.seriesId;
+    if (!seriesId) {
+      seriesId = `series_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      try {
+        await taskRepository.update(task.id, { seriesId });
+      } catch (err) {
+        console.warn('Failed to persist auto-generated seriesId to parent task:', err);
+      }
+    }
+
     // Prevent duplicate spawning: Match strictly by seriesId if present, else fallback to title
     const existingOnDate = await taskRepository.findByDate(nextDateStr);
     const alreadyExists = existingOnDate.some((t) => {
-      if (t.status === 'cancelled') return false;
-      if (task.seriesId) {
-        return t.seriesId === task.seriesId;
+      if (seriesId) {
+        return t.seriesId === seriesId;
       }
       return t.title.toLowerCase().trim() === task.title.toLowerCase().trim();
     });
@@ -440,9 +535,6 @@ export class TaskService {
     if (alreadyExists) {
       return null;
     }
-
-    const seriesId =
-      task.seriesId || `series_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Reset subtask checklist items from [x] back to [ ] so recurring task starts clean
     const cleanNotes = resetBulletsInRawText(task.notes);
@@ -507,12 +599,13 @@ export class TaskService {
     try {
       const allTasks = await taskRepository.findAll();
       const recurringTasks = allTasks.filter(
-        (t) => t.recurrenceRule && t.recurrenceRule.type !== 'none' && t.status !== 'cancelled'
+        (t) => t.recurrenceRule && t.recurrenceRule.type !== 'none'
       );
       if (recurringTasks.length === 0) return 0;
 
+      const horizonDays = typeof daysAhead === 'number' && daysAhead > 0 ? daysAhead : 3;
       const today = new Date();
-      const horizonDateStr = format(addDays(today, daysAhead), 'yyyy-MM-dd');
+      const horizonDateStr = format(addDays(today, horizonDays), 'yyyy-MM-dd');
       let spawnedCount = 0;
 
       // Group by seriesId (or task.id if no seriesId)
@@ -523,6 +616,8 @@ export class TaskService {
         seriesMap.get(key)!.push(t);
       }
 
+      const maxIterationsPerSeries = Math.min(Math.max(horizonDays * 2, 20), 100);
+
       for (const [, instances] of seriesMap.entries()) {
         instances.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         const latest = instances[instances.length - 1];
@@ -531,7 +626,7 @@ export class TaskService {
         let currentCursor = latest;
         let safetyCounter = 0;
 
-        while ((currentCursor.date || '') < horizonDateStr && safetyCounter < 10) {
+        while ((currentCursor.date || '') < horizonDateStr && safetyCounter < maxIterationsPerSeries) {
           safetyCounter++;
           const spawned = await this.spawnNextRecurrence(currentCursor);
           if (spawned) {
@@ -624,7 +719,7 @@ export class TaskService {
       try {
         const seriesTasks = await taskRepository.findBySeriesId(original.seriesId);
         const futureSpawned = seriesTasks.filter(
-          (t) => t.id !== id && t.status === 'pending' && t.date > original.date
+          (t) => t.id !== id && t.status === 'pending' && Boolean(t.date && original.date && t.date > original.date)
         );
         for (const ft of futureSpawned) {
           await notificationService.cancelTaskReminder(ft.id);
@@ -674,13 +769,29 @@ export class TaskService {
       }
     }
 
-    const cleanDate = sanitizeDateString(newDate) || existing.date;
-    const normTime = newTime !== undefined ? normalizeTimeTo24H(newTime) : existing.startTime;
+    let cleanDate = existing.date;
+    if (newDate !== undefined && newDate !== null) {
+      const str = String(newDate).trim();
+      if (str.length > 0) {
+        cleanDate = sanitizeDateString(str);
+        if (!cleanDate) {
+          throw new Error('Invalid date format.');
+        }
+      } else {
+        cleanDate = '';
+      }
+    }
+
+    const normTime =
+      newTime !== undefined ? (normalizeTimeTo24H(newTime) || null) : existing.startTime;
     const isOvernight = Boolean(existing.isOvernight || existing.recurrenceRule?.isOvernight);
 
-    // Validate that end time does not precede new start time unless overnight
+    // Validate that end time does not precede new start time unless overnight.
+    // Also clear end time if start time is removed.
     let adjustedEndTime: string | null | undefined = existing.endTime;
-    if (normTime && existing.endTime && !isOvernight) {
+    if (!normTime) {
+      adjustedEndTime = null;
+    } else if (existing.endTime && !isOvernight) {
       const startMin = parseTimeToMinutes(normTime);
       const endMin = parseTimeToMinutes(existing.endTime);
       if (startMin !== null && endMin !== null && endMin < startMin) {
@@ -694,6 +805,7 @@ export class TaskService {
       startTime: normTime,
       endTime: adjustedEndTime,
       status: 'pending',
+      completedAt: null as any,
       snoozeUntil: null as any,
     });
 
@@ -736,9 +848,9 @@ export class TaskService {
     const overdue = await taskRepository.findOverdue(todayStr, currentTimeStr);
     const nowMin = now.getHours() * 60 + now.getMinutes();
 
-    // Guard: Yesterday's overnight task that is actively in progress right now is not yet overdue
     const yesterdayStr = format(addDays(now, -1), 'yyyy-MM-dd');
     return overdue.filter((t) => {
+      // Guard 1: Yesterday's overnight task that is actively in progress right now is not yet overdue
       if (t.date === yesterdayStr && (t.isOvernight || t.recurrenceRule?.isOvernight) && t.startTime && t.endTime) {
         const startMin = parseTimeToMinutes(t.startTime);
         const endMin = parseTimeToMinutes(t.endTime);
@@ -746,6 +858,28 @@ export class TaskService {
           return false; // Still actively running in overnight morning window
         }
       }
+
+      // Guard 2: Today's active tasks (either overnight or within duration) are currently in progress, not overdue
+      if (t.date === todayStr && t.startTime) {
+        const startMin = parseTimeToMinutes(t.startTime);
+        if (startMin !== null) {
+          const isOvernight = Boolean(t.isOvernight || t.recurrenceRule?.isOvernight);
+          if (isOvernight) {
+            return false; // Runs into tomorrow morning, not overdue today
+          }
+          if (t.endTime) {
+            const endMin = parseTimeToMinutes(t.endTime);
+            if (endMin !== null && endMin > startMin && nowMin < endMin) {
+              return false; // In-progress within scheduled start/end window
+            }
+          } else if (t.estimatedMinutes && t.estimatedMinutes > 0) {
+            if (nowMin < startMin + t.estimatedMinutes) {
+              return false; // In-progress within estimated duration
+            }
+          }
+        }
+      }
+
       return true;
     });
   }
@@ -788,12 +922,13 @@ export class TaskService {
     const todayStr = format(now, 'yyyy-MM-dd');
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const nowTimestamp = now.getTime();
+    const priorityWeights: Record<string, number> = { high: 1, medium: 2, low: 3 };
 
     // 1. Check yesterday's active overnight tasks spanning into the early morning
     if (nowMin < 720) {
       const yesterdayStr = format(addDays(now, -1), 'yyyy-MM-dd');
       const yesterdayTasks = await taskRepository.findByDate(yesterdayStr);
-      const activeOvernightFromYesterday = yesterdayTasks.find((t) => {
+      const activeOvernightFromYesterday = yesterdayTasks.filter((t) => {
         if (t.status === 'completed' || t.status === 'cancelled') return false;
         if (t.snoozeUntil) {
           const sDate = new Date(t.snoozeUntil);
@@ -807,8 +942,16 @@ export class TaskService {
         return endMin < startMin && nowMin < endMin;
       });
 
-      if (activeOvernightFromYesterday) {
-        return activeOvernightFromYesterday;
+      if (activeOvernightFromYesterday.length > 0) {
+        activeOvernightFromYesterday.sort((a, b) => {
+          const pA = priorityWeights[a.priority] || 2;
+          const pB = priorityWeights[b.priority] || 2;
+          if (pA !== pB) return pA - pB;
+          const aEnd = parseTimeToMinutes(a.endTime || '') ?? 0;
+          const bEnd = parseTimeToMinutes(b.endTime || '') ?? 0;
+          return aEnd - bEnd;
+        });
+        return activeOvernightFromYesterday[0];
       }
     }
 
@@ -854,16 +997,20 @@ export class TaskService {
       activeTasks.sort((a, b) => {
         const aStart = parseTimeToMinutes(a.startTime || '') ?? 0;
         const bStart = parseTimeToMinutes(b.startTime || '') ?? 0;
-        return aStart - bStart;
+        if (aStart !== bStart) return aStart - bStart;
+        return (priorityWeights[a.priority] || 2) - (priorityWeights[b.priority] || 2);
       });
       return activeTasks[0];
     }
 
-    // 3. Check for upcoming timed tasks later today (including snoozed ones)
+    // 3. Check for upcoming timed tasks later today (including snoozed ones that wake up today)
     const upcomingTimedTasks = pendingTasks.filter((t) => {
       if (t.snoozeUntil) {
         const sDate = new Date(t.snoozeUntil);
-        if (isValid(sDate) && sDate.getTime() > nowTimestamp) return true;
+        if (isValid(sDate) && sDate.getTime() > nowTimestamp) {
+          // Only count as today's upcoming if it wakes up within today
+          return format(sDate, 'yyyy-MM-dd') === todayStr;
+        }
       }
       if (!t.startTime) return false;
       const tMin = parseTimeToMinutes(t.startTime);
@@ -882,7 +1029,9 @@ export class TaskService {
           }
           return parseTimeToMinutes(t.startTime || '') ?? 9999;
         };
-        return getEffectiveMin(a) - getEffectiveMin(b);
+        const diff = getEffectiveMin(a) - getEffectiveMin(b);
+        if (diff !== 0) return diff;
+        return (priorityWeights[a.priority] || 2) - (priorityWeights[b.priority] || 2);
       });
       return upcomingTimedTasks[0];
     }
@@ -899,6 +1048,9 @@ export class TaskService {
     });
     if (overdueTimedTasks.length > 0) {
       overdueTimedTasks.sort((a, b) => {
+        const pA = priorityWeights[a.priority] || 2;
+        const pB = priorityWeights[b.priority] || 2;
+        if (pA !== pB) return pA - pB;
         const aMin = parseTimeToMinutes(a.startTime || '') ?? 0;
         const bMin = parseTimeToMinutes(b.startTime || '') ?? 0;
         return aMin - bMin;
@@ -907,7 +1059,6 @@ export class TaskService {
     }
 
     // 5. Fallback: untimed tasks for today sorted by priority
-    const priorityWeights: Record<string, number> = { high: 1, medium: 2, low: 3 };
     const untimedTasks = pendingTasks.filter((t) => !t.startTime);
     if (untimedTasks.length > 0) {
       untimedTasks.sort(
@@ -933,13 +1084,17 @@ export class TaskService {
     const safeHabits = Array.isArray(habits) ? habits : [];
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const effectiveDate =
-      targetDate ||
+    const rawTarget =
+      (targetDate && targetDate.trim()) ||
       safeTasks.find((t) => Boolean(t.date))?.date ||
       safeEvents.find((e) => Boolean(e.date))?.date ||
       todayStr;
-    const targetDateObj = parseISO(effectiveDate);
-    const targetDayOfWeek = isValid(targetDateObj) ? targetDateObj.getDay() : new Date().getDay();
+
+    const cleanEffective = sanitizeDateString(rawTarget);
+    const parsedTarget = cleanEffective ? parseISO(cleanEffective) : parseISO(rawTarget);
+    const targetDateObj = isValid(parsedTarget) ? parsedTarget : new Date();
+    const effectiveDate = format(targetDateObj, 'yyyy-MM-dd');
+    const targetDayOfWeek = targetDateObj.getDay();
     const yesterdayDateStr = format(addDays(targetDateObj, -1), 'yyyy-MM-dd');
 
     const scheduledItems: Array<{
@@ -1051,7 +1206,10 @@ export class TaskService {
         const parsedStart = parseTimeToMinutes(h.reminderTime);
         if (parsedStart === null) continue;
         const startMin = parsedStart;
-        const endMin = startMin + 20;
+        const duration = h.recurrenceRule?.estimatedMinutes && h.recurrenceRule.estimatedMinutes > 0
+          ? h.recurrenceRule.estimatedMinutes
+          : 20;
+        const endMin = startMin + duration;
 
         scheduledItems.push({
           title: `🌱 ${h.name}`,
