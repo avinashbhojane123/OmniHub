@@ -912,5 +912,66 @@ describe('TaskService Comprehensive Production Suite', () => {
       // Next instance MUST be Sunday 2026-11-01 of the same weekend
       expect(nextInstance?.date).toBe('2026-11-01');
     });
+
+    it('getTasksByDate and detectConflicts should safely handle JS Date objects and numeric timestamps', async () => {
+      const todayDate = new Date();
+      const results = await taskService.getTasksByDate(todayDate);
+      expect(Array.isArray(results)).toBe(true);
+
+      const conflictCheck = taskService.detectConflicts([], [], [], todayDate);
+      expect(conflictCheck.hasConflict).toBe(false);
+
+      const rangeResults = await taskService.getTasksByDateRange(todayDate, todayDate);
+      expect(Array.isArray(rangeResults)).toBe(true);
+    });
+
+    it('snoozeTask should not snooze completed or cancelled tasks', async () => {
+      const task = await taskService.createTask({
+        title: 'Already Completed',
+        date: '2026-10-31',
+      });
+      await taskService.completeTask(task.id);
+
+      const snoozed = await taskService.snoozeTask(task.id, 15);
+      expect(snoozed?.snoozeUntil).toBeUndefined();
+    });
+
+    it('rescheduling to backlog should clear both startTime and endTime', async () => {
+      const task = await taskService.createTask({
+        title: 'Sprint Planning',
+        date: '2026-10-31',
+        startTime: '10:00',
+        endTime: '11:00',
+      });
+
+      const movedToBacklog = await taskService.rescheduleTask(task.id, '');
+      expect(movedToBacklog?.date).toBe('');
+      expect(movedToBacklog?.startTime).toBeUndefined();
+      expect(movedToBacklog?.endTime).toBeUndefined();
+    });
+
+    it('getUpcomingTask should not return untimed tasks that are snoozed to the future', async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const untimedTask = await taskService.createTask({
+        title: 'Untimed Research',
+        date: today,
+        priority: 'high',
+      });
+
+      // Snooze it by 60 minutes
+      await taskService.snoozeTask(untimedTask.id, 60);
+
+      // Now create a lower priority untimed task that is NOT snoozed
+      await taskService.createTask({
+        title: 'Available Routine Task',
+        date: today,
+        priority: 'low',
+      });
+
+      const upcoming = await taskService.getUpcomingTask();
+      expect(upcoming).not.toBeNull();
+      // Should pick the non-snoozed task, even if lower priority
+      expect(upcoming?.title).toBe('Available Routine Task');
+    });
   });
 });

@@ -5,6 +5,8 @@ import {
   SnoozeDurationOption,
   CalendarEvent,
   HabitWithStreak,
+  TaskPriority,
+  EisenhowerQuadrant,
 } from '../../types';
 import { taskRepository } from '../../database/repositories/TaskRepository';
 import { notificationService } from '../notifications/NotificationService';
@@ -13,13 +15,29 @@ import { normalizeTimeTo24H, parseTimeToMinutes, isTimeValid } from '../../utils
 import { toggleBulletInRawText, resetBulletsInRawText } from '../../utils/bulletNotes';
 
 /**
- * Sanitizes and normalizes an input date string to YYYY-MM-DD.
- * Handles dates containing ISO timestamp suffixes, slashes, unpadded components, or timezone offsets.
+ * Regex matching supported checkbox tags within bullet notes.
+ */
+const CHECKBOX_TAG_REGEX = /\[([ xXvV\u2713\u2714]?)\]/;
+
+/**
+ * Sanitizes and normalizes an input date string or Date object to YYYY-MM-DD.
+ * Handles dates containing ISO timestamp suffixes, slashes, unpadded components, Date objects, or timezone offsets.
  * Returns empty string if the date is invalid or empty.
  */
-function sanitizeDateString(dateStr?: string | null): string {
-  if (!dateStr) return '';
-  const trimmed = dateStr.trim();
+function sanitizeDateString(dateStr?: string | Date | number | null): string {
+  if (!dateStr && dateStr !== 0) return '';
+
+  if (dateStr instanceof Date) {
+    return isValid(dateStr) ? format(dateStr, 'yyyy-MM-dd') : '';
+  }
+
+  if (typeof dateStr === 'number') {
+    const d = new Date(dateStr);
+    return isValid(d) ? format(d, 'yyyy-MM-dd') : '';
+  }
+
+  const raw = String(dateStr);
+  const trimmed = raw.trim();
   if (!trimmed) return '';
 
   // 1. Match date components directly (YYYY-MM-DD, YYYY/MM/DD, YYYY-M-D)
@@ -50,6 +68,7 @@ function sanitizeDateString(dateStr?: string | null): string {
       return candidate;
     }
   }
+
   return '';
 }
 
@@ -62,6 +81,16 @@ function shouldScheduleReminder(task?: Task | null): boolean {
   if (!task || !task.date || task.reminderMinutes === -1) return false;
   if (task.status === 'completed' || task.status === 'cancelled') return false;
   return Boolean(task.startTime) || (task.reminderMinutes !== undefined && task.reminderMinutes > 0);
+}
+
+function sanitizePriority(p?: any): TaskPriority {
+  if (p === 'low' || p === 'medium' || p === 'high') return p;
+  return 'medium';
+}
+
+function sanitizeQuadrant(q?: any): EisenhowerQuadrant | undefined {
+  if (q === 'q1' || q === 'q2' || q === 'q3' || q === 'q4') return q;
+  return undefined;
 }
 
 export class TaskService {
@@ -176,14 +205,14 @@ export class TaskService {
       date: cleanDate,
       startTime: normStart || undefined,
       endTime: normEnd || undefined,
-      priority: dto.priority || 'medium',
+      priority: sanitizePriority(dto.priority),
       categoryId: dto.categoryId?.trim() || undefined,
       status: 'pending',
       recurrenceRule,
       reminderMinutes,
       notes: dto.notes?.trim() || undefined,
       eisenhowerQuadrant:
-        dto.eisenhowerQuadrant || recurrenceRule?.eisenhowerQuadrant || undefined,
+        sanitizeQuadrant(dto.eisenhowerQuadrant) || sanitizeQuadrant(recurrenceRule?.eisenhowerQuadrant),
       accentColor: dto.accentColor || recurrenceRule?.accentColor || undefined,
       isOvernight,
       isLoudAlarm,
@@ -330,10 +359,13 @@ export class TaskService {
       ...(dto.endTime !== undefined || (dto.startTime !== undefined && !normStart)
         ? { endTime: normEnd || null }
         : {}),
+      ...(dto.priority !== undefined ? { priority: sanitizePriority(dto.priority) } : {}),
       ...(dto.categoryId !== undefined
         ? { categoryId: dto.categoryId ? dto.categoryId.trim() || null : null }
         : {}),
-      ...(dto.eisenhowerQuadrant !== undefined ? { eisenhowerQuadrant: dto.eisenhowerQuadrant } : {}),
+      ...(dto.eisenhowerQuadrant !== undefined
+        ? { eisenhowerQuadrant: dto.eisenhowerQuadrant ? sanitizeQuadrant(dto.eisenhowerQuadrant) || null : null }
+        : {}),
       ...(dto.accentColor !== undefined ? { accentColor: dto.accentColor } : {}),
       ...(dto.isOvernight !== undefined
         ? { isOvernight: dto.isOvernight }
@@ -710,8 +742,8 @@ export class TaskService {
     const task = await taskRepository.findById(taskId);
     if (!task) return null;
 
-    const hasNotesChecklist = Boolean(task.notes && /\[([ xX])\]/.test(task.notes));
-    const hasDescChecklist = Boolean(task.description && /\[([ xX])\]/.test(task.description));
+    const hasNotesChecklist = Boolean(task.notes && CHECKBOX_TAG_REGEX.test(task.notes));
+    const hasDescChecklist = Boolean(task.description && CHECKBOX_TAG_REGEX.test(task.description));
 
     if (hasNotesChecklist) {
       const updatedNotes = toggleBulletInRawText(task.notes!, subtaskIndex);
@@ -790,6 +822,11 @@ export class TaskService {
     const existing = await taskRepository.findById(id);
     if (!existing) return null;
 
+    // Guard: completed or cancelled tasks cannot be snoozed
+    if (existing.status === 'completed' || existing.status === 'cancelled') {
+      return existing;
+    }
+
     const safeMinutes = typeof minutes === 'number' && minutes > 0 ? minutes : 10;
     try {
       await notificationService.snoozeTaskReminder(id, safeMinutes);
@@ -827,21 +864,30 @@ export class TaskService {
       }
     }
 
-    const normTime =
-      newTime !== undefined ? (normalizeTimeTo24H(newTime) || null) : existing.startTime;
-    const isOvernight = Boolean(existing.isOvernight || existing.recurrenceRule?.isOvernight);
+    // If moved to backlog (undated), clear times completely
+    let normTime: string | null | undefined;
+    let adjustedEndTime: string | null | undefined;
 
-    // Validate that end time does not precede new start time unless overnight.
-    // Also clear end time if start time is removed.
-    let adjustedEndTime: string | null | undefined = existing.endTime;
-    if (!normTime) {
+    if (!cleanDate) {
+      normTime = null;
       adjustedEndTime = null;
-    } else if (existing.endTime && !isOvernight) {
-      const startMin = parseTimeToMinutes(normTime);
-      const endMin = parseTimeToMinutes(existing.endTime);
-      if (startMin !== null && endMin !== null && endMin < startMin) {
-        // Pass null so TaskRepository clears it in the database
+    } else {
+      normTime =
+        newTime !== undefined ? (normalizeTimeTo24H(newTime) || null) : existing.startTime;
+      const isOvernight = Boolean(existing.isOvernight || existing.recurrenceRule?.isOvernight);
+
+      if (!normTime) {
         adjustedEndTime = null;
+      } else if (existing.endTime && !isOvernight) {
+        const startMin = parseTimeToMinutes(normTime);
+        const endMin = parseTimeToMinutes(existing.endTime);
+        if (startMin !== null && endMin !== null && endMin < startMin) {
+          adjustedEndTime = null;
+        } else {
+          adjustedEndTime = existing.endTime;
+        }
+      } else {
+        adjustedEndTime = existing.endTime;
       }
     }
 
@@ -948,14 +994,14 @@ export class TaskService {
     });
   }
 
-  async getTasksByDate(date: string): Promise<Task[]> {
+  async getTasksByDate(date: string | Date): Promise<Task[]> {
     if (date === undefined || date === null) return [];
     const clean = sanitizeDateString(date);
     if (!clean) return [];
     return await taskRepository.findByDate(clean);
   }
 
-  async getTasksByDateRange(startDate: string, endDate: string): Promise<Task[]> {
+  async getTasksByDateRange(startDate: string | Date, endDate: string | Date): Promise<Task[]> {
     const cleanStart = sanitizeDateString(startDate);
     const cleanEnd = sanitizeDateString(endDate);
     if (!cleanStart || !cleanEnd) return [];
@@ -1070,14 +1116,11 @@ export class TaskService {
       return activeTasks[0];
     }
 
-    // 3. Check for upcoming timed tasks later today (including snoozed ones that wake up today)
+    // 3. Check for upcoming timed tasks later today (excluding currently-snoozed tasks)
     const upcomingTimedTasks = pendingTasks.filter((t) => {
       if (t.snoozeUntil) {
         const sDate = new Date(t.snoozeUntil);
-        if (isValid(sDate) && sDate.getTime() > nowTimestamp) {
-          // Only count as today's upcoming if it wakes up within today
-          return format(sDate, 'yyyy-MM-dd') === todayStr;
-        }
+        if (isValid(sDate) && sDate.getTime() > nowTimestamp) return false;
       }
       if (!t.startTime) return false;
       const tMin = parseTimeToMinutes(t.startTime);
@@ -1086,17 +1129,9 @@ export class TaskService {
 
     if (upcomingTimedTasks.length > 0) {
       upcomingTimedTasks.sort((a, b) => {
-        const getEffectiveMin = (t: Task) => {
-          if (t.snoozeUntil) {
-            const sDate = new Date(t.snoozeUntil);
-            if (isValid(sDate) && sDate.getTime() > nowTimestamp) {
-              const diffMins = Math.round((sDate.getTime() - nowTimestamp) / 60000);
-              return nowMin + diffMins;
-            }
-          }
-          return parseTimeToMinutes(t.startTime || '') ?? 9999;
-        };
-        const diff = getEffectiveMin(a) - getEffectiveMin(b);
+        const aMin = parseTimeToMinutes(a.startTime || '') ?? 9999;
+        const bMin = parseTimeToMinutes(b.startTime || '') ?? 9999;
+        const diff = aMin - bMin;
         if (diff !== 0) return diff;
         return (priorityWeights[a.priority] || 2) - (priorityWeights[b.priority] || 2);
       });
@@ -1125,8 +1160,15 @@ export class TaskService {
       return overdueTimedTasks[0];
     }
 
-    // 5. Fallback: untimed tasks for today sorted by priority
-    const untimedTasks = pendingTasks.filter((t) => !t.startTime);
+    // 5. Fallback: untimed tasks for today (excluding tasks snoozed into the future)
+    const untimedTasks = pendingTasks.filter((t) => {
+      if (t.startTime) return false;
+      if (t.snoozeUntil) {
+        const sDate = new Date(t.snoozeUntil);
+        if (isValid(sDate) && sDate.getTime() > nowTimestamp) return false;
+      }
+      return true;
+    });
     if (untimedTasks.length > 0) {
       untimedTasks.sort(
         (a, b) => (priorityWeights[a.priority] || 4) - (priorityWeights[b.priority] || 4)
@@ -1134,15 +1176,27 @@ export class TaskService {
       return untimedTasks[0];
     }
 
-    // 6. Any remaining pending task
-    return pendingTasks[0];
+    // 6. If all active/available tasks for today are handled, check for any snoozed task waking up today
+    const snoozedToday = pendingTasks.filter((t) => {
+      if (!t.snoozeUntil) return false;
+      const sDate = new Date(t.snoozeUntil);
+      return isValid(sDate) && sDate.getTime() > nowTimestamp && format(sDate, 'yyyy-MM-dd') === todayStr;
+    });
+    if (snoozedToday.length > 0) {
+      snoozedToday.sort((a, b) => new Date(a.snoozeUntil!).getTime() - new Date(b.snoozeUntil!).getTime());
+      return snoozedToday[0];
+    }
+
+    // 7. Fallback to overdue tasks if today's remaining tasks are all done or snoozed past today
+    const overdue = await this.getOverdueTasks();
+    return overdue.length > 0 ? overdue[0] : null;
   }
 
   detectConflicts(
     tasks: Task[] = [],
     events: CalendarEvent[] = [],
     habits: HabitWithStreak[] = [],
-    targetDate?: string
+    targetDate?: string | Date
   ): { hasConflict: boolean; conflicts: { itemA: string; itemB: string; time: string }[] } {
     const conflicts: { itemA: string; itemB: string; time: string }[] = [];
 
@@ -1151,11 +1205,17 @@ export class TaskService {
     const safeHabits = Array.isArray(habits) ? habits : [];
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const rawTarget =
-      (targetDate && targetDate.trim()) ||
-      safeTasks.find((t) => Boolean(t.date))?.date ||
-      safeEvents.find((e) => Boolean(e.date))?.date ||
-      todayStr;
+    let rawTarget: string;
+    if (targetDate instanceof Date) {
+      rawTarget = isValid(targetDate) ? format(targetDate, 'yyyy-MM-dd') : todayStr;
+    } else if (typeof targetDate === 'string' && targetDate.trim()) {
+      rawTarget = targetDate.trim();
+    } else {
+      rawTarget =
+        safeTasks.find((t) => Boolean(t.date))?.date ||
+        safeEvents.find((e) => Boolean(e.date))?.date ||
+        todayStr;
+    }
 
     const cleanEffective = sanitizeDateString(rawTarget);
     const parsedTarget = cleanEffective ? parseISO(cleanEffective) : parseISO(rawTarget);
