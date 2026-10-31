@@ -15,5 +15,23 @@ class BootReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             Log.e("LifePlannerBoot", "Failed to restore alarms on $action", e)
         }
+
+        try {
+            val prefs = context.getSharedPreferences(BatteryGuardService.PREFS_NAME, Context.MODE_PRIVATE)
+            val guardActive = prefs.getBoolean("battery_guard_active", true)
+            if (guardActive) {
+                val serviceIntent = Intent(context, BatteryGuardService::class.java).apply {
+                    this.action = BatteryGuardService.ACTION_START
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+                Log.d("LifePlannerBoot", "Restored BatteryGuardService on boot")
+            }
+        } catch (e: Exception) {
+            Log.e("LifePlannerBoot", "Failed to start BatteryGuardService on boot", e)
+        }
     }
 }

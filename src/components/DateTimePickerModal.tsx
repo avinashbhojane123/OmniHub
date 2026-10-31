@@ -32,8 +32,12 @@ interface DateTimePickerModalProps {
   title?: string;
 }
 
-function parseTimeHelper(timeStr?: string) {
-  if (!timeStr) return { hour: 9, minute: 0, isNone: true };
+function parseTimeHelper(timeStr?: string, forceActive = false) {
+  if (!timeStr) {
+    const now = new Date();
+    const nextHour = (now.getHours() + 1) % 24;
+    return { hour: nextHour, minute: 0, isNone: !forceActive };
+  }
   const parts = timeStr.split(':').map((p) => parseInt(p, 10));
   return {
     hour: isNaN(parts[0]) ? 9 : parts[0],
@@ -64,10 +68,10 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
   const [currentMonth, setCurrentMonth] = useState<Date>(initialDate);
   const [pickedDate, setPickedDate] = useState<Date>(initialDate);
 
-  const initialTimeObj = parseTimeHelper(selectedTime);
+  const initialTimeObj = parseTimeHelper(selectedTime, mode === 'time');
   const [pickedHour, setPickedHour] = useState<number>(initialTimeObj.hour);
   const [pickedMinute, setPickedMinute] = useState<number>(initialTimeObj.minute);
-  const [isTimeNone, setIsTimeNone] = useState<boolean>(initialTimeObj.isNone);
+  const [isTimeNone, setIsTimeNone] = useState<boolean>(mode === 'time' ? false : initialTimeObj.isNone);
 
   useEffect(() => {
     if (visible) {
@@ -77,10 +81,10 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
       setPickedDate(d);
       setCurrentMonth(d);
 
-      const tObj = parseTimeHelper(selectedTime);
+      const tObj = parseTimeHelper(selectedTime, mode === 'time');
       setPickedHour(tObj.hour);
       setPickedMinute(tObj.minute);
-      setIsTimeNone(tObj.isNone);
+      setIsTimeNone(mode === 'time' ? false : tObj.isNone);
       setActiveTab(mode === 'time' ? 'time' : 'date');
     }
   }, [visible, selectedDate, selectedTime, mode]);
@@ -287,29 +291,31 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
           {/* Tab 2: Time Picker */}
           {activeTab === 'time' && (
             <View style={styles.timePickerBody}>
-              <View style={styles.timeStatusHeader}>
-                <TouchableOpacity
-                  onPress={() => setIsTimeNone(!isTimeNone)}
-                  style={[
-                    styles.timeNoneToggle,
-                    {
-                      backgroundColor: isTimeNone ? colors.surfaceElevated : colors.primary,
-                      borderColor: colors.borderSubtle,
-                    },
-                  ]}
-                >
-                  <Text
+              {mode !== 'time' && (
+                <View style={styles.timeStatusHeader}>
+                  <TouchableOpacity
+                    onPress={() => setIsTimeNone(!isTimeNone)}
                     style={[
-                      styles.timeNoneToggleTxt,
-                      isTimeNone ? { color: colors.textSecondary } : styles.chipTxtActive,
+                      styles.timeNoneToggle,
+                      {
+                        backgroundColor: isTimeNone ? colors.surfaceElevated : colors.primary,
+                        borderColor: colors.borderSubtle,
+                      },
                     ]}
                   >
-                    {isTimeNone ? '🔕 No Specific Time' : '⏰ Specific Time Active'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                    <Text
+                      style={[
+                        styles.timeNoneToggleTxt,
+                        isTimeNone ? { color: colors.textSecondary } : styles.chipTxtActive,
+                      ]}
+                    >
+                      {isTimeNone ? '🔕 No Specific Time' : '⏰ Specific Time Active'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
-              {!isTimeNone && (
+              {(mode === 'time' || !isTimeNone) && (
                 <View style={styles.clockContainer}>
                   <Text style={[styles.subLabel, typography.caption, { color: colors.textSecondary }]}>
                     MANUAL TIME SETTING (12-HOUR CLOCK)
@@ -335,6 +341,7 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                             if (isPm && next12 < 12) newH += 12;
                             if (!isPm && next12 === 12) newH = 0;
                             setPickedHour(newH);
+                            setIsTimeNone(false);
                           }}
                           style={styles.stepperArrow}
                           activeOpacity={0.6}
@@ -357,6 +364,7 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                                 if (isPm && h < 12) newH += 12;
                                 if (!isPm && h === 12) newH = 0;
                                 setPickedHour(newH);
+                                setIsTimeNone(false);
                               }
                             }}
                             keyboardType="number-pad"
@@ -374,6 +382,7 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                             if (isPm && prev12 < 12) newH += 12;
                             if (!isPm && prev12 === 12) newH = 0;
                             setPickedHour(newH);
+                            setIsTimeNone(false);
                           }}
                           style={styles.stepperArrow}
                           activeOpacity={0.6}
@@ -388,7 +397,10 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                       {/* Minute Column */}
                       <View style={styles.digitCol}>
                         <TouchableOpacity
-                          onPress={() => setPickedMinute((pickedMinute + 1) % 60)}
+                          onPress={() => {
+                            setPickedMinute((pickedMinute + 1) % 60);
+                            setIsTimeNone(false);
+                          }}
                           style={styles.stepperArrow}
                           activeOpacity={0.6}
                           accessibilityLabel="Increment Minute"
@@ -406,6 +418,7 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                                 if (m < 0) m = 0;
                                 if (m > 59) m = 59;
                                 setPickedMinute(m);
+                                setIsTimeNone(false);
                               }
                             }}
                             keyboardType="number-pad"
@@ -415,7 +428,10 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                           />
                         </View>
                         <TouchableOpacity
-                          onPress={() => setPickedMinute((pickedMinute - 1 + 60) % 60)}
+                          onPress={() => {
+                            setPickedMinute((pickedMinute - 1 + 60) % 60);
+                            setIsTimeNone(false);
+                          }}
                           style={styles.stepperArrow}
                           activeOpacity={0.6}
                           accessibilityLabel="Decrement Minute"
@@ -431,6 +447,7 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                             if (pickedHour >= 12) {
                               setPickedHour(pickedHour - 12);
                             }
+                            setIsTimeNone(false);
                           }}
                           style={[
                             styles.ampmBtn,
@@ -452,6 +469,7 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                             if (pickedHour < 12) {
                               setPickedHour(pickedHour + 12);
                             }
+                            setIsTimeNone(false);
                           }}
                           style={[
                             styles.ampmBtn,
@@ -471,6 +489,53 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
                       </View>
                     </View>
                   </View>
+
+                  {/* Quick Time Presets */}
+                  <View style={styles.quickPresetSection}>
+                    <Text style={[styles.subLabel, typography.caption, { color: colors.textSecondary, marginBottom: 8 }]}>
+                      QUICK TIME PRESETS
+                    </Text>
+                    <View style={styles.quickPresetGrid}>
+                      {[
+                        { label: 'Now', getH: () => new Date().getHours(), getM: () => new Date().getMinutes() },
+                        { label: '9:00 AM', h: 9, m: 0 },
+                        { label: '12:00 PM', h: 12, m: 0 },
+                        { label: '2:00 PM', h: 14, m: 0 },
+                        { label: '5:00 PM', h: 17, m: 0 },
+                        { label: '8:00 PM', h: 20, m: 0 },
+                      ].map((item) => {
+                        const targetH = item.getH ? item.getH() : item.h!;
+                        const targetM = item.getM ? item.getM() : item.m!;
+                        const isSel = pickedHour === targetH && pickedMinute === targetM && !isTimeNone;
+                        return (
+                          <TouchableOpacity
+                            key={item.label}
+                            onPress={() => {
+                              setPickedHour(targetH);
+                              setPickedMinute(targetM);
+                              setIsTimeNone(false);
+                            }}
+                            style={[
+                              styles.quickChip,
+                              {
+                                backgroundColor: isSel ? colors.primary : colors.surfaceElevated,
+                                borderColor: isSel ? colors.primary : colors.borderSubtle,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.quickChipTxt,
+                                isSel ? styles.chipTxtActive : { color: colors.textSecondary },
+                              ]}
+                            >
+                              {item.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 </View>
               )}
             </View>
@@ -478,15 +543,30 @@ export const DateTimePickerModal: React.FC<DateTimePickerModalProps> = ({
 
           {/* Action Row */}
           <View style={[styles.footerRow, { borderTopColor: colors.borderSubtle }]}>
-            <TouchableOpacity onPress={onClose} style={styles.cancelBtn}>
-              <Text style={[styles.cancelBtnTxt, { color: colors.textSecondary }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              style={[styles.confirmBtn, { backgroundColor: colors.primary }]}
-            >
-              <Text style={styles.confirmBtnTxt}>Set & Done</Text>
-            </TouchableOpacity>
+            {mode === 'time' ? (
+              <TouchableOpacity
+                onPress={() => {
+                  onConfirm(format(pickedDate, 'yyyy-MM-dd'), undefined);
+                  onClose();
+                }}
+                style={styles.clearBtnFooter}
+              >
+                <Text style={[styles.clearBtnFooterTxt, { color: colors.danger || '#EF4444' }]}>
+                  Clear Time
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            <View style={styles.footerRightBtns}>
+              <TouchableOpacity onPress={onClose} style={styles.cancelBtn}>
+                <Text style={[styles.cancelBtnTxt, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleConfirm}
+                style={[styles.confirmBtn, { backgroundColor: colors.primary }]}
+              >
+                <Text style={styles.confirmBtnTxt}>Set & Done</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -735,12 +815,26 @@ const styles = StyleSheet.create({
   },
   footerRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
     gap: spacing.sm,
     marginTop: spacing.md,
     paddingTop: spacing.sm,
     borderTopWidth: 1,
+  },
+  footerRightBtns: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginLeft: 'auto',
+  },
+  clearBtnFooter: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  clearBtnFooterTxt: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   cancelBtn: {
     paddingHorizontal: spacing.md,
@@ -759,5 +853,13 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  quickPresetSection: {
+    marginTop: spacing.md,
+  },
+  quickPresetGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
 });

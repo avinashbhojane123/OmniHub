@@ -43,6 +43,14 @@ export const ChatGatewayView: React.FC<ChatGatewayViewProps> = React.memo(({
   onGoBack,
   topInset,
   bottomInset,
+  serverUrl,
+  setServerUrl,
+  showServerCustom,
+  setShowServerCustom,
+  presetRooms = [],
+  recentRooms = [],
+  onClearRecentRooms,
+  serverPresets = [],
 }) => {
   const nicknameInputRef = useRef<any>(null);
   const passcodeInputRef = useRef<any>(null);
@@ -55,7 +63,18 @@ export const ChatGatewayView: React.FC<ChatGatewayViewProps> = React.memo(({
         style={styles.gatewayFlex}
       >
         {/* Header */}
-        <View style={[styles.gatewayHeader, { justifyContent: 'flex-end' }]}>
+        <View style={styles.gatewayHeader}>
+          {Boolean(onGoBack) ? (
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={onGoBack}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.backBtnText}>‹ Back</Text>
+            </TouchableOpacity>
+          ) : (
+            <View />
+          )}
           <View style={styles.gatewayBadgePill}>
             <Text style={styles.gatewayBadge}>CHATROOM</Text>
           </View>
@@ -125,6 +144,114 @@ export const ChatGatewayView: React.FC<ChatGatewayViewProps> = React.memo(({
                 onSubmitEditing={onJoin}
                 autoCorrect={false}
               />
+
+              {/* Preset Room Quick Chips */}
+              {presetRooms.length > 0 && (
+                <View style={styles.presetRoomsRow}>
+                  {presetRooms.map((room) => {
+                    const isSelected = passcode.trim().toLowerCase() === room.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={room}
+                        style={[styles.presetChip, isSelected && styles.presetChipActive]}
+                        onPress={() => setPasscode(room)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.presetChipText, isSelected && styles.presetChipTextActive]}>
+                          #{room}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Recent Rooms */}
+              {recentRooms.length > 0 && (
+                <View style={styles.recentRoomsSection}>
+                  <View style={styles.recentRoomsHeader}>
+                    <Text style={styles.recentRoomsTitle}>Recent Rooms</Text>
+                    {Boolean(onClearRecentRooms) && (
+                      <TouchableOpacity onPress={onClearRecentRooms}>
+                        <Text style={styles.recentClearBtnText}>Clear</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <View style={styles.presetRoomsRow}>
+                    {recentRooms.map((room) => {
+                      const isSelected = passcode.trim().toLowerCase() === room.toLowerCase();
+                      return (
+                        <TouchableOpacity
+                          key={room}
+                          style={[styles.recentChip, isSelected && styles.recentChipActive]}
+                          onPress={() => setPasscode(room)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.recentChipText, isSelected && styles.recentChipTextActive]}>
+                            🕒 #{room}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Server Connection Settings */}
+            <View style={styles.fieldSection}>
+              <View style={styles.serverRowHeader}>
+                <Text style={styles.label}>Server Target</Text>
+                {setShowServerCustom && (
+                  <TouchableOpacity
+                    onPress={() => setShowServerCustom(!showServerCustom)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.toggleCustomText}>
+                      {showServerCustom ? 'Hide Custom' : 'Custom Server'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Server Presets */}
+              {serverPresets.length > 0 && (
+                <View style={styles.serverPresetsRow}>
+                  {serverPresets.map((preset) => {
+                    const isSelected = (serverUrl || '').trim() === preset.url.trim();
+                    return (
+                      <TouchableOpacity
+                        key={preset.url}
+                        style={[styles.serverChip, isSelected && styles.serverChipActive]}
+                        onPress={() => {
+                          setServerUrl?.(preset.url);
+                          setShowServerCustom?.(false);
+                        }}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={[styles.serverChipText, isSelected && styles.serverChipTextActive]}>
+                          {preset.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Custom Server URL Input */}
+              {showServerCustom && (
+                <View style={{ marginTop: 10 }}>
+                  <TextInput
+                    style={styles.gatewayInput}
+                    placeholder="https://your-server.com or http://IP:10000"
+                    placeholderTextColor="#64748B"
+                    value={serverUrl}
+                    onChangeText={(val) => setServerUrl?.(val)}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+              )}
             </View>
 
             {/* Enter Room Button with Loading Indicator */}

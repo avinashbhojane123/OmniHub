@@ -1,19 +1,21 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Task } from '../../types';
+import { Task, UnifiedNextUpItem } from '../../types';
 import { useAppTheme } from '../../hooks/useTheme';
 import { withOpacity } from '../../utils/color';
 
 interface NextUpCardProps {
-  task: Task;
+  task?: Task | null;
+  item?: UnifiedNextUpItem | null;
   onPress: () => void;
   onComplete: () => void;
-  onSnooze: () => void;
+  onSnooze?: () => void;
   formatTaskTime: (time?: string) => string;
 }
 
 export const NextUpCardComponent: React.FC<NextUpCardProps> = ({
   task,
+  item,
   onPress,
   onComplete,
   onSnooze,
@@ -21,13 +23,36 @@ export const NextUpCardComponent: React.FC<NextUpCardProps> = ({
 }) => {
   const { colors } = useAppTheme();
 
-  const isSnoozed = Boolean(
-    task.snoozeUntil &&
-      !isNaN(new Date(task.snoozeUntil).getTime()) &&
-      new Date(task.snoozeUntil).getTime() > Date.now()
-  );
+  // If item is passed, use it; otherwise adapt task
+  const resolvedItem: UnifiedNextUpItem | null = item || (task ? {
+    id: task.id,
+    type: 'task',
+    title: task.title,
+    description: task.description,
+    startTime: task.startTime,
+    endTime: task.endTime,
+    categoryName: task.categoryName,
+    categoryColor: task.categoryColor,
+    categoryIcon: task.categoryIcon,
+    isSnoozed: Boolean(
+      task.snoozeUntil &&
+        !isNaN(new Date(task.snoozeUntil).getTime()) &&
+        new Date(task.snoozeUntil).getTime() > Date.now()
+    ),
+    rawTask: task,
+  } : null);
 
-  const snoozeTime = isSnoozed && task.snoozeUntil ? new Date(task.snoozeUntil) : null;
+  if (!resolvedItem) return null;
+
+  const isTask = resolvedItem.type === 'task';
+  const isEvent = resolvedItem.type === 'calendar_event';
+  const isHabit = resolvedItem.type === 'habit';
+
+  const badgeColor = isEvent ? '#3B82F6' : isHabit ? '#10B981' : colors.primary;
+  const badgeLabel = isEvent ? '📅 EVENT' : isHabit ? '🔁 HABIT' : '⚡ NEXT UP';
+
+  const isSnoozed = Boolean(resolvedItem.isSnoozed);
+  const snoozeTime = isSnoozed && resolvedItem.rawTask?.snoozeUntil ? new Date(resolvedItem.rawTask.snoozeUntil) : null;
   const snoozeFormatted = snoozeTime
     ? formatTaskTime(
         `${String(snoozeTime.getHours()).padStart(2, '0')}:${String(snoozeTime.getMinutes()).padStart(2, '0')}`
@@ -40,7 +65,7 @@ export const NextUpCardComponent: React.FC<NextUpCardProps> = ({
         styles.card,
         {
           backgroundColor: colors.surfaceElevated,
-          borderColor: withOpacity(colors.primary, 0.4),
+          borderColor: withOpacity(badgeColor, 0.45),
         },
       ]}
     >
@@ -49,37 +74,42 @@ export const NextUpCardComponent: React.FC<NextUpCardProps> = ({
         onPress={onPress}
         activeOpacity={0.75}
         accessibilityRole="button"
-        accessibilityLabel={`Next task: ${task.title}. Tap to edit.`}
+        accessibilityLabel={`Next up: ${resolvedItem.title}. Tap to view.`}
       >
         <View style={styles.headerRow}>
-          <View style={[styles.badge, { backgroundColor: withOpacity(colors.primary, 0.18) }]}>
-            <Text style={[styles.badgeText, { color: colors.primary }]}>⚡ NEXT UP</Text>
+          <View style={[styles.badge, { backgroundColor: withOpacity(badgeColor, 0.18) }]}>
+            <Text style={[styles.badgeText, { color: badgeColor }]}>{badgeLabel}</Text>
           </View>
           {isSnoozed ? (
             <Text style={[styles.snoozeNoticeText, { color: colors.warning }]}>
               💤 Snoozed until {snoozeFormatted}
             </Text>
-          ) : task.startTime ? (
+          ) : resolvedItem.startTime ? (
             <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-              ⏰ {formatTaskTime(task.startTime)}
-              {task.endTime ? ` – ${formatTaskTime(task.endTime)}` : ''}
+              ⏰ {formatTaskTime(resolvedItem.startTime)}
+              {resolvedItem.endTime ? ` – ${formatTaskTime(resolvedItem.endTime)}` : ''}
             </Text>
           ) : null}
+          {isHabit && resolvedItem.streakCount !== undefined && resolvedItem.streakCount > 0 && (
+            <View style={[styles.badge, { backgroundColor: withOpacity('#F59E0B', 0.16) }]}>
+              <Text style={[styles.badgeText, { color: '#F59E0B' }]}>🔥 {resolvedItem.streakCount}d streak</Text>
+            </View>
+          )}
         </View>
 
         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-          {task.title}
+          {resolvedItem.title}
         </Text>
 
-        {task.categoryName && (
+        {resolvedItem.categoryName && (
           <Text
             style={[
               styles.categoryText,
-              { color: task.categoryColor || colors.primary },
+              { color: resolvedItem.categoryColor || badgeColor },
             ]}
           >
-            {task.categoryIcon ? `${task.categoryIcon} ` : ''}
-            {task.categoryName}
+            {resolvedItem.categoryIcon ? `${resolvedItem.categoryIcon} ` : ''}
+            {resolvedItem.categoryName}
           </Text>
         )}
       </TouchableOpacity>
@@ -87,25 +117,38 @@ export const NextUpCardComponent: React.FC<NextUpCardProps> = ({
       <View style={styles.actionsCol}>
         <TouchableOpacity
           onPress={onComplete}
-          style={[styles.completeBtn, { backgroundColor: colors.primary }]}
+          style={[styles.completeBtn, { backgroundColor: badgeColor }]}
           activeOpacity={0.7}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
-          accessibilityLabel="Complete next task"
+          accessibilityLabel={isHabit ? "Complete habit" : isEvent ? "Complete event" : "Complete task"}
         >
           <Text style={styles.completeBtnText}>✓ Done</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={onSnooze}
-          style={[styles.snoozeBtn, { borderColor: colors.borderSubtle }]}
-          activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityRole="button"
-          accessibilityLabel="Snooze next task 10 minutes"
-        >
-          <Text style={[styles.snoozeBtnText, { color: colors.textMuted }]}>💤 +10m</Text>
-        </TouchableOpacity>
+        {isTask && onSnooze ? (
+          <TouchableOpacity
+            onPress={onSnooze}
+            style={[styles.snoozeBtn, { borderColor: colors.borderSubtle }]}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Snooze next task 10 minutes"
+          >
+            <Text style={[styles.snoozeBtnText, { color: colors.textMuted }]}>💤 +10m</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={onPress}
+            style={[styles.snoozeBtn, { borderColor: colors.borderSubtle }]}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Open details"
+          >
+            <Text style={[styles.snoozeBtnText, { color: colors.textMuted }]}>👁️ View</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );

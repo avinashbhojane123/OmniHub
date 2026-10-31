@@ -29,36 +29,36 @@ if (!fs.existsSync(uploadDir)) {
 const maxFileSizeMB = Number(process.env.MAX_FILE_SIZE_MB || 100);
 const blockedExtList = process.env.BLOCKED_FILE_EXTENSIONS
   ? process.env.BLOCKED_FILE_EXTENSIONS.split(',').map((e) =>
-      e.trim().toLowerCase(),
-    )
+    e.trim().toLowerCase(),
+  )
   : [
-      '.exe',
-      '.bat',
-      '.cmd',
-      '.vbs',
-      '.com',
-      '.scr',
-      '.pif',
-      '.msi',
-      '.ps1',
-      '.hta',
-      '.jar',
-      '.html',
-      '.htm',
-      '.xhtml',
-      '.php',
-      '.phtml',
-      '.js',
-      '.mjs',
-      '.sh',
-      '.py',
-      '.pl',
-      '.cgi',
-      '.asp',
-      '.aspx',
-      '.jsp',
-      '.svg',
-    ];
+    '.exe',
+    '.bat',
+    '.cmd',
+    '.vbs',
+    '.com',
+    '.scr',
+    '.pif',
+    '.msi',
+    '.ps1',
+    '.hta',
+    '.jar',
+    '.html',
+    '.htm',
+    '.xhtml',
+    '.php',
+    '.phtml',
+    '.js',
+    '.mjs',
+    '.sh',
+    '.py',
+    '.pl',
+    '.cgi',
+    '.asp',
+    '.aspx',
+    '.jsp',
+    '.svg',
+  ];
 
 @Controller('upload')
 export class UploadController {
@@ -122,8 +122,35 @@ export class UploadController {
     }
 
     console.log('Uploaded file:', file.filename);
-
     console.log('Saved path:', file.path);
+
+    // Inspect binary header bytes to prevent masked executables/scripts
+    try {
+      const fd = fs.openSync(file.path, 'r');
+      const headerBuffer = Buffer.alloc(16);
+      fs.readSync(fd, headerBuffer, 0, 16, 0);
+      fs.closeSync(fd);
+
+      // Check for Windows executable (MZ), Linux ELF, or Shell script (#! / 0x23 0x21)
+      const isDosExe = headerBuffer[0] === 0x4d && headerBuffer[1] === 0x5a;
+      const isElf =
+        headerBuffer[0] === 0x7f &&
+        headerBuffer[1] === 0x45 &&
+        headerBuffer[2] === 0x4c &&
+        headerBuffer[3] === 0x46;
+      const isShebang = headerBuffer[0] === 0x23 && headerBuffer[1] === 0x21;
+
+      if (isDosExe || isElf || isShebang) {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+        throw new BadRequestException(
+          'Security rejection: Executable binary or script signature detected.',
+        );
+      }
+    } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
+    }
 
     const uploadPrefix = process.env.UPLOAD_PREFIX || '/uploads/';
     const cleanPrefix = uploadPrefix.endsWith('/')

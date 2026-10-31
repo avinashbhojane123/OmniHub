@@ -1,3 +1,6 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
+
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -19,6 +22,28 @@ async function bootstrap() {
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     credentials: true,
+  });
+
+  // URL rewrite middleware: normalize routes without /api/ prefix
+  app.use((req: any, res: any, next: any) => {
+    const rawPath = req.url.split('?')[0];
+    if (
+      rawPath === '/dashboard' ||
+      rawPath === '/monitor' ||
+      rawPath === '/api/dashboard' ||
+      rawPath === '/api/monitor' ||
+      rawPath === '/'
+    ) {
+      req.url = '/api/devices/dashboard';
+    } else if (
+      req.url.startsWith('/devices') ||
+      req.url.startsWith('/device')
+    ) {
+      if (!req.url.startsWith('/api/')) {
+        req.url = `/api${req.url}`;
+      }
+    }
+    next();
   });
 
   app.useGlobalPipes(

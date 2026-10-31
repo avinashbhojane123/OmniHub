@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Task } from '../../types';
 import { useAppTheme } from '../../hooks/useTheme';
-import { parseBulletNotes } from '../../utils/bulletNotes';
 import { withOpacity } from '../../utils/color';
 
 interface TodayTaskItemProps {
@@ -43,11 +42,6 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
     const mm = String(d.getMinutes()).padStart(2, '0');
     return formatTaskTime(`${hh}:${mm}`);
   }, [isSnoozed, task.snoozeUntil, formatTaskTime]);
-
-  const bullets = useMemo(
-    () => parseBulletNotes(task.notes || task.description),
-    [task.notes, task.description]
-  );
 
   const accentHighlight = task.recurrenceRule?.accentColor;
 
@@ -156,51 +150,7 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
               </Text>
             </View>
           )}
-          {task.priority === 'high' && (
-            <View
-              style={[
-                styles.priorityPill,
-                {
-                  backgroundColor: withOpacity(colors.priorityHigh, 0.15),
-                  borderColor: colors.priorityHigh || '#EF4444',
-                },
-              ]}
-            >
-              <Text style={[styles.priorityPillText, { color: colors.priorityHigh || '#EF4444' }]}>
-                High
-              </Text>
-            </View>
-          )}
-          {task.priority === 'medium' && (
-            <View
-              style={[
-                styles.priorityPill,
-                {
-                  backgroundColor: withOpacity(colors.priorityMedium, 0.15),
-                  borderColor: colors.priorityMedium || '#F97316',
-                },
-              ]}
-            >
-              <Text style={[styles.priorityPillText, { color: colors.priorityMedium || '#F97316' }]}>
-                Med
-              </Text>
-            </View>
-          )}
-          {task.priority === 'low' && (
-            <View
-              style={[
-                styles.priorityPill,
-                {
-                  backgroundColor: withOpacity(colors.priorityLow, 0.15),
-                  borderColor: colors.priorityLow || '#10B981',
-                },
-              ]}
-            >
-              <Text style={[styles.priorityPillText, { color: colors.priorityLow || '#10B981' }]}>
-                Low
-              </Text>
-            </View>
-          )}
+
           {task.categoryName && (
             <View
               style={[
@@ -261,51 +211,7 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
           )}
         </View>
 
-        {bullets.length > 0 && (
-          <View style={styles.bulletsWrapper}>
-            {bullets.slice(0, 3).map((b, i) => (
-              <TouchableOpacity
-                key={b.id || `bullet_${i}`}
-                style={styles.bulletRow}
-                onPress={() => {
-                  if (onToggleSubtask) {
-                    onToggleSubtask(task, i);
-                  } else {
-                    onPress(task);
-                  }
-                }}
-                activeOpacity={0.7}
-                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-              >
-                <Text style={[styles.bulletBullet, { color: colors.primary }]}>
-                  {b.completed !== undefined ? (b.completed ? '☑' : '☐') : '•'}
-                </Text>
-                <Text
-                  style={[
-                    styles.bulletText,
-                    (b.completed || isTaskDone) && styles.bulletTextDone,
-                    {
-                      color:
-                        b.completed || isTaskDone
-                          ? colors.textMuted
-                          : colors.textSecondary,
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {b.text}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            {bullets.length > 3 && (
-              <TouchableOpacity onPress={() => onPress(task)}>
-                <Text style={[styles.moreBulletsText, { color: colors.textMuted }]}>
-                  +{bullets.length - 3} more subtasks...
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
+
       </View>
     </View>
   );

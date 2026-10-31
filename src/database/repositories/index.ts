@@ -6,3 +6,4 @@ export * from './NoteRepository';
 export * from './SettingsRepository';
 export * from './CalendarRepository';
 export * from './MovieRepository';
+export * from './BatteryRepository';

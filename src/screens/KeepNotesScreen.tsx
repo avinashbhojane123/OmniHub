@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { KeepNote, KeepColorKey } from '../types';
+import { KeepNote, KeepColorKey, KeepFilterTab, toggleChecklistItem } from '../types';
 import { useAppTheme } from '../hooks/useTheme';
 import { keepNoteRepository } from '../database/repositories/KeepNoteRepository';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
@@ -26,7 +26,7 @@ import { KeepEditorModal } from '../components/notes/KeepEditorModal';
 import { KeepColorPicker } from '../components/notes/KeepColorPicker';
 import { KeepLabelModal } from '../components/notes/KeepLabelModal';
 
-type KeepFilterTab = 'all' | 'reminders' | 'checklists' | 'archived' | 'trash';
+
 
 // Content-weighted height estimation for optimal Masonry waterfall balance
 const estimateNoteHeight = (note: KeepNote): number => {
@@ -255,9 +255,7 @@ export const KeepNotesScreen: React.FC = () => {
   const handleToggleCheckItem = async (noteId: string, itemId: string) => {
     const note = notes.find((n) => n.id === noteId);
     if (!note || !note.checklistData) return;
-    const updatedChecklist = note.checklistData.map((item) =>
-      item.id === itemId ? { ...item, completed: !item.completed } : item
-    );
+    const updatedChecklist = toggleChecklistItem(note.checklistData, itemId);
     // Optimistic in-place update prevents card from re-sorting and jumping to top
     setNotes((prev) =>
       prev.map((n) => (n.id === noteId ? { ...n, checklistData: updatedChecklist } : n))
@@ -507,7 +505,7 @@ export const KeepNotesScreen: React.FC = () => {
     if (navigation?.canGoBack && navigation.canGoBack()) {
       navigation.goBack();
     } else {
-      navigation.navigate('WorkspaceSelect');
+      navigation.navigate('Today');
     }
   }, [isSelectionMode, handleExitSelection, searchQuery, navigation]);
 

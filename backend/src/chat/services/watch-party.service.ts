@@ -27,7 +27,7 @@ export class WatchPartyService implements OnModuleDestroy {
 
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
-  ) {}
+  ) { }
 
   onModuleDestroy() {
     for (const timer of this.watchPartyCleanupTimers.values()) {
@@ -46,18 +46,20 @@ export class WatchPartyService implements OnModuleDestroy {
   }
 
   clearWatchPartyBufferTimer(passcode: string) {
-    const timer = this.watchPartyBufferTimers.get(passcode);
+    const key = (passcode || '').trim().toLowerCase();
+    const timer = this.watchPartyBufferTimers.get(key);
     if (timer) {
       clearTimeout(timer);
-      this.watchPartyBufferTimers.delete(passcode);
+      this.watchPartyBufferTimers.delete(key);
     }
   }
 
   clearWatchPartyDisconnectTimer(passcode: string) {
-    const timer = this.watchPartyDisconnectTimers.get(passcode);
+    const key = (passcode || '').trim().toLowerCase();
+    const timer = this.watchPartyDisconnectTimers.get(key);
     if (timer) {
       clearTimeout(timer);
-      this.watchPartyDisconnectTimers.delete(passcode);
+      this.watchPartyDisconnectTimers.delete(key);
     }
   }
 
@@ -99,7 +101,12 @@ export class WatchPartyService implements OnModuleDestroy {
     ) => boolean,
   ) {
     const targetPasscode = (data.passcode || session?.passcode || '').trim();
-    if (!session || !targetPasscode || session.passcode !== targetPasscode) {
+    const normPasscode = targetPasscode.toLowerCase();
+    if (
+      !session ||
+      !targetPasscode ||
+      session.passcode.trim().toLowerCase() !== normPasscode
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
@@ -115,13 +122,13 @@ export class WatchPartyService implements OnModuleDestroy {
       };
     }
 
-    let state = this.watchPartyRooms.get(targetPasscode);
+    let state = this.watchPartyRooms.get(normPasscode);
     const now = Date.now();
 
     // Cancel pending eviction timer if users are actively interacting
-    if (this.watchPartyCleanupTimers.has(targetPasscode)) {
-      clearTimeout(this.watchPartyCleanupTimers.get(targetPasscode));
-      this.watchPartyCleanupTimers.delete(targetPasscode);
+    if (this.watchPartyCleanupTimers.has(normPasscode)) {
+      clearTimeout(this.watchPartyCleanupTimers.get(normPasscode));
+      this.watchPartyCleanupTimers.delete(normPasscode);
     }
 
     if (!state) {
@@ -140,13 +147,14 @@ export class WatchPartyService implements OnModuleDestroy {
         isBuffering: false,
         bufferingUsers: [],
       };
-      this.watchPartyRooms.set(targetPasscode, state);
+      this.watchPartyRooms.set(normPasscode, state);
     }
 
     // Enforce host-only permissions when lock is active
     if (
       state.isHostOnly &&
-      session.nickname !== state.hostNickname &&
+      session.nickname.trim().toLowerCase() !==
+        (state.hostNickname || '').trim().toLowerCase() &&
       ['play', 'pause', 'seek', 'rate', 'change_video'].includes(data.action)
     ) {
       return {
@@ -306,8 +314,14 @@ export class WatchPartyService implements OnModuleDestroy {
       }
 
       case 'buffering': {
-        if (!state.bufferingUsers.includes(session.nickname)) {
-          state.bufferingUsers.push(session.nickname);
+        const nickTrim = session.nickname.trim();
+        const nickLower = nickTrim.toLowerCase();
+        if (
+          !state.bufferingUsers.some(
+            (u) => (u || '').trim().toLowerCase() === nickLower,
+          )
+        ) {
+          state.bufferingUsers.push(nickTrim);
         }
         state.isBuffering = true;
         state.currentTime = currentPos;
@@ -347,8 +361,9 @@ export class WatchPartyService implements OnModuleDestroy {
       }
 
       case 'ready': {
+        const nickLower = session.nickname.trim().toLowerCase();
         state.bufferingUsers = state.bufferingUsers.filter(
-          (u) => u !== session.nickname,
+          (u) => (u || '').trim().toLowerCase() !== nickLower,
         );
         if (state.bufferingUsers.length === 0) {
           state.isBuffering = false;
@@ -378,16 +393,22 @@ export class WatchPartyService implements OnModuleDestroy {
       case 'close': {
         state.isActive = false;
         state.isPlaying = false;
-        this.clearWatchPartyBufferTimer(targetPasscode);
-        this.watchPartyRooms.delete(targetPasscode);
-        server.to(targetPasscode).emit('watchPartyClosed', {
-          closedBy: session.nickname,
-        });
+        this.clearWatchPartyBufferTimer(normPasscode);
+        this.watchPartyRooms.delete(normPasscode);
+        server
+          .to(targetPasscode)
+          .to(normPasscode)
+          .emit('watchPartyClosed', {
+            closedBy: session.nickname,
+          });
         return { success: true };
       }
 
       case 'toggle_host_lock': {
-        if (session.nickname === state.hostNickname) {
+        if (
+          session.nickname.trim().toLowerCase() ===
+          (state.hostNickname || '').trim().toLowerCase()
+        ) {
           state.isHostOnly = !state.isHostOnly;
           state.lastUpdatedTimestamp = now;
           state.version = (state.version || 0) + 1;
@@ -413,7 +434,10 @@ export class WatchPartyService implements OnModuleDestroy {
       serverTime: now,
     };
 
-    server.to(targetPasscode).emit('watchPartyUpdate', payload);
+    server
+      .to(targetPasscode)
+      .to(normPasscode)
+      .emit('watchPartyUpdate', payload);
     return { success: true, state: payload };
   }
 
@@ -431,16 +455,21 @@ export class WatchPartyService implements OnModuleDestroy {
     data: GetWatchPartyDto,
   ) {
     const targetPasscode = (data?.passcode || session?.passcode || '').trim();
-    if (!session || !targetPasscode || session.passcode !== targetPasscode) {
+    const normPasscode = targetPasscode.toLowerCase();
+    if (
+      !session ||
+      !targetPasscode ||
+      session.passcode.trim().toLowerCase() !== normPasscode
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    if (this.watchPartyCleanupTimers.has(targetPasscode)) {
-      clearTimeout(this.watchPartyCleanupTimers.get(targetPasscode));
-      this.watchPartyCleanupTimers.delete(targetPasscode);
+    if (this.watchPartyCleanupTimers.has(normPasscode)) {
+      clearTimeout(this.watchPartyCleanupTimers.get(normPasscode));
+      this.watchPartyCleanupTimers.delete(normPasscode);
     }
 
-    const state = this.watchPartyRooms.get(targetPasscode);
+    const state = this.watchPartyRooms.get(normPasscode);
     if (!state || !state.isActive) {
       client.emit('watchPartyState', null);
       return { success: true, state: null };
@@ -448,6 +477,7 @@ export class WatchPartyService implements OnModuleDestroy {
 
     const calculatedTime = this.getCalculatedWatchPartyPosition(state);
     const now = Date.now();
+
     const payload = {
       action: 'sync',
       videoSource: state.videoSource,
@@ -475,15 +505,18 @@ export class WatchPartyService implements OnModuleDestroy {
     data: WatchPartyReactionDto,
   ) {
     const targetPasscode = (data?.passcode || session?.passcode || '').trim();
-    if (!session || !targetPasscode || session.passcode !== targetPasscode) {
+    if (!session || !targetPasscode || session.passcode.toLowerCase() !== targetPasscode.toLowerCase()) {
       return;
     }
 
-    server.to(targetPasscode).emit('watchPartyReaction', {
-      from: session.nickname,
-      reaction: data.reaction,
-      timestamp: Date.now(),
-    });
+    server
+      .to(targetPasscode)
+      .to(targetPasscode.toLowerCase())
+      .emit('watchPartyReaction', {
+        from: session.nickname,
+        reaction: data.reaction,
+        timestamp: Date.now(),
+      });
   }
 
   async watchPartyComment(
@@ -493,7 +526,7 @@ export class WatchPartyService implements OnModuleDestroy {
     data: WatchPartyCommentDto,
   ) {
     const targetPasscode = (data?.passcode || session?.passcode || '').trim();
-    if (!session || !targetPasscode || session.passcode !== targetPasscode) {
+    if (!session || !targetPasscode || session.passcode.toLowerCase() !== targetPasscode.toLowerCase()) {
       return;
     }
 
@@ -503,19 +536,22 @@ export class WatchPartyService implements OnModuleDestroy {
       });
       const user = room
         ? await this.userRepo.findOne({
-            where: { nickname: session.nickname, roomId: room.id },
-          })
+          where: { nickname: session.nickname, roomId: room.id },
+        })
         : null;
       if (user?.mutedUntil && new Date(user.mutedUntil) <= new Date()) {
         user.isMuted = false;
         user.mutedUntil = null;
         await this.userRepo.save(user);
         session.isMuted = false;
-        server.to(targetPasscode).emit('userMuteToggled', {
-          targetNickname: user.nickname,
-          isMuted: false,
-          mutedBy: 'System (Timed Mute Expired)',
-        });
+        server
+          .to(targetPasscode)
+          .to(targetPasscode.toLowerCase())
+          .emit('userMuteToggled', {
+            targetNickname: user.nickname,
+            isMuted: false,
+            mutedBy: 'System (Timed Mute Expired)',
+          });
       } else {
         client.emit('error', {
           message: 'You are muted and cannot post watch party comments.',
@@ -524,16 +560,19 @@ export class WatchPartyService implements OnModuleDestroy {
       }
     }
 
-    server.to(targetPasscode).emit('watchPartyComment', {
-      id: `${Date.now()}-${Math.random()}`,
-      from: session.nickname,
-      text: data.text,
-      top:
-        typeof data.top === 'number'
-          ? data.top
-          : Math.floor(Math.random() * 60) + 15,
-      timestamp: Date.now(),
-    });
+    server
+      .to(targetPasscode)
+      .to(targetPasscode.toLowerCase())
+      .emit('watchPartyComment', {
+        id: `${Date.now()}-${Math.random()}`,
+        from: session.nickname,
+        text: data.text,
+        top:
+          typeof data.top === 'number'
+            ? data.top
+            : Math.floor(Math.random() * 60) + 15,
+        timestamp: Date.now(),
+      });
   }
 
   handleUserDisconnect(

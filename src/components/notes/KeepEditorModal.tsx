@@ -19,6 +19,9 @@ import {
   KeepColorKey,
   KEEP_COLORS,
   ChecklistItem,
+  checklistToText,
+  textToChecklist,
+  toggleChecklistItem,
 } from '../../types';
 import { useAppTheme } from '../../hooks/useTheme';
 import { keepNoteRepository } from '../../database/repositories/KeepNoteRepository';
@@ -176,10 +179,6 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
         overrideFields.imageUri !== undefined
           ? overrideFields.imageUri
           : (imageUriRef.current ?? imageUri);
-      const typeVal =
-        overrideFields.type !== undefined
-          ? overrideFields.type
-          : (noteTypeRef.current ?? noteType);
       const colorVal =
         overrideFields.color !== undefined ? overrideFields.color : (colorRef.current ?? color);
       const pinnedVal =
@@ -188,12 +187,30 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
         overrideFields.isArchived !== undefined ? overrideFields.isArchived : (isArchivedRef.current ?? isArchived);
       const labelsVal =
         overrideFields.labels !== undefined ? overrideFields.labels : (labelsRef.current ?? labels);
+      const activeType =
+        overrideFields.type !== undefined
+          ? overrideFields.type
+          : (noteTypeRef.current ?? noteType);
+
+      const finalType = activeType === 'checklist' ? 'checklist' : 'text';
+
+      // Ensure mutual exclusivity between content (text/bullets) and checklistData
+      const finalContent =
+        finalType === 'checklist'
+          ? (overrideFields.content !== undefined ? overrideFields.content : '')
+          : (overrideFields.content !== undefined ? overrideFields.content : (contentRef.current ?? content));
+
+      const finalChecklist =
+        finalType === 'text'
+          ? (overrideFields.checklistData !== undefined ? overrideFields.checklistData : [])
+          : (overrideFields.checklistData !== undefined ? overrideFields.checklistData : (checklistItemsRef.current ?? checklistItems));
 
       // Don't save empty notes that have never had any content
       const hasContent =
         titleVal.trim().length > 0 ||
-        contentVal.trim().length > 0 ||
-        checklistVal.some((i) => i.text.trim().length > 0) ||
+        (finalType === 'checklist'
+          ? finalChecklist.some((i) => i.text.trim().length > 0)
+          : finalContent.trim().length > 0) ||
         Boolean(reminderVal) ||
         Boolean(imageVal);
 
@@ -204,19 +221,14 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
       const noteToSave: Partial<KeepNote> = {
         id: activeId,
         title: titleVal,
-        content: contentVal,
-        type:
-          overrideFields.type !== undefined
-            ? overrideFields.type
-            : typeVal === 'checklist'
-              ? 'checklist'
-              : 'text',
+        content: finalContent,
+        type: finalType,
         color: colorVal,
         isPinned: pinnedVal,
         isArchived: archivedVal,
         reminderTime: reminderVal,
         labels: labelsVal,
-        checklistData: checklistVal,
+        checklistData: finalChecklist,
         imageUri: imageVal,
       };
 
@@ -270,6 +282,100 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
     }, 400);
   }, [persistNote]);
 
+  // Selection state tracking in content input
+  const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+
+  const handleSelectionChange = useCallback((e: any) => {
+    const sel = e.nativeEvent?.selection;
+    if (sel) {
+      selectionRef.current = sel;
+    }
+  }, []);
+
+  // Format selected lines or active line with bullet dots (•)
+  const handleFormatBullets = useCallback(() => {
+    if (noteType === 'checklist') {
+      handleToggleCheckboxes();
+      return;
+    }
+
+    const currentText = contentRef.current || '';
+    if (!currentText.trim() && currentText.length === 0) {
+      const bulleted = '• ';
+      contentRef.current = bulleted;
+      setContent(bulleted);
+      persistNote({ content: bulleted });
+      setShowMoreMenu(false);
+      return;
+    }
+
+    const { start, end } = selectionRef.current;
+    const lines = currentText.split('\n');
+
+    // Case 1: Specific text range selected
+    if (start !== end && start >= 0 && end <= currentText.length) {
+      let charCount = 0;
+      const updatedLines = lines.map((line) => {
+        const lineStart = charCount;
+        const lineEnd = charCount + line.length;
+        charCount = lineEnd + 1; // +1 for the '\n'
+
+        // Check if selection intersects with this line
+        const intersects = Math.max(start, lineStart) <= Math.min(end, lineEnd);
+        if (intersects) {
+          const trimmed = line.trimStart();
+          if (trimmed.startsWith('• ')) {
+            return line.replace(/^\s*•\s*/, '');
+          } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            return line.replace(/^\s*[-*]\s*/, '• ');
+          } else {
+            return `• ${line}`;
+          }
+        }
+        return line;
+      });
+
+      const updatedContent = updatedLines.join('\n');
+      contentRef.current = updatedContent;
+      setContent(updatedContent);
+      persistNote({ content: updatedContent });
+      setShowMoreMenu(false);
+      return;
+    }
+
+    // Case 2: Cursor position
+    let charCount = 0;
+    let targetLineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const lineLen = lines[i].length;
+      if (start >= charCount && start <= charCount + lineLen) {
+        targetLineIdx = i;
+        break;
+      }
+      charCount += lineLen + 1;
+    }
+
+    if (targetLineIdx !== -1) {
+      const line = lines[targetLineIdx];
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith('• ')) {
+        lines[targetLineIdx] = line.replace(/^\s*•\s*/, '');
+      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        lines[targetLineIdx] = line.replace(/^\s*[-*]\s*/, '• ');
+      } else {
+        lines[targetLineIdx] = `• ${line}`;
+      }
+    } else {
+      lines.push('• ');
+    }
+
+    const updatedContent = lines.join('\n');
+    contentRef.current = updatedContent;
+    setContent(updatedContent);
+    persistNote({ content: updatedContent });
+    setShowMoreMenu(false);
+  }, [noteType, persistNote]);
+
   // Clean exit with auto-save
   const handleExitAndSave = async () => {
     if (autoSaveTimerRef.current) {
@@ -282,32 +388,25 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
   // Toggle Checkboxes Mode
   const handleToggleCheckboxes = () => {
     if (noteType === 'checklist') {
-      // Convert checklists back to plain text
-      const convertedText = checklistItems
-        .map((i) => (i.text.trim() ? (i.completed ? `✓ ${i.text}` : `• ${i.text}`) : ''))
-        .filter(Boolean)
-        .join('\n');
+      // Convert checklists back to plain text with bullet dots
+      const convertedText = checklistToText(checklistItems, { format: 'bullet' });
       contentRef.current = convertedText;
       noteTypeRef.current = 'text';
+      checklistItemsRef.current = [];
       setNoteType('text');
       setContent(convertedText);
-      persistNote({ type: 'text', content: convertedText });
+      setChecklistItems([]);
+      persistNote({ type: 'text', content: convertedText, checklistData: [] });
     } else {
       // Convert text to checklist items
-      const lines = content.split('\n').filter((l) => l.trim().length > 0);
-      const items: ChecklistItem[] =
-        lines.length > 0
-          ? lines.map((line, idx) => ({
-              id: `item_${Date.now()}_${idx}`,
-              text: line.replace(/^[•\-*✓]\s*/, '').trim(),
-              completed: line.startsWith('✓'),
-            }))
-          : [{ id: `item_${Date.now()}_1`, text: '', completed: false }];
+      const items = textToChecklist(content);
       checklistItemsRef.current = items;
       noteTypeRef.current = 'checklist';
+      contentRef.current = '';
       setNoteType('checklist');
+      setContent('');
       setChecklistItems(items);
-      persistNote({ type: 'checklist', checklistData: items });
+      persistNote({ type: 'checklist', checklistData: items, content: '' });
     }
   };
 
@@ -320,9 +419,7 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
   };
 
   const handleToggleItemComplete = (id: string) => {
-    const updated = checklistItems.map((item) =>
-      item.id === id ? { ...item, completed: !item.completed } : item
-    );
+    const updated = toggleChecklistItem(checklistItems, id);
     checklistItemsRef.current = updated;
     setChecklistItems(updated);
     persistNote({ checklistData: updated });
@@ -532,6 +629,14 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
         {/* Dropdown More Menu */}
         {showMoreMenu && (
           <View style={[styles.dropdownMenu, { backgroundColor: colors.surface }]}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={handleFormatBullets}
+              accessibilityRole="button"
+              accessibilityLabel="Add bullet dots"
+            >
+              <Text style={[styles.menuItemText, { color: colors.text }]}>• Add bullet dots (•)</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
               onPress={handleDuplicate}
@@ -795,6 +900,7 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
                 setContent(txt);
                 triggerDebouncedAutoSave();
               }}
+              onSelectionChange={handleSelectionChange}
               multiline
               textAlignVertical="top"
             />
@@ -841,6 +947,16 @@ export const KeepEditorModal: React.FC<KeepEditorModalProps> = ({
               accessibilityLabel="Toggle checklists"
             >
               <Text style={styles.bottomIconText}>☑️</Text>
+            </TouchableOpacity>
+
+            {/* Bullet Dot Button */}
+            <TouchableOpacity
+              style={styles.bottomIconBtn}
+              onPress={handleFormatBullets}
+              accessibilityRole="button"
+              accessibilityLabel="Format selected lines with bullet dots"
+            >
+              <Text style={[styles.bottomIconText, { fontSize: 22, fontWeight: '900', color: colors.primary, marginTop: -3 }]}>•</Text>
             </TouchableOpacity>
 
             {/* Toggle Color Palette */}
@@ -1040,7 +1156,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
     zIndex: 100,
-    minWidth: 160,
+    minWidth: 195,
   },
   menuItem: {
     paddingHorizontal: 16,

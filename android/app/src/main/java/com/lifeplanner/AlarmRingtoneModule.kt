@@ -605,8 +605,9 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
                             .setUsage(AudioAttributes.USAGE_ALARM)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build()
-                        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                             .setAudioAttributes(attrs)
+                            .setAcceptsDelayedFocusGain(true)
                             .setOnAudioFocusChangeListener { focusChange ->
                                 if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
                                     // Only permanent loss (e.g. phone call active) stops the alarm
@@ -625,7 +626,7 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
                                 }
                             },
                             AudioManager.STREAM_ALARM,
-                            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
                         )
                     }
                 }

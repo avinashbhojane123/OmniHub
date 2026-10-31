@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">LifePlanner</string>
+    <string name="app_name">OmniHub</string>
     <string name="shortcut_planner_short">Planner</string>
     <string name="shortcut_planner_long">LifePlanner &amp; Tasks</string>
     <string name="shortcut_battery_short">Battery</string>

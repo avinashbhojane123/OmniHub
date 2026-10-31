@@ -1,5 +1,6 @@
 import { Category } from '../../types';
 import { getDatabase } from '../connection';
+import { syncEventBus } from '../../services/backup/SyncEventBus';
 
 export class CategoryRepository {
   async findAll(): Promise<Category[]> {
@@ -34,16 +35,28 @@ export class CategoryRepository {
       'INSERT INTO categories (id, name, color, icon, createdAt) VALUES (?, ?, ?, ?, ?)',
       [category.id, category.name, category.color, category.icon, category.createdAt]
     );
+    syncEventBus.notifyDataChanged({
+      entityType: 'category',
+      operation: 'upsert',
+      id: category.id,
+      item: category,
+    });
     return category;
   }
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
-    return await db.transaction(async (tx) => {
+    const res = await db.transaction(async (tx) => {
       await tx.execute('UPDATE tasks SET categoryId = NULL WHERE categoryId = ?', [id]);
       const result = await tx.execute('DELETE FROM categories WHERE id = ?', [id]);
       return result.rowsAffected > 0;
     });
+    syncEventBus.notifyDataChanged({
+      entityType: 'category',
+      operation: 'delete',
+      id,
+    });
+    return res;
   }
 }
 

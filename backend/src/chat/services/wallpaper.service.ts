@@ -89,7 +89,8 @@ export class WallpaperService {
   }
 
   getRoomWallpaperState(roomPasscode: string, room: Room): RoomWallpaperState {
-    const activeWallpaper = this.roomWallpapers.get(roomPasscode) || {
+    const roomKey = (roomPasscode || room.passcode || '').trim().toLowerCase();
+    const activeWallpaper = this.roomWallpapers.get(roomKey) || {
       theme: room.theme || 'wa-doodle',
       customWallpaper: room.customWallpaper || null,
     };
@@ -114,7 +115,7 @@ export class WallpaperService {
           if (activeWallpaper.theme === 'custom') {
             activeWallpaper.theme = 'wa-doodle';
           }
-          this.roomWallpapers.set(roomPasscode, activeWallpaper);
+          this.roomWallpapers.set(roomKey, activeWallpaper);
           room.customWallpaper = null;
           if (room.theme === 'custom') {
             room.theme = 'wa-doodle';
@@ -124,8 +125,8 @@ export class WallpaperService {
       }
     }
 
-    if (!this.roomWallpapers.has(roomPasscode)) {
-      this.roomWallpapers.set(roomPasscode, activeWallpaper);
+    if (!this.roomWallpapers.has(roomKey)) {
+      this.roomWallpapers.set(roomKey, activeWallpaper);
     }
 
     return activeWallpaper;
@@ -137,13 +138,22 @@ export class WallpaperService {
     data: UpdateRoomWallpaperDto,
   ) {
     const targetPasscode = (data.passcode || session?.passcode || '').trim();
-    if (!session || !targetPasscode || session.passcode !== targetPasscode) {
+    if (
+      !session ||
+      !targetPasscode ||
+      session.passcode.trim().toLowerCase() !== targetPasscode.toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
+    let room = await this.roomRepo.findOne({
       where: { passcode: targetPasscode },
     });
+    if (!room) {
+      room = await this.roomRepo.findOne({
+        where: { passcode: targetPasscode.toLowerCase() },
+      });
+    }
     if (!room) {
       return { success: false, message: 'Room not found' };
     }
@@ -155,7 +165,8 @@ export class WallpaperService {
       };
     }
 
-    const currentCached = this.roomWallpapers.get(targetPasscode) || {
+    const roomKey = targetPasscode.toLowerCase();
+    const currentCached = this.roomWallpapers.get(roomKey) || {
       theme: 'wa-doodle',
       customWallpaper: null,
     };
@@ -194,7 +205,7 @@ export class WallpaperService {
       theme: newTheme,
       customWallpaper: newWallpaper,
     };
-    this.roomWallpapers.set(targetPasscode, updatedState);
+    this.roomWallpapers.set(roomKey, updatedState);
 
     try {
       room.theme = newTheme;
@@ -207,12 +218,17 @@ export class WallpaperService {
       );
     }
 
-    // Broadcast synchronized wallpaper to all participants in this passcode room
-    server.to(targetPasscode).emit('roomWallpaperUpdated', {
-      theme: newTheme,
-      customWallpaper: newWallpaper,
-      updatedBy: session.nickname,
-    });
+    // Broadcast synchronized wallpaper to all participants across both casing variants
+    server
+      .to(targetPasscode)
+      .to(roomKey)
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('roomWallpaperUpdated', {
+        theme: newTheme,
+        customWallpaper: newWallpaper,
+        updatedBy: session.nickname,
+      });
 
     return {
       success: true,

@@ -16,7 +16,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useToday } from '../hooks/useToday';
 import { useAppTheme } from '../hooks/useTheme';
-import { CreateNewModal } from '../components/CreateNewModal';
 import { NewHabitModal } from '../components/NewHabitModal';
 import { ProfileModal, computeAgeStats } from '../components/ProfileModal';
 import { CalendarEventModal } from '../components/CalendarEventModal';
@@ -27,14 +26,18 @@ import { LifeAgeBanner } from '../components/today/LifeAgeBanner';
 import { TodayOverdueBanner } from '../components/today/TodayOverdueBanner';
 import { TodayHabitsSection } from '../components/today/TodayHabitsSection';
 import { TodayCalendarSection, CalendarFilterType } from '../components/today/TodayCalendarSection';
+import { TodayTasksSection, TaskFilterType } from '../components/today/TodayTasksSection';
+import { ProductivityInsights } from '../components/today/ProductivityInsights';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
+import { statisticsService } from '../services/statistics/StatisticsService';
 import { alarmService } from '../services/alarm/AlarmService';
-import { HabitWithStreak, Task, CalendarEvent } from '../types';
+import { HabitWithStreak, Task, CalendarEvent, ProductivityStats } from '../types';
 import { radius, spacing } from '../theme';
 import { formatTimeTo12H } from '../utils/time';
 import { getHabitIconDetails } from '../utils/habitIcons';
 import { SETTINGS_KEYS } from '../constants/settingsKeys';
 import { googleSheetsSyncService } from '../services/backup/GoogleSheetsSyncService';
+import { syncEventBus } from '../services/backup/SyncEventBus';
 import { format, parseISO, isValid } from 'date-fns';
 
 interface TodayScreenProps {
@@ -48,9 +51,11 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     todayTasks,
     overdueTasks,
     upcomingTask,
+    unifiedNextUp,
     habits,
     calendarEvents,
     conflicts,
+    completionPercentage,
     loading,
     refreshToday,
     toggleHabit,
@@ -61,6 +66,8 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     deleteTask,
     deleteCalendarEvent,
     toggleEventStatus,
+    completeAllPendingToday,
+    toggleSubtask,
     toggleHabitSubtask,
     addHabitSubtask,
     deleteHabitSubtask,
@@ -80,7 +87,6 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
   const [dismissedOverdueCount, setDismissedOverdueCount] = useState<number>(0);
   const [showOverdueList, setShowOverdueList] = useState<boolean>(false);
   const [conflictBannerDismissed, setConflictBannerDismissed] = useState<boolean>(false);
-  const [createNewModalVisible, setCreateNewModalVisible] = useState(false);
   const [newHabitModalVisible, setNewHabitModalVisible] = useState(false);
   const [habitToEdit, setHabitToEdit] = useState<HabitWithStreak | null>(null);
   const [calendarModalVisible, setCalendarModalVisible] = useState(false);
@@ -93,6 +99,8 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
   const [birthTime, setBirthTime] = useState<string>('');
   const [focusTimerVisible, setFocusTimerVisible] = useState<boolean>(false);
   const [focusTaskId, setFocusTaskId] = useState<string | undefined>(undefined);
+  const [taskFilter, setTaskFilter] = useState<TaskFilterType>('all');
+  const [productivityStats, setProductivityStats] = useState<ProductivityStats | null>(null);
 
   // Stable date and hour state
   const [todayIso, setTodayIso] = useState<string>(() => format(new Date(), 'yyyy-MM-dd'));
@@ -132,7 +140,10 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
 
   const loadUserAndSettings = useCallback(async () => {
     try {
-      const all = await settingsRepository.getAll();
+      const [all, stats] = await Promise.all([
+        settingsRepository.getAll(),
+        statisticsService.getStats().catch(() => null),
+      ]);
       if (!isMountedRef.current) return;
 
       const u = all[SETTINGS_KEYS.USER_NAME] || '';
@@ -150,6 +161,9 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
       setExactAlarmDismissed(dismissed === 'true');
       setOverdueDismissedDate(dismissedOverdueDate);
       setDismissedOverdueCount(isNaN(dismissedOverdueCnt) ? 0 : dismissedOverdueCnt);
+      if (stats) {
+        setProductivityStats(stats);
+      }
     } catch {
       // Graceful fallback
     }
@@ -208,6 +222,17 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     await toggleTask(task);
   }, [toggleTask]);
 
+  const handleToggleSubtask = useCallback(
+    async (task: Task, subtaskIndex: number) => {
+      await toggleSubtask(task.id, subtaskIndex);
+    },
+    [toggleSubtask]
+  );
+
+  const handleCompleteAllPending = useCallback(async () => {
+    await completeAllPendingToday();
+  }, [completeAllPendingToday]);
+
 
   const handleToggleHabit = useCallback(async (habit: HabitWithStreak) => {
     await toggleHabit(habit);
@@ -260,23 +285,44 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     handleSnooze(task.id, task.title);
   }, [handleSnooze]);
 
-  const handlePressUpcomingTask = useCallback(() => {
-    if (upcomingTask) {
-      navigation.navigate('CreateEditTask', { taskId: upcomingTask.id });
-    }
-  }, [navigation, upcomingTask]);
+  const handleOpenNewEvent = useCallback(() => {
+    setEventToEdit(null);
+    setCalendarModalVisible(true);
+  }, []);
 
-  const handleCompleteUpcomingTask = useCallback(() => {
-    if (upcomingTask) {
-      handleToggleTask(upcomingTask);
-    }
-  }, [handleToggleTask, upcomingTask]);
+  const handleEditEvent = useCallback((event: CalendarEvent) => {
+    setEventToEdit(event);
+    setCalendarModalVisible(true);
+  }, []);
 
-  const handleSnoozeUpcomingTask = useCallback(() => {
-    if (upcomingTask) {
-      handleSnooze(upcomingTask.id, upcomingTask.title);
+  const handlePressNextUp = useCallback(() => {
+    if (!unifiedNextUp) return;
+    if (unifiedNextUp.type === 'task' && unifiedNextUp.rawTask) {
+      navigation.navigate('CreateEditTask', { taskId: unifiedNextUp.rawTask.id });
+    } else if (unifiedNextUp.type === 'calendar_event' && unifiedNextUp.rawEvent) {
+      handleEditEvent(unifiedNextUp.rawEvent);
+    } else if (unifiedNextUp.type === 'habit' && unifiedNextUp.rawHabit) {
+      handleEditHabit(unifiedNextUp.rawHabit);
     }
-  }, [handleSnooze, upcomingTask]);
+  }, [navigation, unifiedNextUp, handleEditEvent, handleEditHabit]);
+
+  const handleCompleteNextUp = useCallback(() => {
+    if (!unifiedNextUp) return;
+    if (unifiedNextUp.type === 'task' && unifiedNextUp.rawTask) {
+      handleToggleTask(unifiedNextUp.rawTask);
+    } else if (unifiedNextUp.type === 'calendar_event' && unifiedNextUp.rawEvent) {
+      toggleEventStatus(unifiedNextUp.rawEvent);
+    } else if (unifiedNextUp.type === 'habit' && unifiedNextUp.rawHabit) {
+      handleToggleHabit(unifiedNextUp.rawHabit);
+    }
+  }, [unifiedNextUp, handleToggleTask, toggleEventStatus, handleToggleHabit]);
+
+  const handleSnoozeNextUp = useCallback(() => {
+    if (!unifiedNextUp) return;
+    if (unifiedNextUp.type === 'task' && unifiedNextUp.rawTask) {
+      handleSnooze(unifiedNextUp.rawTask.id, unifiedNextUp.rawTask.title);
+    }
+  }, [unifiedNextUp, handleSnooze]);
 
   const handleOpenProfile = useCallback(() => {
     setProfileModalVisible(true);
@@ -286,6 +332,25 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     setHabitToEdit(null);
     setNewHabitModalVisible(true);
   }, []);
+
+  const pendingTodayTasks = useMemo(
+    () => todayTasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled'),
+    [todayTasks]
+  );
+  const completedTodayTasks = useMemo(
+    () => todayTasks.filter((t) => t.status === 'completed'),
+    [todayTasks]
+  );
+  const overdueTaskIds = useMemo(
+    () => new Set(overdueTasks.map((t) => t.id)),
+    [overdueTasks]
+  );
+
+  const displayedTodayTasks = useMemo(() => {
+    if (taskFilter === 'pending') return pendingTodayTasks;
+    if (taskFilter === 'completed') return completedTodayTasks;
+    return todayTasks;
+  }, [taskFilter, pendingTodayTasks, completedTodayTasks, todayTasks]);
 
   const calendarFilterCounts = useMemo(() => {
     return {
@@ -308,16 +373,6 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
       return (a.time || '').localeCompare(b.time || '');
     });
   }, [calendarEvents, eventFilter, todayIso]);
-
-  const handleOpenNewEvent = useCallback(() => {
-    setEventToEdit(null);
-    setCalendarModalVisible(true);
-  }, []);
-
-  const handleEditEvent = useCallback((event: CalendarEvent) => {
-    setEventToEdit(event);
-    setCalendarModalVisible(true);
-  }, []);
 
   const handleDeleteEvent = useCallback((event: CalendarEvent) => {
     Alert.alert(
@@ -383,26 +438,29 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     navigation.navigate('CreateEditTask');
   }, [navigation]);
 
-  const handleFabPress = useCallback(() => {
-    setCreateNewModalVisible(true);
-  }, []);
-
   const handleToggleOverdueExpand = useCallback(() => {
     setShowOverdueList((prev) => !prev);
   }, []);
 
   const handleDismissExactAlarm = useCallback(async () => {
     setExactAlarmDismissed(true);
-    await settingsRepository.set(SETTINGS_KEYS.EXACT_ALARM_DISMISSED, 'true').catch(() => {});
+    await settingsRepository.set(SETTINGS_KEYS.EXACT_ALARM_DISMISSED, 'true').catch(() => { });
   }, []);
 
   const handleDismissOverdueBanner = useCallback(async () => {
     setOverdueDismissedDate(todayIso);
     setDismissedOverdueCount(overdueTasks.length);
     setShowOverdueList(false);
-    await settingsRepository.set(SETTINGS_KEYS.TODAY_DISMISSED_OVERDUE_DATE, todayIso).catch(() => {});
-    await settingsRepository.set(SETTINGS_KEYS.TODAY_DISMISSED_OVERDUE_COUNT, String(overdueTasks.length)).catch(() => {});
+    await settingsRepository.set(SETTINGS_KEYS.TODAY_DISMISSED_OVERDUE_DATE, todayIso).catch(() => { });
+    await settingsRepository.set(SETTINGS_KEYS.TODAY_DISMISSED_OVERDUE_COUNT, String(overdueTasks.length)).catch(() => { });
   }, [todayIso, overdueTasks.length]);
+
+  useEffect(() => {
+    const unsub = syncEventBus.subscribeToRestore(() => {
+      refreshToday(true);
+    });
+    return () => unsub();
+  }, [refreshToday]);
 
   useFocusEffect(
     useCallback(() => {
@@ -413,7 +471,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
       setCurrentHour(new Date().getHours());
       loadUserAndSettings();
       refreshToday(true);
-      googleSheetsSyncService.triggerAutoSyncIfEnabled().catch(() => {});
+      googleSheetsSyncService.triggerAutoSyncIfEnabled().catch(() => { });
 
       if (Platform.OS === 'android') {
         alarmService
@@ -423,7 +481,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
               setExactAlarmPermitted(allowed);
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       }
 
       const onBackPress = () => {
@@ -473,7 +531,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
                 setExactAlarmPermitted(allowed);
               }
             })
-            .catch(() => {});
+            .catch(() => { });
         }
       }
     });
@@ -522,7 +580,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom, 24) + 120 },
+          { paddingBottom: Math.max(insets.bottom, 24) + 60 },
         ]}
         refreshControl={
           <RefreshControl
@@ -663,13 +721,13 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           />
         )}
 
-        {/* Next Up / Spotlight Card */}
-        {upcomingTask && upcomingTask.status !== 'completed' && upcomingTask.status !== 'cancelled' && (
+        {/* Next Up / Spotlight Card - Supports Tasks, Calendar Events & Habits */}
+        {unifiedNextUp && (
           <NextUpCard
-            task={upcomingTask}
-            onPress={handlePressUpcomingTask}
-            onComplete={handleCompleteUpcomingTask}
-            onSnooze={handleSnoozeUpcomingTask}
+            item={unifiedNextUp}
+            onPress={handlePressNextUp}
+            onComplete={handleCompleteNextUp}
+            onSnooze={unifiedNextUp.type === 'task' ? handleSnoozeNextUp : undefined}
             formatTaskTime={formatTaskTime}
           />
         )}
@@ -684,6 +742,28 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           </View>
         )}
 
+        {/* Scheduled Tasks for Today */}
+        <TodayTasksSection
+          tasks={displayedTodayTasks}
+          allTasks={todayTasks}
+          totalCount={todayTasks.length}
+          pendingCount={pendingTodayTasks.length}
+          completedCount={completedTodayTasks.length}
+          completionPercentage={completionPercentage}
+          taskFilter={taskFilter}
+          overdueTaskIds={overdueTaskIds}
+          onSetTaskFilter={setTaskFilter}
+          onOpenCreateTask={handleOpenCreateTask}
+          onViewAllTasks={() => navigation.navigate('TasksScreen')}
+          onCompleteAllPending={handleCompleteAllPending}
+          onToggleTask={handleToggleTask}
+          onPressTask={handlePressTask}
+          onDeleteTask={handleDeleteTask}
+          onSnoozeTask={handleSnoozeTask}
+          onToggleSubtask={handleToggleSubtask}
+          formatTaskTime={formatTaskTime}
+        />
+
         {/* Habits Section */}
         <TodayHabitsSection
           habits={habits}
@@ -696,7 +776,6 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           onDeleteHabitSubtask={handleDeleteHabitSubtask}
           getIconDetails={habitIconGetter}
         />
-
 
         {/* Calendar Events & Reminders */}
         <TodayCalendarSection
@@ -711,6 +790,14 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           onDeleteEvent={handleDeleteEvent}
           onTestAlarm={handleTestAlarm}
           onToggleStatus={toggleEventStatus}
+        />
+
+        {/* Productivity Insights Local On-Device Analytics */}
+        <ProductivityInsights
+          stats={productivityStats}
+          todayTasksCount={todayTasks.length}
+          todayCompletedTasksCount={completedTodayTasks.length}
+          completionPercentage={completionPercentage}
         />
       </ScrollView>
 
@@ -765,48 +852,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
         />
       )}
 
-      {/* Quick Create Bottom Sheet Modal (Lazy Mounted) */}
-      {createNewModalVisible && (
-        <CreateNewModal
-          visible={createNewModalVisible}
-          onClose={() => setCreateNewModalVisible(false)}
-          onSelectHabit={() => {
-            setCreateNewModalVisible(false);
-            handleOpenNewHabit();
-          }}
-          onSelectTask={() => {
-            setCreateNewModalVisible(false);
-            handleOpenCreateTask();
-          }}
-          onSelectEvent={() => {
-            setCreateNewModalVisible(false);
-            handleOpenNewEvent();
-          }}
-          onSelectFocusTimer={() => {
-            setCreateNewModalVisible(false);
-            setFocusTaskId(undefined);
-            setFocusTimerVisible(true);
-          }}
-        />
-      )}
-
-      {/* Floating Action Button for Quick Creation Speed Dial */}
-      <TouchableOpacity
-        style={[
-          styles.fab,
-          {
-            backgroundColor: colors.primary,
-            bottom: 16,
-          },
-        ]}
-        onPress={handleFabPress}
-        activeOpacity={0.85}
-        accessibilityRole="button"
-        accessibilityLabel="Quick Create"
-        accessibilityHint="Opens quick creation menu for tasks, habits, and reminders"
-      >
-        <Text style={styles.fabPlusText}>+</Text>
-      </TouchableOpacity>
+      {/* Focus / Pomodoro Timer Modal (Lazy Mounted) */}
 
       {/* Focus / Pomodoro Timer Modal (Lazy Mounted) */}
       {focusTimerVisible && (
@@ -974,27 +1020,5 @@ const styles = StyleSheet.create({
   exactAlarmBannerCloseText: {
     fontSize: 14,
     fontWeight: '700',
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 8,
-    elevation: 6,
-    zIndex: 99,
-  },
-  fabPlusText: {
-    color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: '300',
-    lineHeight: 32,
-    marginTop: -2,
   },
 });

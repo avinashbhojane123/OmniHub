@@ -1,14 +1,15 @@
 import React from 'react';
+import { View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TodayScreen } from '../screens/TodayScreen';
-import { TasksScreen } from '../screens/TasksScreen';
 import { KeepNotesScreen } from '../screens/KeepNotesScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { useAppTheme } from '../hooks/useTheme';
+import { FocusTimerProvider } from '../context/FocusTimerContext';
+import { FloatingTimerWidget } from '../components/FloatingTimerWidget';
 import {
   TodayTabIcon,
-  TasksTabIcon,
   KeepNotesTabIcon,
   SettingsTabIcon,
 } from '../components/TabIcons';
@@ -17,10 +18,6 @@ const Tab = createBottomTabNavigator();
 
 const renderTodayIcon = ({ focused, color, size }: { focused: boolean; color: string; size: number }) => (
   <TodayTabIcon focused={focused} color={color} size={size || 22} />
-);
-
-const renderTasksIcon = ({ focused, color, size }: { focused: boolean; color: string; size: number }) => (
-  <TasksTabIcon focused={focused} color={color} size={size || 22} />
 );
 
 const renderNotesIcon = ({ focused, color, size }: { focused: boolean; color: string; size: number }) => (
@@ -36,8 +33,9 @@ export const BottomTabNavigator = () => {
   const { colors } = useAppTheme();
 
   return (
-    <Tab.Navigator
-      initialRouteName="Today"
+    <View style={{ flex: 1 }}>
+        <Tab.Navigator
+          initialRouteName="Today"
       screenOptions={{
         headerShown: false,
         lazy: true,
@@ -72,14 +70,6 @@ export const BottomTabNavigator = () => {
         }}
       />
       <Tab.Screen
-        name="Tasks"
-        component={TasksScreen}
-        options={{
-          tabBarLabel: 'Tasks',
-          tabBarIcon: renderTasksIcon,
-        }}
-      />
-      <Tab.Screen
         name="Notes"
         component={KeepNotesScreen}
         options={{
@@ -96,5 +86,7 @@ export const BottomTabNavigator = () => {
         }}
       />
     </Tab.Navigator>
+    <FloatingTimerWidget />
+  </View>
   );
 };

@@ -41,6 +41,98 @@ import { ChatMessageBubble, TypingIndicatorBubble } from '../components/chat/Cha
 import { styles } from '../components/chat/chatStyles';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
 import { copyToClipboard } from '../utils/clipboard';
+import { WebView } from 'react-native-webview';
+import { ChatUploadModal } from '../components/chat/ChatUploadModal';
+import { chatAudioPlayerService } from '../services/chat/ChatAudioPlayerService';
+
+const WebViewComponent: any = WebView;
+
+const AUDIO_BRIDGE_HTML = `
+<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:transparent;">
+  <audio id="audioEl" preload="auto" playsinline></audio>
+  <script>
+    const audio = document.getElementById('audioEl');
+
+    audio.addEventListener('loadedmetadata', function() {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'loaded',
+          duration: audio.duration || 0
+        }));
+      }
+    });
+
+    audio.addEventListener('timeupdate', function() {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'timeupdate',
+          currentTime: audio.currentTime || 0,
+          duration: audio.duration || 0
+        }));
+      }
+    });
+
+    audio.addEventListener('ended', function() {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'ended'
+        }));
+      }
+    });
+
+    audio.addEventListener('error', function(e) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'error',
+          message: 'Audio playback failed'
+        }));
+      }
+    });
+
+    function handleCommand(rawData) {
+      try {
+        const data = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+        if (data.command === 'play') {
+          audio.src = data.url;
+          audio.currentTime = 0;
+          if (data.rate) {
+            audio.playbackRate = Number(data.rate) || 1;
+          }
+          audio.play().catch(function(err) {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'error',
+                message: err.message
+              }));
+            }
+          });
+        } else if (data.command === 'rate') {
+          audio.playbackRate = Number(data.rate) || 1;
+        } else if (data.command === 'pause') {
+          audio.pause();
+        } else if (data.command === 'resume') {
+          audio.play().catch(function() {});
+        } else if (data.command === 'stop') {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.src = '';
+        }
+      } catch (err) {}
+    }
+
+    window.addEventListener('message', function(event) {
+      handleCommand(event.data);
+    });
+    document.addEventListener('message', function(event) {
+      handleCommand(event.data);
+    });
+  </script>
+</body>
+</html>
+`;
 
 const DEFAULT_INTERNET_SERVER = 'https://backend-9i6w.onrender.com';
 const HOTSPOT_SERVER = 'http://10.16.64.73:10000';
@@ -138,6 +230,91 @@ export const ChatRoomScreen: React.FC = () => {
   const [isInRoom, setIsInRoom] = useState(
     chatSocketService.isConnected && Boolean(chatSocketService.passcode)
   );
+
+  const audioWebViewRef = useRef<WebView>(null);
+  const [uploadModal, setUploadModal] = useState<{
+    visible: boolean;
+    tab: 'file' | 'voice' | 'url';
+  }>({
+    visible: false,
+    tab: 'file',
+  });
+
+  // Audio player sender registration
+  useEffect(() => {
+    chatAudioPlayerService.registerSender((msg) => {
+      audioWebViewRef.current?.postMessage(msg);
+    });
+    return () => {
+      chatAudioPlayerService.unregisterSender();
+      chatAudioPlayerService.stop();
+    };
+  }, []);
+
+  // Load recent rooms from storage on mount
+  useEffect(() => {
+    const loadRecent = async () => {
+      try {
+        const stored = await settingsRepository.get('chat_recent_rooms');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            setRecentRooms(parsed);
+          }
+        }
+      } catch {}
+    };
+    loadRecent();
+  }, []);
+
+  const handleClearRecentRooms = useCallback(() => {
+    setRecentRooms([]);
+    settingsRepository.set('chat_recent_rooms', '[]').catch(() => {});
+  }, []);
+
+  const handleSendAttachment = useCallback((props: {
+    fileUrl: string;
+    fileName: string;
+    fileType?: string;
+    fileSize?: number;
+    isVoiceNote?: boolean;
+    caption?: string;
+  }) => {
+    const replyRef = replyingTo ? {
+      id: replyingTo.id,
+      nickname: replyingTo.nickname,
+      message: replyingTo.message,
+    } : undefined;
+
+    const payload = {
+      fileUrl: props.fileUrl,
+      fileName: props.fileName,
+      fileType: props.fileType,
+      fileSize: props.fileSize,
+      isVoiceNote: props.isVoiceNote,
+      expiresIn: disappearingSecs,
+      isWithoutSound: false,
+      replyTo: replyRef,
+    };
+
+    if (directTarget) {
+      chatSocketService.sendDirectMessage(
+        directTarget,
+        props.caption || (props.isVoiceNote ? '🎙️ Voice Note' : `📁 ${props.fileName}`),
+        payload
+      );
+    } else {
+      chatSocketService.sendMessage(
+        props.caption || '',
+        replyRef,
+        payload
+      );
+    }
+
+    if (replyingTo) {
+      setReplyingTo(null);
+    }
+  }, [replyingTo, directTarget, disappearingSecs]);
 
   // 9. Coordinated voice note playback (ensures only 1 plays at a time)
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
@@ -238,11 +415,6 @@ export const ChatRoomScreen: React.FC = () => {
     loadSavedGateway();
   }, []);
 
-  const handleClearRecentRooms = useCallback(() => {
-    setRecentRooms([]);
-    settingsRepository.set('chat_recent_rooms', '[]').catch(() => {});
-  }, []);
-
   // Automatically mark incoming unread messages from other members as read with deduplication protection
   useEffect(() => {
     if (!isInRoom || !roomState.isConnected) return;
@@ -304,23 +476,19 @@ export const ChatRoomScreen: React.FC = () => {
     };
   }, [inputText, isInRoom, passcode, editingMessage]);
 
-  // Matching indices when in-chat search is active (debounced)
-  const matchingIndices = useMemo(() => {
+  // Matching messages when in-chat search is active (debounced, immune to index shifts from pagination)
+  const matchingMessages = useMemo(() => {
     const q = debouncedSearchQuery.trim().toLowerCase();
     if (!q) return [];
-    const indices: number[] = [];
-    roomState.messages.forEach((m, idx) => {
+    return roomState.messages.filter((m) => {
       const textMatch = m.message?.toLowerCase().includes(q);
       const nickMatch = m.nickname?.toLowerCase().includes(q);
       const targetMatch = m.targetNickname?.toLowerCase().includes(q);
       const fileMatch = m.fileName?.toLowerCase().includes(q);
       const pollQMatch = m.pollData?.question?.toLowerCase().includes(q);
       const pollOptMatch = m.pollData?.options?.some((o) => o.text?.toLowerCase().includes(q));
-      if (textMatch || nickMatch || targetMatch || fileMatch || pollQMatch || pollOptMatch) {
-        indices.push(idx);
-      }
+      return Boolean(textMatch || nickMatch || targetMatch || fileMatch || pollQMatch || pollOptMatch);
     });
-    return indices;
   }, [roomState.messages, debouncedSearchQuery]);
 
   // Scroll to a specific message by ID safely with visual pulse highlight
@@ -360,41 +528,41 @@ export const ChatRoomScreen: React.FC = () => {
   useEffect(() => {
     if (searchState.isSearching && debouncedSearchQuery.trim()) {
       setSearchState((prev) => ({ ...prev, currentMatchIdx: 0 }));
-      if (matchingIndices.length > 0) {
-        const targetMsg = roomState.messages[matchingIndices[0]];
+      if (matchingMessages.length > 0) {
+        const targetMsg = matchingMessages[0];
         if (targetMsg?.id !== undefined) {
           scrollToMessageId(targetMsg.id);
         }
       }
     }
-  }, [debouncedSearchQuery, searchState.isSearching, scrollToMessageId]);
+  }, [debouncedSearchQuery, searchState.isSearching, scrollToMessageId, matchingMessages]);
 
-  // Ensure current match index never exceeds matching indices length
+  // Ensure current match index never exceeds matching messages length
   useEffect(() => {
-    if (matchingIndices.length > 0 && searchState.currentMatchIdx >= matchingIndices.length) {
-      setSearchState((prev) => ({ ...prev, currentMatchIdx: Math.max(0, matchingIndices.length - 1) }));
+    if (matchingMessages.length > 0 && searchState.currentMatchIdx >= matchingMessages.length) {
+      setSearchState((prev) => ({ ...prev, currentMatchIdx: Math.max(0, matchingMessages.length - 1) }));
     }
-  }, [matchingIndices.length, searchState.currentMatchIdx]);
+  }, [matchingMessages.length, searchState.currentMatchIdx]);
 
   const handleNextMatch = useCallback(() => {
-    if (matchingIndices.length === 0) return;
-    const nextIdx = (searchState.currentMatchIdx + 1) % matchingIndices.length;
+    if (matchingMessages.length === 0) return;
+    const nextIdx = (searchState.currentMatchIdx + 1) % matchingMessages.length;
     setSearchState((s) => ({ ...s, currentMatchIdx: nextIdx }));
-    const targetMsg = roomState.messages[matchingIndices[nextIdx]];
+    const targetMsg = matchingMessages[nextIdx];
     if (targetMsg?.id !== undefined) {
       scrollToMessageId(targetMsg.id);
     }
-  }, [matchingIndices, searchState.currentMatchIdx, roomState.messages, scrollToMessageId]);
+  }, [matchingMessages, searchState.currentMatchIdx, scrollToMessageId]);
 
   const handlePrevMatch = useCallback(() => {
-    if (matchingIndices.length === 0) return;
-    const prevIdx = (searchState.currentMatchIdx - 1 + matchingIndices.length) % matchingIndices.length;
+    if (matchingMessages.length === 0) return;
+    const prevIdx = (searchState.currentMatchIdx - 1 + matchingMessages.length) % matchingMessages.length;
     setSearchState((s) => ({ ...s, currentMatchIdx: prevIdx }));
-    const targetMsg = roomState.messages[matchingIndices[prevIdx]];
+    const targetMsg = matchingMessages[prevIdx];
     if (targetMsg?.id !== undefined) {
       scrollToMessageId(targetMsg.id);
     }
-  }, [matchingIndices, searchState.currentMatchIdx, roomState.messages, scrollToMessageId]);
+  }, [matchingMessages, searchState.currentMatchIdx, scrollToMessageId]);
 
   // Handle loading older messages
   const handleLoadOlder = useCallback(async () => {
@@ -597,8 +765,17 @@ export const ChatRoomScreen: React.FC = () => {
         latency: chatSocketService.latency,
       });
 
-      // Synchronize session state if disconnected or kicked by server
-      if (!chatSocketService.passcode && !chatSocketService.isConnected) {
+      // Synchronize session state: enter room only on confirmed connection and room join
+      if (chatSocketService.isConnected && chatSocketService.isJoined && chatSocketService.passcode) {
+        setIsInRoom(true);
+        // Save room passcode to recent rooms list
+        const currentPass = chatSocketService.passcode;
+        setRecentRooms((prev) => {
+          const next = [currentPass, ...prev.filter((r) => r.toLowerCase() !== currentPass.toLowerCase())].slice(0, 6);
+          settingsRepository.set('chat_recent_rooms', JSON.stringify(next)).catch(() => {});
+          return next;
+        });
+      } else if (!chatSocketService.isConnected || !chatSocketService.passcode) {
         setIsInRoom(false);
       }
 
@@ -716,7 +893,7 @@ export const ChatRoomScreen: React.FC = () => {
     setHighlightedMessageId(null);
     setShowScrollBottomBtn(false);
     setNewMessagesWhileScrolled(0);
-    setIsInRoom(true);
+    // Connect to room via socket - transition to active room occurs upon confirmed join ack
     chatSocketService.connect({
       serverUrl: serverUrl.trim(),
       nickname: nickname.trim(),
@@ -854,15 +1031,21 @@ export const ChatRoomScreen: React.FC = () => {
     return { myStories: my, otherMemberStories: others };
   }, [roomState.statuses, nickname]);
 
-  // Render Story Ring Item with count badge
+  // Render Story Ring Item with count badge and viewed indicator
   const renderStoryItem = (story: ChatStatusStory, allStories?: ChatStatusStory[], totalCount = 1) => {
+    const currentNick = (chatSocketService.nickname || nickname).trim().toLowerCase();
+    const hasUnviewed = (allStories || [story]).some((s) => {
+      const viewers = s.viewers || [];
+      return !viewers.some((v) => (v || '').trim().toLowerCase() === currentNick);
+    });
+
     return (
       <TouchableOpacity
         key={story.id}
         style={styles.storyRingItem}
         onPress={() => openStory(story, allStories)}
       >
-        <View style={styles.storyRingGradient}>
+        <View style={[styles.storyRingGradient, !hasUnviewed && styles.storyRingGradientViewed]}>
           <View style={styles.storyAvatarCircle}>
             <Text style={styles.storyAvatarLetter}>
               {(story.nickname || '').trim().charAt(0).toUpperCase() || '?'}
@@ -929,14 +1112,16 @@ export const ChatRoomScreen: React.FC = () => {
   }, []);
 
   const handleDirectMessage = useCallback((targetNick: string) => {
-    setDirectTarget(targetNick);
+    const cleanNick = (targetNick || '').replace(/^@+/, '').trim();
+    setDirectTarget(cleanNick);
     composerInputRef.current?.focus();
   }, []);
 
   const isTargetOnline = useMemo(() => {
     if (!directTarget) return true;
+    const cleanTarget = directTarget.replace(/^@+/, '').trim().toLowerCase();
     const target = roomState.users.find(
-      (u) => (u.nickname || '').trim().toLowerCase() === directTarget.trim().toLowerCase()
+      (u) => (u.nickname || '').trim().toLowerCase() === cleanTarget
     );
     return Boolean(target && target.isOnline);
   }, [directTarget, roomState.users]);
@@ -1100,6 +1285,14 @@ export const ChatRoomScreen: React.FC = () => {
           onGoBack={handleGoBack}
           topInset={insets.top}
           bottomInset={insets.bottom}
+          serverUrl={serverUrl}
+          setServerUrl={setServerUrl}
+          showServerCustom={showServerCustom}
+          setShowServerCustom={setShowServerCustom}
+          presetRooms={PRESET_ROOMS}
+          recentRooms={recentRooms}
+          onClearRecentRooms={handleClearRecentRooms}
+          serverPresets={SERVER_PRESETS}
         />
       ) : (
         /* Joined Room: Active Room Experience */
@@ -1119,24 +1312,38 @@ export const ChatRoomScreen: React.FC = () => {
           {/* Room Header */}
           <View style={styles.chatHeader}>
             <View style={styles.headerLeftCol}>
-              <View style={styles.latencyRow}>
-                <View
-                  style={[
-                    styles.onlineDot,
-                    roomState.connectionStatus === 'connecting'
-                      ? styles.dotConnecting
-                      : roomState.connectionStatus === 'disconnected'
-                      ? styles.dotDisconnected
-                      : styles.dotConnected,
-                  ]}
-                />
-                <Text style={styles.latencyText}>
-                  {roomState.connectionStatus === 'connected'
-                    ? `Connected • ${roomState.latency}ms`
-                    : roomState.connectionStatus === 'connecting'
-                    ? 'Reconnecting...'
-                    : 'Offline'}
+              <TouchableOpacity
+                style={styles.headerBackBtn}
+                onPress={handleLeaveRoom}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Leave room"
+              >
+                <Text style={styles.headerBackText}>‹</Text>
+              </TouchableOpacity>
+              <View>
+                <Text style={styles.roomNameText} numberOfLines={1}>
+                  #{chatSocketService.passcode || passcode || 'Room'}
                 </Text>
+                <View style={styles.latencyRow}>
+                  <View
+                    style={[
+                      styles.onlineDot,
+                      roomState.connectionStatus === 'connecting'
+                        ? styles.dotConnecting
+                        : roomState.connectionStatus === 'disconnected'
+                        ? styles.dotDisconnected
+                        : styles.dotConnected,
+                    ]}
+                  />
+                  <Text style={styles.latencyText}>
+                    {roomState.connectionStatus === 'connected'
+                      ? `${roomState.users.length} online • ${roomState.latency}ms`
+                      : roomState.connectionStatus === 'connecting'
+                      ? 'Reconnecting...'
+                      : 'Offline'}
+                  </Text>
+                </View>
               </View>
             </View>
 
@@ -1225,6 +1432,30 @@ export const ChatRoomScreen: React.FC = () => {
             </TouchableOpacity>
           )}
 
+          {/* Active Watch Party Room Banner */}
+          {Boolean(roomState.watchParty?.isActive) && (
+            <TouchableOpacity
+              style={styles.watchPartyBanner}
+              activeOpacity={0.9}
+              onPress={() => setModalVisible('watchParty', true)}
+            >
+              <View style={styles.watchPartyBannerLeft}>
+                <Text style={styles.watchPartyBannerIcon}>🎬</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.watchPartyBannerTitle} numberOfLines={1}>
+                    Watch Party: {roomState.watchParty?.videoSource?.title || 'Shared Stream'}
+                  </Text>
+                  <Text style={styles.watchPartyBannerSub}>
+                    {roomState.watchParty?.isPlaying ? '▶ Now Playing' : '⏸ Paused'} • Hosted by @{roomState.watchParty?.hostNickname || 'Host'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.watchPartyJoinBtn}>
+                <Text style={styles.watchPartyJoinText}>Join ↗</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+
           {/* Dynamic Reconnecting / Offline Banner */}
           {roomState.connectionStatus !== 'connected' && (
             <View
@@ -1281,14 +1512,14 @@ export const ChatRoomScreen: React.FC = () => {
               {searchState.searchQuery.trim().length > 0 && (
                 <View style={styles.searchNavRow}>
                   <Text style={styles.searchCountText}>
-                    {matchingIndices.length > 0
-                      ? `${Math.min(searchState.currentMatchIdx + 1, matchingIndices.length)}/${matchingIndices.length}`
+                    {matchingMessages.length > 0
+                      ? `${Math.min(searchState.currentMatchIdx + 1, matchingMessages.length)}/${matchingMessages.length}`
                       : '0'}
                   </Text>
                   <TouchableOpacity
                     style={styles.searchNavArrowBtn}
                     onPress={handlePrevMatch}
-                    disabled={matchingIndices.length === 0}
+                    disabled={matchingMessages.length === 0}
                     hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                   >
                     <Text style={styles.searchNavArrowText}>▲</Text>
@@ -1296,7 +1527,7 @@ export const ChatRoomScreen: React.FC = () => {
                   <TouchableOpacity
                     style={styles.searchNavArrowBtn}
                     onPress={handleNextMatch}
-                    disabled={matchingIndices.length === 0}
+                    disabled={matchingMessages.length === 0}
                     hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                   >
                     <Text style={styles.searchNavArrowText}>▼</Text>
@@ -1407,6 +1638,7 @@ export const ChatRoomScreen: React.FC = () => {
               windowSize={5}
               updateCellsBatchingPeriod={40}
               removeClippedSubviews={Platform.OS === 'android'}
+              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               onScroll={handleScroll}
               scrollEventThrottle={16}
               keyboardShouldPersistTaps="handled"
@@ -1602,11 +1834,11 @@ export const ChatRoomScreen: React.FC = () => {
             {searchState.isSearching && (
               <View style={[styles.searchFooterNotice, { paddingBottom: 6 }]}>
                 <Text style={styles.searchFooterText}>
-                  {matchingIndices.length > 0
-                    ? `🔍 Showing match ${Math.min(searchState.currentMatchIdx + 1, matchingIndices.length)} of ${matchingIndices.length}. Use ▲ / ▼ to navigate.`
+                  {matchingMessages.length > 0
+                    ? `🔍 Showing match ${Math.min(searchState.currentMatchIdx + 1, matchingMessages.length)} of ${matchingMessages.length}. Use ▲ / ▼ to navigate.`
                     : '🔍 No matching messages found in loaded history.'}
                 </Text>
-                {matchingIndices.length === 0 && Boolean(debouncedSearchQuery.trim()) && (
+                {matchingMessages.length === 0 && Boolean(debouncedSearchQuery.trim()) && (
                   <TouchableOpacity
                     style={{
                       marginTop: 4,
@@ -1698,6 +1930,46 @@ export const ChatRoomScreen: React.FC = () => {
                 onPress={() => setModalVisible('attach', false)}
               />
               <View style={[styles.attachPopup, { bottom: attachBottomOffset }]}>
+                {/* Photo / Image */}
+                <TouchableOpacity
+                  style={styles.attachPopupItem}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setModalVisible('attach', false);
+                    setUploadModal({ visible: true, tab: 'file' });
+                  }}
+                >
+                  <Text style={styles.attachItemIcon}>📷</Text>
+                  <Text style={styles.attachItemText}>Photo / Image</Text>
+                </TouchableOpacity>
+
+                {/* Voice Note */}
+                <TouchableOpacity
+                  style={styles.attachPopupItem}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setModalVisible('attach', false);
+                    setUploadModal({ visible: true, tab: 'voice' });
+                  }}
+                >
+                  <Text style={styles.attachItemIcon}>🎙️</Text>
+                  <Text style={styles.attachItemText}>Record Voice Note</Text>
+                </TouchableOpacity>
+
+                {/* Document / File */}
+                <TouchableOpacity
+                  style={styles.attachPopupItem}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setModalVisible('attach', false);
+                    setUploadModal({ visible: true, tab: 'file' });
+                  }}
+                >
+                  <Text style={styles.attachItemIcon}>📄</Text>
+                  <Text style={styles.attachItemText}>Document / File</Text>
+                </TouchableOpacity>
+
+                {/* Create Poll */}
                 <TouchableOpacity
                   style={styles.attachPopupItem}
                   onPress={() => {
@@ -1715,6 +1987,7 @@ export const ChatRoomScreen: React.FC = () => {
                   <Text style={styles.attachItemText}>Create Poll</Text>
                 </TouchableOpacity>
 
+                {/* Disappearing Messages */}
                 <TouchableOpacity
                   style={styles.attachPopupItem}
                   onPress={() => {
@@ -1826,7 +2099,10 @@ export const ChatRoomScreen: React.FC = () => {
                         </TouchableOpacity>
                       )}
 
-                      {chatSocketService.isAdmin && !actionSheetMsg.isDeleted && !isPendingMsg && (
+                      {chatSocketService.isAdmin &&
+                        !actionSheetMsg.isDeleted &&
+                        !actionSheetMsg.isDirect &&
+                        !isPendingMsg && (
                         <TouchableOpacity
                           style={styles.sheetItem}
                           onPress={() => {
@@ -1959,6 +2235,32 @@ export const ChatRoomScreen: React.FC = () => {
             />
           )}
 
+          {/* Genuine Attachment & Voice Recording Upload Modal */}
+          <ChatUploadModal
+            visible={uploadModal.visible}
+            onClose={() => setUploadModal((prev) => ({ ...prev, visible: false }))}
+            serverUrl={serverUrl}
+            initialTab={uploadModal.tab}
+            onSendAttachment={handleSendAttachment}
+          />
+
+          {/* Hidden Background Audio Player Bridge */}
+          <View style={{ width: 0, height: 0, opacity: 0, position: 'absolute' }}>
+            <WebViewComponent
+              ref={audioWebViewRef}
+              source={{ html: AUDIO_BRIDGE_HTML }}
+              onMessage={(e: any) => {
+                try {
+                  const data = JSON.parse(e.nativeEvent.data);
+                  chatAudioPlayerService.handleBridgeMessage(data);
+                } catch {}
+              }}
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback
+              javaScriptEnabled
+            />
+          </View>
+
 
 
           {/* Fullscreen Image Lightbox Preview Modal */}
@@ -2000,6 +2302,7 @@ export const ChatRoomScreen: React.FC = () => {
                   </TouchableOpacity>
                 </View>
                 <ScrollView
+                  key={lightboxImage || 'lightbox'}
                   maximumZoomScale={3}
                   minimumZoomScale={1}
                   showsHorizontalScrollIndicator={false}

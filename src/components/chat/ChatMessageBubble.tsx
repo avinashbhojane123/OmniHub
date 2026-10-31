@@ -7,10 +7,13 @@ import {
   Linking,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { ChatMessage } from '../../types/chat';
 import { styles } from './chatStyles';
 import { copyToClipboard } from '../../utils/clipboard';
+import { chatSocketService } from '../../services/chat/ChatSocketService';
+import { chatAudioPlayerService } from '../../services/chat/ChatAudioPlayerService';
 
 // In-memory format caches to eliminate repeated new Date() allocations in feed
 const timeFormatCache = new Map<string, string>();
@@ -99,66 +102,118 @@ export const ChatImageCard: React.FC<{ uri: string; onPress: () => void }> = Rea
 const STATIC_WAVE_BARS = [12, 20, 8, 24, 16, 28, 14, 22, 10, 18, 14, 22, 12, 26, 16] as const;
 
 export const VoiceNoteBubbleCard: React.FC<{
+  messageId: string | number;
+  fileUrl?: string | null;
   fileName?: string | null;
-  isPlaying: boolean;
-  onTogglePlay: () => void;
-}> = React.memo(({ fileName, isPlaying, onTogglePlay }) => {
-  const [seconds, setSeconds] = useState(0);
+  fileSize?: number | null;
+}> = React.memo(({ messageId, fileUrl, fileName, fileSize }) => {
+  const [playerState, setPlayerState] = useState(() => chatAudioPlayerService.getState);
 
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    if (isPlaying) {
-      setSeconds(0);
-      timer = setInterval(() => {
-        setSeconds((prev) => {
-          if (prev >= 14) {
-            return 15;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } else {
-      setSeconds(0);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [isPlaying]);
+    return chatAudioPlayerService.subscribe((st) => {
+      setPlayerState(st);
+    });
+  }, []);
 
-  // Safely stop playback when duration completes without calling parent callback during state updater
-  useEffect(() => {
-    if (isPlaying && seconds >= 15) {
-      onTogglePlay();
-    }
-  }, [isPlaying, seconds, onTogglePlay]);
+  const isCurrent = playerState.activeId === messageId;
+  const isPlaying = isCurrent && playerState.isPlaying;
+  const resolvedUrl = chatSocketService.resolveFileUrl(fileUrl);
 
-  const formattedCurrent = `0:${seconds < 10 ? '0' : ''}${seconds}`;
+  const handleToggle = () => {
+    if (!resolvedUrl) {
+      Alert.alert('Audio Unavailable', 'This voice note does not have a valid audio URL.');
+      return;
+    }
+    chatAudioPlayerService.play(resolvedUrl, messageId);
+  };
+
+  const parsedDurationFromFilename = (() => {
+    if (!fileName) return 0;
+    const match = fileName.match(/_(\d+)s\.[a-z0-9]+$/i);
+    return match ? parseInt(match[1], 10) : 0;
+  })();
+
+  const durationSec =
+    isCurrent && playerState.duration > 0
+      ? Math.round(playerState.duration)
+      : parsedDurationFromFilename > 0
+      ? parsedDurationFromFilename
+      : fileSize && fileSize > 0
+      ? Math.round(fileSize / 16000)
+      : 0;
+  const currentSec = isCurrent ? Math.round(playerState.currentTime) : 0;
+
+  const formatSec = (s: number) => {
+    const mins = Math.floor(s / 60);
+    const rem = s % 60;
+    return `${mins}:${rem < 10 ? '0' : ''}${rem}`;
+  };
+
+  const progressFraction = durationSec > 0 ? Math.min(1, currentSec / durationSec) : 0;
+  const activeBarCount = Math.round(progressFraction * STATIC_WAVE_BARS.length);
 
   return (
     <TouchableOpacity
       style={styles.voiceNoteCard}
       activeOpacity={0.8}
-      onPress={onTogglePlay}
+      onPress={handleToggle}
     >
       <View style={[styles.voicePlayBtn, isPlaying && styles.voicePlayBtnActive]}>
-        <Text style={styles.voicePlayIcon}>{isPlaying ? '⏸' : '▶'}</Text>
+        {playerState.isLoading && isCurrent ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Text style={styles.voicePlayIcon}>{isPlaying ? '⏸' : '▶'}</Text>
+        )}
       </View>
       <View style={styles.voiceWaveCol}>
         <View style={styles.voiceHeaderRow}>
           <Text style={styles.voiceWaveTitle}>{fileName || 'Voice Note'}</Text>
-          <Text style={styles.voiceDurationText}>
-            {isPlaying ? `${formattedCurrent} / 0:15` : '0:15'}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {isCurrent && (
+              <TouchableOpacity
+                style={{
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  backgroundColor: 'rgba(56, 189, 248, 0.18)',
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: 'rgba(56, 189, 248, 0.35)',
+                }}
+                onPress={(e: any) => {
+                  e.stopPropagation?.();
+                  const nextRate = playerState.playbackRate === 1 ? 1.5 : playerState.playbackRate === 1.5 ? 2 : 1;
+                  chatAudioPlayerService.setPlaybackRate(nextRate);
+                }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={{ fontSize: 10, color: '#38BDF8', fontWeight: '800' }}>
+                  {playerState.playbackRate || 1}x
+                </Text>
+              </TouchableOpacity>
+            )}
+            <Text style={styles.voiceDurationText}>
+              {isPlaying || currentSec > 0
+                ? `${formatSec(currentSec)} / ${formatSec(durationSec || 15)}`
+                : durationSec > 0
+                ? formatSec(durationSec)
+                : '0:15'}
+            </Text>
+          </View>
         </View>
         <View style={styles.voiceWaveBarsRow}>
           {STATIC_WAVE_BARS.map((h, i) => {
-            const activeBar = isPlaying && i <= seconds;
+            const activeBar = isPlaying ? i <= activeBarCount : false;
             return (
               <View
                 key={i}
                 style={[
                   styles.voiceWaveBar,
-                  { height: isPlaying && i % 2 === seconds % 2 ? Math.min(28, h + 6) : h },
+                  {
+                    height:
+                      isPlaying && i % 2 === Math.floor(playerState.currentTime * 2) % 2
+                        ? Math.min(28, h + 6)
+                        : h,
+                  },
                   activeBar && styles.voiceWaveBarPlaying,
                 ]}
               />
@@ -172,14 +227,24 @@ export const VoiceNoteBubbleCard: React.FC<{
 
 export const ExpiringCountdownBadge: React.FC<{ expiresAt: string | Date }> = React.memo(({ expiresAt }) => {
   const [secondsLeft, setSecondsLeft] = useState(() => {
+    if (!expiresAt) return 0;
     const target = new Date(expiresAt).getTime();
-    return Math.max(0, Math.floor((target - Date.now()) / 1000));
+    if (isNaN(target)) return 0;
+    return Math.max(0, Math.floor((target - chatSocketService.getAdjustedServerNow()) / 1000));
   });
 
   useEffect(() => {
+    if (!expiresAt) {
+      setSecondsLeft(0);
+      return;
+    }
+    const target = new Date(expiresAt).getTime();
+    if (isNaN(target)) {
+      setSecondsLeft(0);
+      return;
+    }
     const timer = setInterval(() => {
-      const target = new Date(expiresAt).getTime();
-      const remaining = Math.max(0, Math.floor((target - Date.now()) / 1000));
+      const remaining = Math.max(0, Math.floor((target - chatSocketService.getAdjustedServerNow()) / 1000));
       setSecondsLeft(remaining);
       if (remaining <= 0) {
         clearInterval(timer);
@@ -528,18 +593,19 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
           )}
 
           {/* Image / File Attachment Card */}
-          {Boolean(item.fileUrl) && !item.isVoiceNote && !item.fileType?.startsWith('audio/') && (
-            item.fileType?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(item.fileUrl!) ? (
+          {Boolean(item.fileUrl) && !item.isVoiceNote && !item.fileType?.startsWith('audio/') && (() => {
+            const resolvedFileUrl = chatSocketService.resolveFileUrl(item.fileUrl);
+            return item.fileType?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(item.fileUrl!) ? (
               <ChatImageCard
-                uri={item.fileUrl!}
-                onPress={() => onOpenImage(item.fileUrl!)}
+                uri={resolvedFileUrl}
+                onPress={() => onOpenImage(resolvedFileUrl)}
               />
             ) : (
               <TouchableOpacity
                 style={styles.fileAttachmentCard}
                 onPress={() => {
-                  if (item.fileUrl) {
-                    Linking.openURL(item.fileUrl).catch(() => {});
+                  if (resolvedFileUrl) {
+                    Linking.openURL(resolvedFileUrl).catch(() => {});
                   }
                 }}
               >
@@ -553,15 +619,16 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
                   </Text>
                 </View>
               </TouchableOpacity>
-            )
-          )}
+            );
+          })()}
 
           {/* Voice Audio Note Preview Card with Coordinated Playback */}
           {item.isVoiceNote && (
             <VoiceNoteBubbleCard
+              messageId={item.id}
+              fileUrl={item.fileUrl}
               fileName={item.fileName}
-              isPlaying={isPlayingVoice}
-              onTogglePlay={() => onToggleVoicePlay(String(item.id))}
+              fileSize={item.fileSize}
             />
           )}
 
@@ -596,8 +663,21 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
           {/* Interactive Poll Rendering */}
           {item.pollData && Array.isArray(item.pollData.options) ? (() => {
             const totalVotes = item.pollData.options.reduce((sum, o) => sum + (o.votes?.length || 0), 0);
+            const isExpired = Boolean(
+              item.pollData.expiresAt && new Date(item.pollData.expiresAt).getTime() <= Date.now()
+            );
+            const isMulti = Boolean(item.pollData.allowMultiple);
+
             return (
               <View style={styles.pollCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: isExpired ? '#EF4444' : '#38BDF8' }}>
+                    {isExpired ? '🔒 Voting Closed' : isMulti ? '📊 Multi-Choice Poll' : '📊 Single-Choice Poll'}
+                  </Text>
+                  {isExpired && (
+                    <Text style={{ fontSize: 10, color: '#EF4444', fontWeight: '600' }}>Expired</Text>
+                  )}
+                </View>
                 <Text style={styles.pollQuestion}>
                   {renderWithSearchHighlight(item.pollData.question, 'poll_q', isSearching, searchQuery)}
                 </Text>
@@ -613,7 +693,12 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
                   return (
                     <TouchableOpacity
                       key={opt.id}
-                      style={[styles.pollOptionBtn, hasVoted && styles.pollOptionBtnVoted]}
+                      style={[
+                        styles.pollOptionBtn,
+                        hasVoted && styles.pollOptionBtnVoted,
+                        isExpired && { opacity: 0.75 },
+                      ]}
+                      disabled={isExpired}
                       onPress={() => onVotePoll(item.id, opt.id)}
                     >
                       <View style={[styles.pollProgressFill, { width: `${percentage}%` }]} />
@@ -627,7 +712,7 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
                   );
                 })}
                 <Text style={styles.pollTotalVotesText}>
-                  {totalVotes} total votes
+                  {totalVotes} total votes {isMulti ? '• Multiple answers allowed' : '• Select one'}
                 </Text>
               </View>
             );

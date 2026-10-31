@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,11 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { EdgeInsets } from 'react-native-safe-area-context';
-import { Movie, TraktComment, TraktMovieStats } from '../../types';
-import { traktService } from '../../services/movies/TraktService';
+import { Movie } from '../../types';
+import { movieService } from '../../services/movies/MovieService';
+import { tvMazeService } from '../../services/movies/TVMazeService';
 
 interface MovieDetailModalProps {
   visible: boolean;
@@ -40,65 +40,54 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
     onToggleWatchlist,
     onBrowseEpisodes,
   }) => {
+    const [detailMovie, setDetailMovie] = useState<Movie | null>(movie);
+    const [isLoadingDetails, setIsLoadingDetails] = useState<boolean>(false);
 
-    const [traktStats, setTraktStats] = useState<TraktMovieStats | null>(null);
-    const [traktComments, setTraktComments] = useState<TraktComment[]>([]);
-    const [isLoadingTrakt, setIsLoadingTrakt] = useState(false);
-    const [hasLoggedWatch, setHasLoggedWatch] = useState(false);
-
-    // Fetch Trakt Community Insights when movie modal opens
     useEffect(() => {
-      if (!visible || !movie) {
-        setTraktStats(null);
-        setTraktComments([]);
-        setHasLoggedWatch(false);
+      setDetailMovie(movie);
+      if (!visible || !movie) return;
+
+      // If cast and director / trailer_key are already present, skip loading
+      if (movie.cast && movie.cast.length > 0 && (movie.director || movie.trailer_key)) {
         return;
       }
 
       let isCurrent = true;
-      setIsLoadingTrakt(true);
+      setIsLoadingDetails(true);
 
-      const fetchTraktData = async () => {
+      const loadFullDetails = async () => {
         try {
-          const [stats, comments] = await Promise.all([
-            traktService.getMovieStats(movie.id),
-            traktService.getMovieComments(movie.id),
-          ]);
-          if (isCurrent) {
-            setTraktStats(stats);
-            setTraktComments(comments);
+          if (movie.is_tv || movie.tvmaze_id) {
+            const showId = movie.tvmaze_id || movie.id;
+            const cast = await tvMazeService.getShowCast(showId);
+            if (isCurrent && cast.length > 0) {
+              setDetailMovie((prev) => (prev ? { ...prev, cast } : prev));
+            }
+          } else {
+            const details = await movieService.getMovieDetails(movie.id);
+            if (isCurrent && details && !details.title.startsWith('Movie #')) {
+              setDetailMovie((prev) => (prev ? { ...prev, ...details } : prev));
+            }
           }
         } catch {
-          // Fallback handled in TraktService
+          // Keep base movie information on network error
         } finally {
           if (isCurrent) {
-            setIsLoadingTrakt(false);
+            setIsLoadingDetails(false);
           }
         }
       };
 
-      fetchTraktData();
+      loadFullDetails();
 
       return () => {
         isCurrent = false;
       };
-    }, [visible, movie]);
-
-    const handleLogWatch = useCallback(async () => {
-      if (!movie) return;
-      try {
-        await traktService.logWatchHistory(movie.id, movie.title);
-        setHasLoggedWatch(true);
-        Alert.alert(
-          'Logged to Trakt',
-          `"${movie.title}" was logged to your watch history and marked as watched!`,
-        );
-      } catch (err: any) {
-        Alert.alert('Error', err?.message || 'Could not log watch history.');
-      }
-    }, [movie]);
+    }, [visible, movie?.id]);
 
     if (!movie) return null;
+
+    const activeMovie = detailMovie || movie;
 
     return (
       <Modal
@@ -114,15 +103,20 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
           >
             {/* Backdrop Header */}
             <View style={styles.detailBackdropContainer}>
-              <Image
-                source={{
-                  uri:
-                    movie.backdrop_path ||
-                    movie.poster_path ||
-                    'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1200&q=80',
-                }}
-                style={styles.detailBackdrop}
-              />
+              {activeMovie.backdrop_path || activeMovie.poster_path ? (
+                <Image
+                  source={{
+                    uri: activeMovie.backdrop_path || activeMovie.poster_path,
+                  }}
+                  style={styles.detailBackdrop}
+                />
+              ) : (
+                <View style={[styles.detailBackdrop, styles.fallbackBackdrop]}>
+                  <Text style={styles.fallbackBackdropIcon}>
+                    {activeMovie.is_tv ? '📺' : '🎬'}
+                  </Text>
+                </View>
+              )}
               <View style={styles.detailBackdropOverlay}>
                 {/* Close button */}
                 <TouchableOpacity
@@ -138,7 +132,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                   style={styles.detailPlayFloatingBtn}
                   onPress={() => {
                     onClose();
-                    onStream(movie);
+                    onStream(activeMovie);
                   }}
                   activeOpacity={0.85}
                 >
@@ -150,37 +144,50 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
             {/* Movie info box */}
             <View style={styles.detailBody}>
               <View style={styles.detailHeaderRow}>
-                <Image
-                  source={{
-                    uri:
-                      movie.poster_path ||
-                      'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80',
-                  }}
-                  style={styles.detailThumbPoster}
-                />
+                {activeMovie.poster_path ? (
+                  <Image
+                    source={{ uri: activeMovie.poster_path }}
+                    style={styles.detailThumbPoster}
+                  />
+                ) : (
+                  <View style={[styles.detailThumbPoster, styles.fallbackThumbPoster]}>
+                    <Text style={styles.fallbackThumbPosterIcon}>
+                      {activeMovie.is_tv ? '📺' : '🎬'}
+                    </Text>
+                  </View>
+                )}
 
                 <View style={styles.detailHeaderTextWrap}>
-                  <Text style={styles.detailTitle}>{movie.title}</Text>
-                  {movie.tagline ? (
-                    <Text style={styles.detailTagline}>"{movie.tagline}"</Text>
+                  <Text style={styles.detailTitle}>{activeMovie.title}</Text>
+                  {activeMovie.tagline ? (
+                    <Text style={styles.detailTagline}>"{activeMovie.tagline}"</Text>
                   ) : null}
 
                   {/* Stats pills */}
                   <View style={styles.detailStatsRow}>
                     <View style={styles.detailStatPill}>
                       <Text style={styles.detailStatPillText}>
-                        ★ {movie.vote_average} / 10
+                        ★ {activeMovie.vote_average} / 10
                       </Text>
                     </View>
-                    <View style={styles.detailStatPill}>
-                      <Text style={styles.detailStatPillText}>
-                        {movie.release_date ? movie.release_date.slice(0, 4) : ''}
-                      </Text>
-                    </View>
-                    {movie.runtime ? (
+                    {activeMovie.release_date ? (
                       <View style={styles.detailStatPill}>
                         <Text style={styles.detailStatPillText}>
-                          {Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m
+                          {activeMovie.release_date.slice(0, 4)}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {activeMovie.runtime ? (
+                      <View style={styles.detailStatPill}>
+                        <Text style={styles.detailStatPillText}>
+                          {Math.floor(activeMovie.runtime / 60)}h {activeMovie.runtime % 60}m
+                        </Text>
+                      </View>
+                    ) : null}
+                    {activeMovie.original_language ? (
+                      <View style={[styles.detailStatPill, { borderColor: '#E11D48', backgroundColor: 'rgba(225, 29, 72, 0.15)' }]}>
+                        <Text style={[styles.detailStatPillText, { color: '#FB7185', fontWeight: '800' }]}>
+                          🌐 {activeMovie.original_language.toUpperCase()}
                         </Text>
                       </View>
                     ) : null}
@@ -194,7 +201,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                   style={styles.detailMainActionBtn}
                   onPress={() => {
                     onClose();
-                    onStream(movie);
+                    onStream(activeMovie);
                   }}
                   activeOpacity={0.85}
                 >
@@ -207,7 +214,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                   style={styles.detailDownloadActionBtn}
                   onPress={() => {
                     onClose();
-                    onDownload && onDownload(movie);
+                    onDownload && onDownload(activeMovie);
                   }}
                   activeOpacity={0.85}
                 >
@@ -216,12 +223,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                   </Text>
                 </TouchableOpacity>
 
-                {movie.trailer_key ? (
+                {activeMovie.trailer_key ? (
                   <TouchableOpacity
                     style={styles.detailTrailerActionBtn}
                     onPress={() => {
                       onClose();
-                      onTrailer(movie.trailer_key);
+                      onTrailer(activeMovie.trailer_key);
                     }}
                     activeOpacity={0.85}
                   >
@@ -236,7 +243,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                     styles.detailSecondaryActionBtn,
                     isBookmarked && styles.detailSecondaryActionBtnActive,
                   ]}
-                  onPress={() => onToggleWatchlist(movie)}
+                  onPress={() => onToggleWatchlist(activeMovie)}
                   activeOpacity={0.85}
                 >
                   <Text style={styles.detailSecondaryActionBtnText}>
@@ -246,12 +253,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
               </View>
 
               {/* TVmaze Series Episode Guide Action Button */}
-              {(movie.is_tv || movie.network || movie.tvmaze_id) && onBrowseEpisodes && (
+              {(activeMovie.is_tv || activeMovie.network || activeMovie.tvmaze_id) && onBrowseEpisodes && (
                 <TouchableOpacity
                   style={styles.detailTvEpisodesActionBtn}
                   onPress={() => {
                     onClose();
-                    onBrowseEpisodes(movie);
+                    onBrowseEpisodes(activeMovie);
                   }}
                   activeOpacity={0.85}
                 >
@@ -261,12 +268,10 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                 </TouchableOpacity>
               )}
 
-
-
               {/* Genres */}
-              {movie.genres && movie.genres.length > 0 && (
+              {activeMovie.genres && activeMovie.genres.length > 0 && (
                 <View style={styles.detailGenresRow}>
-                  {movie.genres.map((g) => (
+                  {activeMovie.genres.map((g) => (
                     <View key={g.id} style={styles.detailGenreTag}>
                       <Text style={styles.detailGenreTagText}>{g.name}</Text>
                     </View>
@@ -275,19 +280,19 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
               )}
 
               {/* Director */}
-              {movie.director ? (
+              {activeMovie.director ? (
                 <View style={styles.detailDirectorRow}>
                   <Text style={styles.detailSectionLabel}>Director: </Text>
-                  <Text style={styles.detailDirectorName}>{movie.director}</Text>
+                  <Text style={styles.detailDirectorName}>{activeMovie.director}</Text>
                 </View>
               ) : null}
 
               {/* Overview */}
               <Text style={styles.detailSectionHeading}>Synopsis</Text>
-              <Text style={styles.detailOverviewText}>{movie.overview}</Text>
+              <Text style={styles.detailOverviewText}>{activeMovie.overview}</Text>
 
               {/* Cast */}
-              {movie.cast && movie.cast.length > 0 && (
+              {activeMovie.cast && activeMovie.cast.length > 0 ? (
                 <>
                   <Text style={styles.detailSectionHeading}>Top Cast</Text>
                   <ScrollView
@@ -295,16 +300,26 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.detailCastScroll}
                   >
-                    {movie.cast.map((actor) => (
+                    {activeMovie.cast.map((actor) => (
                       <View key={actor.id} style={styles.castCard}>
-                        <Image
-                          source={{
-                            uri:
-                              actor.profile_path ||
-                              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=185&q=80',
-                          }}
-                          style={styles.castAvatar}
-                        />
+                        {actor.profile_path ? (
+                          <Image
+                            source={{ uri: actor.profile_path }}
+                            style={styles.castAvatar}
+                          />
+                        ) : (
+                          <View style={[styles.castAvatar, styles.castAvatarPlaceholder]}>
+                            <Text style={styles.castAvatarInitials}>
+                              {actor.name
+                                ? actor.name
+                                    .split(' ')
+                                    .map((n) => n[0])
+                                    .slice(0, 2)
+                                    .join('')
+                                : '👤'}
+                            </Text>
+                          </View>
+                        )}
                         <Text style={styles.castName} numberOfLines={1}>
                           {actor.name}
                         </Text>
@@ -315,153 +330,13 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = React.memo(
                     ))}
                   </ScrollView>
                 </>
-              )}
-
-              {/* Trakt Social & Community Section */}
-              <View style={styles.traktDetailSection}>
-                <View style={styles.traktDetailHeaderRow}>
-                  <View style={styles.traktPill}>
-                    <Text style={styles.traktPillText}>⚡ TRAKT.TV SOCIAL</Text>
-                  </View>
-                  <Text style={styles.traktSectionTitle}>Community Insights</Text>
+              ) : isLoadingDetails ? (
+                <View style={styles.loadingDetailsRow}>
+                  <ActivityIndicator size="small" color="#E11D48" />
+                  <Text style={styles.loadingDetailsText}>Loading cast & credits...</Text>
                 </View>
+              ) : null}
 
-                {isLoadingTrakt ? (
-                  <View style={styles.traktLoaderWrap}>
-                    <ActivityIndicator size="small" color="#ED1C24" />
-                    <Text style={styles.traktLoaderText}>Loading Trakt community data...</Text>
-                  </View>
-                ) : (
-                  <>
-                    {/* Trakt Live Metrics Grid */}
-                    <View style={styles.traktMetricsBar}>
-                      <View style={styles.traktMetricItem}>
-                        <Text style={styles.traktMetricValue}>
-                          ★ {movie.trakt_rating || movie.vote_average}
-                        </Text>
-                        <Text style={styles.traktMetricLabel}>Trakt Score</Text>
-                      </View>
-
-                      <View style={styles.traktMetricDivider} />
-
-                      <View style={styles.traktMetricItem}>
-                        <Text style={styles.traktMetricValue}>
-                          {traktStats?.watchers
-                            ? `🔥 ${traktStats.watchers}`
-                            : movie.trakt_watchers
-                              ? `🔥 ${movie.trakt_watchers}`
-                              : '★ Active'}
-                        </Text>
-                        <Text style={styles.traktMetricLabel}>Watching Now</Text>
-                      </View>
-
-                      <View style={styles.traktMetricDivider} />
-
-                      <View style={styles.traktMetricItem}>
-                        <Text style={styles.traktMetricValue}>
-                          {traktStats?.plays
-                            ? `${Math.round(traktStats.plays / 1000)}k`
-                            : movie.vote_count
-                              ? `${(movie.vote_count / 1000).toFixed(1)}k`
-                              : '—'}
-                        </Text>
-                        <Text style={styles.traktMetricLabel}>Scrobbles</Text>
-                      </View>
-
-                      <View style={styles.traktMetricDivider} />
-
-                      <View style={styles.traktMetricItem}>
-                        <Text style={styles.traktMetricValue}>
-                          {traktStats?.comments || traktComments.length || '—'}
-                        </Text>
-                        <Text style={styles.traktMetricLabel}>Reviews</Text>
-                      </View>
-                    </View>
-
-                    {/* Quick Scrobble / Watch Log Action */}
-                    <TouchableOpacity
-                      style={[
-                        styles.traktLogWatchBtn,
-                        hasLoggedWatch && styles.traktLogWatchBtnActive,
-                      ]}
-                      onPress={handleLogWatch}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={styles.traktLogWatchBtnText}>
-                        {hasLoggedWatch
-                          ? '✓ Logged to Trakt & CineVerse'
-                          : '⚡ Log to Trakt Watch History'}
-                      </Text>
-                    </TouchableOpacity>
-
-                    {/* Trakt Community Comments & Reviews */}
-                    {traktComments.length > 0 && (
-                      <View style={styles.traktReviewsWrap}>
-                        <Text style={styles.traktReviewsHeading}>
-                          Community Reviews & Discussions
-                        </Text>
-
-                        {traktComments.slice(0, 3).map((item) => (
-                          <View key={item.id} style={styles.traktCommentCard}>
-                            <View style={styles.traktCommentHeader}>
-                              <Image
-                                source={{
-                                  uri:
-                                    item.user.images?.avatar?.full ||
-                                    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&q=80',
-                                }}
-                                style={styles.traktCommentAvatar}
-                              />
-                              <View style={styles.traktCommentMeta}>
-                                <View style={styles.traktCommentNameRow}>
-                                  <Text style={styles.traktCommentUsername}>
-                                    {item.user.name || item.user.username}
-                                  </Text>
-                                  {item.user.vip && (
-                                    <View style={styles.traktVipBadge}>
-                                      <Text style={styles.traktVipBadgeText}>VIP</Text>
-                                    </View>
-                                  )}
-                                </View>
-                                <Text style={styles.traktCommentDate}>
-                                  {new Date(item.created_at).toLocaleDateString([], {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric',
-                                  })}
-                                </Text>
-                              </View>
-
-                              {item.user_rating && (
-                                <View style={styles.traktUserRatingBadge}>
-                                  <Text style={styles.traktUserRatingBadgeText}>
-                                    ★ {item.user_rating}/10
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-
-                            <Text style={styles.traktCommentBody}>{item.comment}</Text>
-
-                            <View style={styles.traktCommentFooter}>
-                              <Text style={styles.traktLikesText}>
-                                👍 {item.likes} helpful
-                              </Text>
-                              {item.spoiler && (
-                                <View style={styles.traktSpoilerBadge}>
-                                  <Text style={styles.traktSpoilerBadgeText}>
-                                    ⚠️ Contains Spoilers
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </>
-                )}
-              </View>
             </View>
           </ScrollView>
         </View>
@@ -725,193 +600,45 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: 'center',
   },
-  traktDetailSection: {
-    marginTop: 20,
-    backgroundColor: '#121622',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#222A3C',
-  },
-  traktDetailHeaderRow: {
+  loadingDetailsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 14,
+    paddingVertical: 12,
   },
-  traktPill: {
-    backgroundColor: '#ED1C24',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+  loadingDetailsText: {
+    color: '#9CA3AF',
+    fontSize: 12,
   },
-  traktPillText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  traktSectionTitle: {
-    color: '#F9FAFB',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  traktLoaderWrap: {
-    paddingVertical: 20,
+  fallbackBackdrop: {
+    backgroundColor: '#161B26',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  traktLoaderText: {
-    color: '#9CA3AF',
-    fontSize: 11,
-    marginTop: 6,
+  fallbackBackdropIcon: {
+    fontSize: 48,
+    opacity: 0.6,
   },
-  traktMetricsBar: {
-    flexDirection: 'row',
+  fallbackThumbPoster: {
+    backgroundColor: '#161B26',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#090B10',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderWidth: 1,
-    borderColor: '#1A202E',
+    justifyContent: 'center',
   },
-  traktMetricItem: {
-    flex: 1,
-    alignItems: 'center',
+  fallbackThumbPosterIcon: {
+    fontSize: 32,
+    opacity: 0.7,
   },
-  traktMetricValue: {
-    color: '#F9FAFB',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  traktMetricLabel: {
-    color: '#6B7280',
-    fontSize: 9,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  traktMetricDivider: {
-    width: 1,
-    height: 24,
+  castAvatarPlaceholder: {
     backgroundColor: '#1E2536',
-  },
-  traktLogWatchBtn: {
-    backgroundColor: '#ED1C24',
-    borderRadius: 10,
-    paddingVertical: 10,
     alignItems: 'center',
-    marginTop: 14,
-  },
-  traktLogWatchBtnActive: {
-    backgroundColor: '#059669',
-  },
-  traktLogWatchBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  traktReviewsWrap: {
-    marginTop: 18,
-  },
-  traktReviewsHeading: {
-    color: '#D1D5DB',
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  traktCommentCard: {
-    backgroundColor: '#0C0F17',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#1A2130',
+    borderColor: '#2C3549',
   },
-  traktCommentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  traktCommentAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#1E2536',
-    marginRight: 10,
-  },
-  traktCommentMeta: {
-    flex: 1,
-  },
-  traktCommentNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  traktCommentUsername: {
-    color: '#F9FAFB',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  traktVipBadge: {
-    backgroundColor: '#F59E0B',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 3,
-  },
-  traktVipBadgeText: {
-    color: '#000000',
-    fontSize: 8,
-    fontWeight: '800',
-  },
-  traktCommentDate: {
-    color: '#6B7280',
-    fontSize: 10,
-  },
-  traktUserRatingBadge: {
-    backgroundColor: 'rgba(237, 28, 36, 0.15)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 0.5,
-    borderColor: '#ED1C24',
-  },
-  traktUserRatingBadgeText: {
-    color: '#ED1C24',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  traktCommentBody: {
-    color: '#D1D5DB',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  traktCommentFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#161C28',
-  },
-  traktLikesText: {
+  castAvatarInitials: {
     color: '#9CA3AF',
-    fontSize: 10,
-  },
-  traktSpoilerBadge: {
-    backgroundColor: '#7F1D1D',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  traktSpoilerBadgeText: {
-    color: '#FCA5A5',
-    fontSize: 9,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 

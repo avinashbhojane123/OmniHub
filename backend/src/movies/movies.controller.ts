@@ -7,6 +7,7 @@ import {
   Query,
   Param,
   Body,
+  Headers,
 } from '@nestjs/common';
 import { MoviesService } from './movies.service';
 import { BookmarkMovieDto, UpdateWatchedDto } from './dto/movie.dto';
@@ -45,90 +46,97 @@ export class MoviesController {
     return this.moviesService.getGenres();
   }
 
+  @Get('discover')
+  discover(
+    @Query('language') language?: string,
+    @Query('isTv') isTv?: string,
+    @Query('genre') genre?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.moviesService.discover({
+      language,
+      isTv: isTv === 'true' || isTv === '1',
+      genreId: genre ? Number(genre) : undefined,
+      page: page ? Number(page) : 1,
+    });
+  }
+
   @Get('search')
   search(
     @Query('q') query: string,
     @Query('genre') genre?: string,
     @Query('page') page?: string,
+    @Query('language') language?: string,
   ) {
     return this.moviesService.search(
       query || '',
       genre ? Number(genre) : undefined,
       page ? Number(page) : 1,
+      language,
     );
   }
 
   @Get('watchlist')
-  getWatchlist() {
-    return this.moviesService.getWatchlist();
+  getWatchlist(
+    @Query('userId') queryUserId?: string,
+    @Headers('x-user-id') headerUserId?: string,
+  ) {
+    const userId = queryUserId || headerUserId;
+    return this.moviesService.getWatchlist(userId);
   }
 
   @Post('watchlist')
-  addToWatchlist(@Body() dto: BookmarkMovieDto) {
+  addToWatchlist(
+    @Body() dto: BookmarkMovieDto,
+    @Headers('x-user-id') headerUserId?: string,
+  ) {
+    if (!dto.userId && headerUserId) {
+      dto.userId = headerUserId;
+    }
     return this.moviesService.addToWatchlist(dto);
   }
 
   @Delete('watchlist/:id')
-  removeFromWatchlist(@Param('id') id: string) {
-    return this.moviesService.removeFromWatchlist(id);
+  removeFromWatchlist(
+    @Param('id') id: string,
+    @Query('userId') queryUserId?: string,
+    @Headers('x-user-id') headerUserId?: string,
+    @Query('isTv') isTv?: string,
+  ) {
+    const userId = queryUserId || headerUserId;
+    return this.moviesService.removeFromWatchlist(
+      id,
+      userId,
+      isTv !== undefined ? isTv === 'true' : undefined,
+    );
   }
 
   @Patch('watchlist/:id/watched')
   toggleWatched(
     @Param('id') id: string,
     @Body() body: UpdateWatchedDto,
+    @Query('userId') queryUserId?: string,
+    @Headers('x-user-id') headerUserId?: string,
+    @Query('isTv') queryIsTv?: string,
   ) {
-    return this.moviesService.toggleWatched(id, body?.isWatched);
+    const userId = queryUserId || headerUserId;
+    const isTv =
+      body?.isTv !== undefined
+        ? body.isTv
+        : queryIsTv !== undefined
+          ? queryIsTv === 'true'
+          : undefined;
+    return this.moviesService.toggleWatched(id, body?.isWatched, userId, isTv);
   }
 
-  // --- Trakt.tv API Social & Tracking Endpoints ---
-  @Get('trakt/trending')
-  getTraktTrending(@Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.moviesService.getTraktTrending(page ? Number(page) : 1, limit ? Number(limit) : 20);
-  }
-
-  @Get('trakt/watched')
-  getTraktWatched(
-    @Query('period') period?: 'weekly' | 'monthly' | 'yearly',
-    @Query('page') page?: string,
-  ) {
-    return this.moviesService.getTraktWatched(period || 'weekly', page ? Number(page) : 1);
-  }
-
-  @Get('trakt/anticipated')
-  getTraktAnticipated(@Query('page') page?: string) {
-    return this.moviesService.getTraktAnticipated(page ? Number(page) : 1);
-  }
-
-  @Get('trakt/comments/:id')
-  getTraktComments(@Param('id') id: string) {
-    return this.moviesService.getTraktComments(id);
-  }
-
-  @Get('trakt/stats/:id')
-  getTraktStats(@Param('id') id: string) {
-    return this.moviesService.getTraktStats(id);
-  }
-
-  @Get('trakt/user/:username/profile')
-  getTraktUserProfile(@Param('username') username: string) {
-    return this.moviesService.getTraktUserProfile(username);
-  }
-
-  @Get('trakt/user/:username/watchlist')
-  getTraktUserWatchlist(@Param('username') username: string) {
-    return this.moviesService.getTraktUserWatchlist(username);
-  }
-
-  @Get('trakt/user/:username/history')
-  getTraktUserHistory(@Param('username') username: string) {
-    return this.moviesService.getTraktUserHistory(username);
-  }
 
   // --- TVmaze API (Free TV Series, Schedules, Episodes) ---
   @Get('tvmaze/shows')
-  getTVMazeShows(@Query('page') page?: string) {
-    return this.moviesService.getTVMazeShows(page ? Number(page) : 0);
+  getTVMazeShows(
+    @Query('page') page?: string,
+    @Query('language') language?: string,
+  ) {
+    return this.moviesService.getTVMazeShows(page ? Number(page) : 0, language);
   }
 
   @Get('tvmaze/schedule')
@@ -146,9 +154,27 @@ export class MoviesController {
     return this.moviesService.getTVMazeSeasons(id);
   }
 
+  @Get('tvmaze/shows/:id/cast')
+  getTVMazeCast(@Param('id') id: string) {
+    return this.moviesService.getTVMazeCast(id);
+  }
+
   @Get('tvmaze/search')
   searchTVMazeShows(@Query('q') query: string) {
     return this.moviesService.searchTVMazeShows(query || '');
+  }
+
+  @Get('find-tmdb')
+  findTmdb(
+    @Query('imdbId') imdbId?: string,
+    @Query('q') query?: string,
+    @Query('isTv') isTv?: string,
+  ) {
+    return this.moviesService.findTmdb(
+      imdbId,
+      query,
+      isTv !== undefined ? isTv === 'true' || isTv === '1' : undefined,
+    );
   }
 
   @Get(':id')

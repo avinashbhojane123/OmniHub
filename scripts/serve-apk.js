@@ -26,18 +26,11 @@ const server = http.createServer((req, res) => {
       res.end(data);
       return;
     }
-    const fallback = {
-      version: 1,
-      buildTime: 'Initial',
-      bundleUrl: '/ota/index.android.bundle',
-      notes: 'Initial APK release',
-    };
-    res.writeHead(200, {
+    res.writeHead(404, {
       'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
       'Access-Control-Allow-Origin': '*',
     });
-    res.end(JSON.stringify(fallback));
+    res.end(JSON.stringify({ error: 'No OTA version published yet' }));
     return;
   }
 
@@ -91,14 +84,14 @@ const server = http.createServer((req, res) => {
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
         'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Disposition': 'attachment; filename="LifePlanner.apk"',
+        'Content-Disposition': 'attachment; filename="OmniHub.apk"',
       });
       file.pipe(res);
     } else {
       res.writeHead(200, {
         'Content-Length': fileSize,
         'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Disposition': 'attachment; filename="LifePlanner.apk"',
+        'Content-Disposition': 'attachment; filename="OmniHub.apk"',
         'Cache-Control': 'no-cache',
       });
       fs.createReadStream(apkPath).pipe(res);
@@ -117,7 +110,7 @@ const server = http.createServer((req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Install LifePlanner</title>
+  <title>Install OmniHub</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -195,10 +188,10 @@ const server = http.createServer((req, res) => {
 <body>
   <div class="card">
     <div class="icon">🚀</div>
-    <h1>LifePlanner & Tasks</h1>
+    <h1>OmniHub</h1>
     <div class="badge">Latest Build Ready</div>
     <p>Hotspot direct install with lock-screen alarm wake up and Google Sheets cloud sync.</p>
-    <a href="/download" class="btn">📥 Install LifePlanner APK (${sizeMb} MB)</a>
+    <a href="/download" class="btn">📥 Install OmniHub APK (${sizeMb} MB)</a>
     <div class="meta">Built at ${buildDate} • Fast local hotspot transfer</div>
   </div>
 </body>

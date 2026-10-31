@@ -2,6 +2,7 @@ import { getDatabase } from '../connection';
 import { CalendarEvent, CreateCalendarEventDTO, UpdateCalendarEventDTO } from '../../types';
 import { parseISO, subDays, format } from 'date-fns';
 import { tombstoneRepository } from './TombstoneRepository';
+import { syncEventBus } from '../../services/backup/SyncEventBus';
 
 export class CalendarRepository {
   async findAll(): Promise<CalendarEvent[]> {
@@ -77,7 +78,7 @@ export class CalendarRepository {
       ]
     );
 
-    return {
+    const newEvent: CalendarEvent = {
       id,
       title: dto.title.trim(),
       description: dto.description?.trim() || undefined,
@@ -88,6 +89,15 @@ export class CalendarRepository {
       createdAt: now,
       updatedAt: now,
     };
+
+    syncEventBus.notifyDataChanged({
+      entityType: 'calendarEvent',
+      operation: 'upsert',
+      id,
+      item: newEvent,
+    });
+
+    return newEvent;
   }
 
   async update(id: string, updates: UpdateCalendarEventDTO): Promise<CalendarEvent | null> {
@@ -134,7 +144,16 @@ export class CalendarRepository {
       values
     );
 
-    return this.findById(id);
+    const updatedEvent = await this.findById(id);
+    if (updatedEvent) {
+      syncEventBus.notifyDataChanged({
+        entityType: 'calendarEvent',
+        operation: 'upsert',
+        id,
+        item: updatedEvent,
+      });
+    }
+    return updatedEvent;
   }
 
   async delete(id: string): Promise<boolean> {
@@ -143,11 +162,16 @@ export class CalendarRepository {
     try {
       const { alarmService } = await import('../../services/alarm/AlarmService');
       await alarmService.cancelEventAlarm(id);
-    } catch {}
+    } catch { }
     const result = await db.execute(
       'DELETE FROM calendar_events WHERE id = ?',
       [id]
     );
+    syncEventBus.notifyDataChanged({
+      entityType: 'calendarEvent',
+      operation: 'delete',
+      id,
+    });
     return result.rowsAffected > 0;
   }
 

@@ -4,16 +4,25 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 @Entity('movie_bookmarks')
+@Index(['tmdbId', 'isTv'])
+@Index(['userId', 'tmdbId', 'isTv'])
 export class MovieBookmark {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
   @Column({
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  userId!: string | null;
+
+  @Column({
     type: 'int',
-    unique: true,
   })
   tmdbId!: number;
 
@@ -73,6 +82,12 @@ export class MovieBookmark {
     default: false,
   })
   isWatched!: boolean;
+
+  @Column({
+    type: 'boolean',
+    default: false,
+  })
+  isTv!: boolean;
 
   @CreateDateColumn()
   createdAt!: Date;

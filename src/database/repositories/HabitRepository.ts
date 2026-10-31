@@ -2,6 +2,7 @@ import { Habit, HabitLog, HabitWithStreak } from '../../types';
 import { getDatabase } from '../connection';
 import { format, subDays, addDays, isBefore, parseISO } from 'date-fns';
 import { tombstoneRepository } from './TombstoneRepository';
+import { syncEventBus } from '../../services/backup/SyncEventBus';
 
 export class HabitRepository {
   async findAll(): Promise<Habit[]> {
@@ -42,6 +43,12 @@ export class HabitRepository {
         habit.archivedAt ?? null,
       ]
     );
+    syncEventBus.notifyDataChanged({
+      entityType: 'habit',
+      operation: 'upsert',
+      id: habit.id,
+      item: habit,
+    });
     return habit;
   }
 
@@ -85,17 +92,32 @@ export class HabitRepository {
 
     values.push(id);
     await db.execute(`UPDATE habits SET ${fields.join(', ')} WHERE id = ?`, values);
-    return this.findById(id);
+    const updatedHabit = await this.findById(id);
+    if (updatedHabit) {
+      syncEventBus.notifyDataChanged({
+        entityType: 'habit',
+        operation: 'upsert',
+        id,
+        item: updatedHabit,
+      });
+    }
+    return updatedHabit;
   }
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
     await tombstoneRepository.recordDeleted(id, 'habit');
-    return await db.transaction(async (tx) => {
+    const res = await db.transaction(async (tx) => {
       await tx.execute('DELETE FROM habit_logs WHERE habitId = ?', [id]);
       const result = await tx.execute('DELETE FROM habits WHERE id = ?', [id]);
       return result.rowsAffected > 0;
     });
+    syncEventBus.notifyDataChanged({
+      entityType: 'habit',
+      operation: 'delete',
+      id,
+    });
+    return res;
   }
 
   async logHabit(habitId: string, date: string, completed: boolean, notes?: string): Promise<HabitLog> {
@@ -112,7 +134,7 @@ export class HabitRepository {
       [id, habitId, date, completed ? 1 : 0, completed ? 1 : 0, notes ?? null, now]
     );
 
-    return {
+    const logItem: HabitLog = {
       id,
       habitId,
       date,
@@ -121,6 +143,15 @@ export class HabitRepository {
       notes,
       createdAt: now,
     };
+
+    syncEventBus.notifyDataChanged({
+      entityType: 'habitLog',
+      operation: 'upsert',
+      id,
+      item: logItem,
+    });
+
+    return logItem;
   }
 
   async getLogsForHabit(habitId: string, startDate?: string, endDate?: string): Promise<HabitLog[]> {

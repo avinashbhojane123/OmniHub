@@ -14,13 +14,15 @@ export class MovieRepository {
     }
   }
 
-  async findByTmdbId(tmdbId: number): Promise<MovieBookmark | null> {
+  async findByTmdbId(tmdbId: number, isTv?: boolean): Promise<MovieBookmark | null> {
     try {
-      const db = await getDatabase();
-      const result = await db.execute(
-        'SELECT * FROM movie_bookmarks WHERE tmdbId = ?',
-        [tmdbId],
-      );
+      const db = await getDatabase(); 
+      const sql =
+        isTv !== undefined
+          ? 'SELECT * FROM movie_bookmarks WHERE tmdbId = ? AND isTv = ?'
+          : 'SELECT * FROM movie_bookmarks WHERE tmdbId = ?';
+      const params = isTv !== undefined ? [tmdbId, isTv ? 1 : 0] : [tmdbId];
+      const result = await db.execute(sql, params);
       if (result.rows.length === 0) return null;
       return this.mapRow(result.rows[0]);
     } catch {
@@ -31,7 +33,7 @@ export class MovieRepository {
   async save(bookmark: MovieBookmark): Promise<void> {
     try {
       const db = await getDatabase();
-      const existing = await this.findByTmdbId(bookmark.tmdbId);
+      const existing = await this.findByTmdbId(bookmark.tmdbId, bookmark.isTv);
       const genresStr = JSON.stringify(bookmark.genres || []);
 
       if (existing) {
@@ -46,8 +48,9 @@ export class MovieRepository {
             genres = ?,
             runtime = ?,
             isWatched = ?,
+            isTv = ?,
             savedAt = ?
-          WHERE tmdbId = ?`,
+          WHERE tmdbId = ? AND isTv = ?`,
           [
             bookmark.title,
             bookmark.overview || null,
@@ -58,16 +61,18 @@ export class MovieRepository {
             genresStr,
             bookmark.runtime || 0,
             bookmark.isWatched ? 1 : 0,
+            bookmark.isTv ? 1 : 0,
             bookmark.savedAt,
             bookmark.tmdbId,
+            bookmark.isTv ? 1 : 0,
           ],
         );
       } else {
         await db.execute(
-          `INSERT INTO movie_bookmarks (
+          `INSERT OR REPLACE INTO movie_bookmarks (
             id, tmdbId, title, overview, posterPath, backdropPath,
-            voteAverage, releaseDate, genres, runtime, isWatched, savedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            voteAverage, releaseDate, genres, runtime, isWatched, isTv, savedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             bookmark.id,
             bookmark.tmdbId,
@@ -80,6 +85,7 @@ export class MovieRepository {
             genresStr,
             bookmark.runtime || 0,
             bookmark.isWatched ? 1 : 0,
+            bookmark.isTv ? 1 : 0,
             bookmark.savedAt,
           ],
         );
@@ -89,33 +95,43 @@ export class MovieRepository {
     }
   }
 
-  async delete(tmdbId: number): Promise<void> {
+  async delete(tmdbId: number, isTv?: boolean): Promise<void> {
     try {
       const db = await getDatabase();
-      await db.execute('DELETE FROM movie_bookmarks WHERE tmdbId = ?', [tmdbId]);
+      const sql =
+        isTv !== undefined
+          ? 'DELETE FROM movie_bookmarks WHERE tmdbId = ? AND isTv = ?'
+          : 'DELETE FROM movie_bookmarks WHERE tmdbId = ?';
+      const params = isTv !== undefined ? [tmdbId, isTv ? 1 : 0] : [tmdbId];
+      await db.execute(sql, params);
     } catch (e) {
       console.warn('[MovieRepository] Failed to delete bookmark:', e);
     }
   }
 
-  async toggleWatched(tmdbId: number): Promise<boolean> {
+  async toggleWatched(tmdbId: number, isTv?: boolean): Promise<boolean> {
     try {
-      const item = await this.findByTmdbId(tmdbId);
+      const item = await this.findByTmdbId(tmdbId, isTv);
       if (!item) return false;
       const nextWatched = !item.isWatched;
       const db = await getDatabase();
-      await db.execute(
-        'UPDATE movie_bookmarks SET isWatched = ? WHERE tmdbId = ?',
-        [nextWatched ? 1 : 0, tmdbId],
-      );
+      const sql =
+        isTv !== undefined
+          ? 'UPDATE movie_bookmarks SET isWatched = ? WHERE tmdbId = ? AND isTv = ?'
+          : 'UPDATE movie_bookmarks SET isWatched = ? WHERE tmdbId = ?';
+      const params =
+        isTv !== undefined
+          ? [nextWatched ? 1 : 0, tmdbId, isTv ? 1 : 0]
+          : [nextWatched ? 1 : 0, tmdbId];
+      await db.execute(sql, params);
       return nextWatched;
     } catch {
       return false;
     }
   }
 
-  async isBookmarked(tmdbId: number): Promise<boolean> {
-    const item = await this.findByTmdbId(tmdbId);
+  async isBookmarked(tmdbId: number, isTv?: boolean): Promise<boolean> {
+    const item = await this.findByTmdbId(tmdbId, isTv);
     return item !== null;
   }
 
@@ -143,6 +159,7 @@ export class MovieRepository {
       genres: parsedGenres,
       runtime: row.runtime ? Number(row.runtime) : undefined,
       isWatched: Boolean(row.isWatched),
+      isTv: Boolean(row.isTv),
       savedAt: row.savedAt,
     };
   }

@@ -1,11 +1,153 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Alert } from 'react-native';
-import { Task, HabitWithStreak, CalendarEvent } from '../types';
+import { Task, HabitWithStreak, CalendarEvent, UnifiedNextUpItem } from '../types';
 import { taskService } from '../services/tasks/TaskService';
 import { habitService } from '../services/habits/HabitService';
 import { calendarRepository } from '../database/repositories/CalendarRepository';
 import { alarmService } from '../services/alarm/AlarmService';
 import { format } from 'date-fns';
+
+function computeUnifiedNextUp(
+  upcomingTask: Task | null,
+  calendarEvents: CalendarEvent[],
+  habits: HabitWithStreak[]
+): UnifiedNextUpItem | null {
+  const now = new Date();
+  const todayStr = format(now, 'yyyy-MM-dd');
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const currentDayOfWeek = now.getDay();
+
+  const candidates: {
+    item: UnifiedNextUpItem;
+    startMin: number;
+    isActive: boolean;
+  }[] = [];
+
+  // 1. Task candidate
+  if (upcomingTask && upcomingTask.status !== 'completed' && upcomingTask.status !== 'cancelled') {
+    let tStartMin = 9999;
+    let isActive = false;
+    if (upcomingTask.snoozeUntil) {
+      const sDate = new Date(upcomingTask.snoozeUntil);
+      if (!isNaN(sDate.getTime()) && sDate.getTime() > now.getTime()) {
+        tStartMin = sDate.getHours() * 60 + sDate.getMinutes();
+      }
+    }
+    if (tStartMin === 9999 && upcomingTask.startTime) {
+      const match = upcomingTask.startTime.match(/^(\d{1,2}):(\d{2})$/);
+      if (match) {
+        tStartMin = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+        const endMin = upcomingTask.endTime
+          ? (parseInt(upcomingTask.endTime.split(':')[0], 10) * 60 + parseInt(upcomingTask.endTime.split(':')[1], 10))
+          : tStartMin + 60;
+        if (tStartMin <= nowMin && nowMin < endMin) {
+          isActive = true;
+        }
+      }
+    }
+    candidates.push({
+      item: {
+        id: upcomingTask.id,
+        type: 'task',
+        title: upcomingTask.title,
+        description: upcomingTask.description,
+        startTime: upcomingTask.startTime,
+        endTime: upcomingTask.endTime,
+        categoryName: upcomingTask.categoryName,
+        categoryColor: upcomingTask.categoryColor,
+        categoryIcon: upcomingTask.categoryIcon,
+        isSnoozed: Boolean(upcomingTask.snoozeUntil && new Date(upcomingTask.snoozeUntil).getTime() > now.getTime()),
+        rawTask: upcomingTask,
+      },
+      startMin: tStartMin,
+      isActive,
+    });
+  }
+
+  // 2. Calendar Event candidate
+  const todayEvents = (calendarEvents || []).filter(
+    (e) => (e.date?.split('T')[0] === todayStr) && e.status !== 'completed' && e.status !== 'dismissed'
+  );
+  for (const ev of todayEvents) {
+    if (!ev.time) continue;
+    const match = ev.time.match(/(\d{1,2}):(\d{2})/);
+    if (!match) continue;
+    let evStartMin = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    if (/pm/i.test(ev.time) && parseInt(match[1], 10) < 12) evStartMin += 720;
+    if (/am/i.test(ev.time) && parseInt(match[1], 10) === 12) evStartMin -= 720;
+
+    const evEndMin = evStartMin + 45;
+    const isActive = evStartMin <= nowMin && nowMin < evEndMin;
+
+    if (evStartMin >= nowMin - 15) {
+      candidates.push({
+        item: {
+          id: ev.id,
+          type: 'calendar_event',
+          title: ev.title,
+          description: ev.description,
+          startTime: ev.time,
+          categoryName: 'Calendar Event',
+          categoryColor: '#3B82F6',
+          categoryIcon: '📅',
+          rawEvent: ev,
+        },
+        startMin: evStartMin,
+        isActive,
+      });
+    }
+  }
+
+  // 3. Habit Candidate
+  const pendingHabits = (habits || []).filter((h) => {
+    if (h.completedToday) return false;
+    if (!h.reminderTime) return false;
+    const days = h.recurrenceRule?.daysOfWeek;
+    if (days && days.length > 0 && !days.includes(currentDayOfWeek)) return false;
+    return true;
+  });
+
+  for (const hb of pendingHabits) {
+    const cleanTime = hb.reminderTime!.replace(/[^\d:]/g, '').trim();
+    const parts = cleanTime.split(':');
+    if (parts.length >= 2) {
+      let hbMin = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+      if (/pm/i.test(hb.reminderTime!) && parseInt(parts[0], 10) < 12) hbMin += 720;
+      if (/am/i.test(hb.reminderTime!) && parseInt(parts[0], 10) === 12) hbMin -= 720;
+
+      const isActive = hbMin <= nowMin && nowMin < hbMin + 30;
+      if (hbMin >= nowMin - 15) {
+        candidates.push({
+          item: {
+            id: hb.id,
+            type: 'habit',
+            title: hb.name,
+            description: hb.description,
+            startTime: hb.reminderTime,
+            categoryName: 'Daily Habit',
+            categoryColor: hb.color || '#10B981',
+            categoryIcon: hb.icon || '🎯',
+            streakCount: hb.currentStreak,
+            rawHabit: hb,
+          },
+          startMin: hbMin,
+          isActive,
+        });
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  const activeCandidates = candidates.filter((c) => c.isActive);
+  if (activeCandidates.length > 0) {
+    activeCandidates.sort((a, b) => a.startMin - b.startMin);
+    return activeCandidates[0].item;
+  }
+
+  candidates.sort((a, b) => a.startMin - b.startMin);
+  return candidates[0].item;
+}
 
 export function useToday() {
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
@@ -16,6 +158,10 @@ export function useToday() {
   const [conflicts, setConflicts] = useState<{ itemA: string; itemB: string; time: string }[]>([]);
   const [completionPercentage, setCompletionPercentage] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
+
+  const unifiedNextUp = useMemo(() => {
+    return computeUnifiedNextUp(upcomingTask, calendarEvents, habits);
+  }, [upcomingTask, calendarEvents, habits]);
 
   const isFetchingRef = useRef<boolean>(false);
   const lastFetchTimeRef = useRef<number>(0);
@@ -347,6 +493,7 @@ export function useToday() {
     todayTasks,
     overdueTasks,
     upcomingTask,
+    unifiedNextUp,
     habits,
     calendarEvents,
     conflicts,

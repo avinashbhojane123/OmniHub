@@ -72,6 +72,9 @@ try {
         run(`adb -s ${dev} reverse tcp:8081 tcp:8081`);
       } catch { }
       try {
+        run(`adb -s ${dev} reverse tcp:10000 tcp:10000`);
+      } catch { }
+      try {
         run(`adb -s ${dev} shell am force-stop com.lifeplanner`);
       } catch { }
       run(`adb -s ${dev} install -r "${apkPath}"`);

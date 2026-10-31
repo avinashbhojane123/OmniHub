@@ -19,27 +19,32 @@ if (__DEV__) {
 
 // Background event handler (Runs when app is killed or in background)
 notifee.onBackgroundEvent(async (event) => {
-  const data = event.detail?.notification?.data;
-  const notifId = event.detail?.notification?.id || '';
-  const pressId = event.detail?.pressAction?.id || '';
+  try {
+    const data = event.detail?.notification?.data;
+    const notifId = event.detail?.notification?.id || '';
+    const pressId = event.detail?.pressAction?.id || '';
 
-  const isAlarmAction =
-    data?.actionType === 'habit_alarm' ||
-    data?.actionType === 'event_alarm' ||
-    data?.actionType === 'task_alarm' ||
-    notifId.startsWith('alarm_') ||
-    notifId === 'active_battery_alarm' ||
-    notifId === 'active_ringing_alarm' ||
-    pressId === 'stop_alarm' ||
-    pressId === 'dismiss' ||
-    pressId === 'snooze_alarm' ||
-    pressId === 'done' ||
-    pressId === 'snooze';
+    const isAlarmAction =
+      data?.actionType === 'habit_alarm' ||
+      data?.actionType === 'event_alarm' ||
+      data?.actionType === 'task_alarm' ||
+      data?.actionType === 'battery_alarm' ||
+      notifId.startsWith('alarm_') ||
+      notifId === 'active_battery_alarm' ||
+      notifId === 'active_ringing_alarm' ||
+      pressId === 'stop_alarm' ||
+      pressId === 'dismiss' ||
+      pressId === 'snooze_alarm' ||
+      pressId === 'done' ||
+      pressId === 'snooze';
 
-  if (isAlarmAction) {
-    await alarmService.handleNotificationAction(event);
-  } else {
-    await notificationService.handleNotificationEvent(event);
+    if (isAlarmAction) {
+      await alarmService.handleNotificationAction(event);
+    } else {
+      await notificationService.handleNotificationEvent(event);
+    }
+  } catch (err) {
+    console.warn('[Notifee] onBackgroundEvent error:', err);
   }
 });
 
@@ -47,22 +52,43 @@ notifee.onBackgroundEvent(async (event) => {
 notifee.registerForegroundService((notification) => {
   return new Promise((resolve) => {
     if (notification?.id === 'battery_guard_monitor') {
-      const unsub = batteryService.subscribeStatus((st) => {
+      batteryService.initialize().catch(() => {});
+      let unsub;
+      unsub = batteryService.subscribeStatus((st) => {
         if (!st.isCharging) {
-          unsub();
+          if (unsub) unsub();
+          else setTimeout(() => unsub?.(), 0);
           resolve();
         }
       });
       return;
     }
 
-    const unsubscribe = alarmService.subscribe((state) => {
-      if (!state.isRinging) {
-        unsubscribe();
-        resolve();
-      }
-    });
+    if (
+      notification?.id === 'active_ringing_alarm' ||
+      notification?.id === 'active_battery_alarm' ||
+      notification?.id?.startsWith('alarm_')
+    ) {
+      let unsubscribe;
+      unsubscribe = alarmService.subscribe((state) => {
+        if (!state.isRinging) {
+          if (unsubscribe) unsubscribe();
+          else setTimeout(() => unsubscribe?.(), 0);
+          resolve();
+        }
+      });
+      return;
+    }
+
+    // Default: resolve immediately for generic foreground tasks
+    resolve();
   });
 });
 
 AppRegistry.registerComponent(appName, () => App);
+if (appName !== 'LifePlanner') {
+  AppRegistry.registerComponent('LifePlanner', () => App);
+}
+if (appName !== 'OmniHub') {
+  AppRegistry.registerComponent('OmniHub', () => App);
+}

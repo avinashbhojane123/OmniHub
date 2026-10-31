@@ -2,30 +2,38 @@ import { Task, UpdateTaskDTO, TaskStatus, TaskPriority } from '../../types';
 import { getDatabase } from '../connection';
 import { normalizeTimeTo24H } from '../../utils/time';
 import { tombstoneRepository } from './TombstoneRepository';
+import { syncEventBus } from '../../services/backup/SyncEventBus';
 
 export class TaskRepository {
   async create(task: Task): Promise<Task> {
     const db = await getDatabase();
     const recurrenceJson = task.recurrenceRule ? JSON.stringify(task.recurrenceRule) : null;
 
-    const isLoudAlarmVal = task.recurrenceRule?.isLoudAlarm ? 1 : 0;
-    const eisenhowerQuadrantVal = task.recurrenceRule?.eisenhowerQuadrant || null;
-    const accentColorVal = task.recurrenceRule?.accentColor || null;
-    const estimatedMinutesVal = task.recurrenceRule?.estimatedMinutes ?? null;
+    const isLoudAlarmVal =
+      task.isLoudAlarm !== undefined
+        ? task.isLoudAlarm ? 1 : 0
+        : task.recurrenceRule?.isLoudAlarm ? 1 : 0;
+    const isOvernightVal =
+      task.isOvernight !== undefined
+        ? task.isOvernight ? 1 : 0
+        : task.recurrenceRule?.isOvernight ? 1 : 0;
+    const eisenhowerQuadrantVal = task.eisenhowerQuadrant || task.recurrenceRule?.eisenhowerQuadrant || null;
+    const accentColorVal = task.accentColor || task.recurrenceRule?.accentColor || null;
+    const estimatedMinutesVal = task.estimatedMinutes ?? task.recurrenceRule?.estimatedMinutes ?? null;
 
     await db.execute(
-      `INSERT INTO tasks (
+      `INSERT OR REPLACE INTO tasks (
         id, seriesId, title, description, date, startTime, endTime,
         priority, categoryId, status, recurrenceRule,
-        reminderMinutes, snoozeUntil, notes, isLoudAlarm, eisenhowerQuadrant, accentColor, estimatedMinutes,
+        reminderMinutes, snoozeUntil, notes, isLoudAlarm, isOvernight, eisenhowerQuadrant, accentColor, estimatedMinutes,
         createdAt, updatedAt, completedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.seriesId ?? null,
         task.title,
         task.description ?? null,
-        task.date,
+        task.date ?? '',
         normalizeTimeTo24H(task.startTime) ?? null,
         normalizeTimeTo24H(task.endTime) ?? null,
         task.priority,
@@ -36,6 +44,7 @@ export class TaskRepository {
         task.snoozeUntil ?? null,
         task.notes ?? null,
         isLoudAlarmVal,
+        isOvernightVal,
         eisenhowerQuadrantVal,
         accentColorVal,
         estimatedMinutesVal,
@@ -45,6 +54,12 @@ export class TaskRepository {
       ]
     );
 
+    syncEventBus.notifyDataChanged({
+      entityType: 'task',
+      operation: 'upsert',
+      id: task.id,
+      item: task,
+    });
     return task;
   }
 
@@ -68,7 +83,7 @@ export class TaskRepository {
       `SELECT t.*, c.name as categoryName, c.color as categoryColor, c.icon as categoryIcon
        FROM tasks t
        LEFT JOIN categories c ON t.categoryId = c.id
-       ORDER BY t.date ASC, t.startTime ASC, t.createdAt DESC`
+       ORDER BY t.date ASC, CASE WHEN t.startTime IS NULL THEN 1 ELSE 0 END, t.startTime ASC, t.createdAt DESC`
     );
 
     return result.rows.map((r) => this.mapRowToTask(r));
@@ -95,7 +110,7 @@ export class TaskRepository {
        FROM tasks t
        LEFT JOIN categories c ON t.categoryId = c.id
        WHERE t.date >= ? AND t.date <= ?
-       ORDER BY t.date ASC, t.startTime ASC`,
+       ORDER BY t.date ASC, CASE WHEN t.startTime IS NULL THEN 1 ELSE 0 END, t.startTime ASC`,
       [startDate, endDate]
     );
 
@@ -116,12 +131,23 @@ export class TaskRepository {
        WHERE (t.status NOT IN ('completed', 'cancelled'))
          AND (t.snoozeUntil IS NULL OR t.snoozeUntil <= ?)
          AND t.date IS NOT NULL AND t.date != ''
-         AND (t.date < ? OR (t.date = ? AND t.startTime IS NOT NULL AND t.startTime != '' AND t.startTime < ?))
+         AND t.date <= ?
        ORDER BY t.date ASC, t.startTime ASC`,
-      [nowIso, today, today, currentTime]
+      [nowIso, today]
     );
 
-    return result.rows.map((r) => this.mapRowToTask(r));
+    const normCurrent = normalizeTimeTo24H(currentTime) || currentTime;
+    return result.rows
+      .map((r) => this.mapRowToTask(r))
+      .filter((task) => {
+        if (!task.date) return false;
+        if (task.date < today) return true;
+        if (task.date === today && task.startTime) {
+          const normStart = normalizeTimeTo24H(task.startTime) || task.startTime;
+          return normStart < normCurrent;
+        }
+        return false;
+      });
   }
 
   async update(id: string, updates: UpdateTaskDTO): Promise<Task | null> {
@@ -188,6 +214,29 @@ export class TaskRepository {
         values.push(updates.recurrenceRule.estimatedMinutes ?? null);
       }
     }
+    if (updates.isLoudAlarm !== undefined) {
+      fields.push('isLoudAlarm = ?');
+      values.push(updates.isLoudAlarm ? 1 : 0);
+    }
+    if (updates.isOvernight !== undefined) {
+      fields.push('isOvernight = ?');
+      values.push(updates.isOvernight ? 1 : 0);
+    } else if (updates.recurrenceRule?.isOvernight !== undefined) {
+      fields.push('isOvernight = ?');
+      values.push(updates.recurrenceRule.isOvernight ? 1 : 0);
+    }
+    if (updates.eisenhowerQuadrant !== undefined) {
+      fields.push('eisenhowerQuadrant = ?');
+      values.push(updates.eisenhowerQuadrant || null);
+    }
+    if (updates.accentColor !== undefined) {
+      fields.push('accentColor = ?');
+      values.push(updates.accentColor || null);
+    }
+    if (updates.estimatedMinutes !== undefined) {
+      fields.push('estimatedMinutes = ?');
+      values.push(updates.estimatedMinutes ?? null);
+    }
     if (updates.reminderMinutes !== undefined) {
       fields.push('reminderMinutes = ?');
       values.push(updates.reminderMinutes);
@@ -213,14 +262,63 @@ export class TaskRepository {
 
     await db.execute(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, values);
 
-    return this.findById(id);
+    const updatedTask = await this.findById(id);
+    if (updatedTask) {
+      syncEventBus.notifyDataChanged({
+        entityType: 'task',
+        operation: 'upsert',
+        id,
+        item: updatedTask,
+      });
+    }
+    return updatedTask;
   }
 
   async delete(id: string): Promise<boolean> {
     const db = await getDatabase();
     await tombstoneRepository.recordDeleted(id, 'task');
     const result = await db.execute('DELETE FROM tasks WHERE id = ?', [id]);
+    syncEventBus.notifyDataChanged({
+      entityType: 'task',
+      operation: 'delete',
+      id,
+    });
     return result.rowsAffected > 0;
+  }
+
+  async deleteMany(ids: string[]): Promise<boolean> {
+    if (!ids || ids.length === 0) return true;
+    const db = await getDatabase();
+    for (const id of ids) {
+      await tombstoneRepository.recordDeleted(id, 'task');
+    }
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = await db.execute(`DELETE FROM tasks WHERE id IN (${placeholders})`, ids);
+    syncEventBus.notifyDataChanged({
+      entityType: 'task',
+      operation: 'delete',
+      id: ids[0],
+    });
+    return result.rowsAffected > 0;
+  }
+
+  async clearCompleted(): Promise<number> {
+    const db = await getDatabase();
+    const completedTasks = await db.execute("SELECT id FROM tasks WHERE status = 'completed'");
+    const ids = completedTasks.rows.map((r: any) => r.id);
+    if (ids.length === 0) return 0;
+
+    for (const id of ids) {
+      await tombstoneRepository.recordDeleted(id, 'task');
+    }
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = await db.execute(`DELETE FROM tasks WHERE id IN (${placeholders})`, ids);
+    syncEventBus.notifyDataChanged({
+      entityType: 'task',
+      operation: 'delete',
+      id: ids[0],
+    });
+    return result.rowsAffected;
   }
 
   async findBySeriesId(seriesId: string): Promise<Task[]> {
@@ -245,6 +343,7 @@ export class TaskRepository {
       }
     } catch {}
     const result = await db.execute('DELETE FROM tasks WHERE seriesId = ?', [seriesId]);
+    syncEventBus.notifyDataChanged();
     return result.rowsAffected > 0;
   }
 
@@ -273,26 +372,32 @@ export class TaskRepository {
       }
     }
 
+    const isLoud =
+      row.isLoudAlarm !== undefined && row.isLoudAlarm !== null
+        ? Boolean(row.isLoudAlarm)
+        : recurrenceRule?.isLoudAlarm;
+    const isOvernight =
+      row.isOvernight !== undefined && row.isOvernight !== null
+        ? Boolean(row.isOvernight)
+        : Boolean(recurrenceRule?.isOvernight);
+    const quad = row.eisenhowerQuadrant || recurrenceRule?.eisenhowerQuadrant;
+    const accent = row.accentColor || recurrenceRule?.accentColor;
+    const estMin =
+      row.estimatedMinutes !== undefined && row.estimatedMinutes !== null
+        ? Number(row.estimatedMinutes)
+        : recurrenceRule?.estimatedMinutes;
+
     if (
       row.isLoudAlarm !== undefined ||
+      row.isOvernight !== undefined ||
       row.eisenhowerQuadrant ||
       row.accentColor ||
       row.estimatedMinutes !== undefined
     ) {
-      const isLoud =
-        row.isLoudAlarm !== undefined && row.isLoudAlarm !== null
-          ? Boolean(row.isLoudAlarm)
-          : recurrenceRule?.isLoudAlarm;
-      const quad = row.eisenhowerQuadrant || recurrenceRule?.eisenhowerQuadrant;
-      const accent = row.accentColor || recurrenceRule?.accentColor;
-      const estMin =
-        row.estimatedMinutes !== undefined && row.estimatedMinutes !== null
-          ? Number(row.estimatedMinutes)
-          : recurrenceRule?.estimatedMinutes;
-
       recurrenceRule = {
         ...(recurrenceRule || { type: 'none' }),
         ...(isLoud !== undefined ? { isLoudAlarm: isLoud } : {}),
+        ...(isOvernight !== undefined ? { isOvernight } : {}),
         ...(quad ? { eisenhowerQuadrant: quad } : {}),
         ...(accent ? { accentColor: accent } : {}),
         ...(estMin !== undefined ? { estimatedMinutes: estMin } : {}),
@@ -313,6 +418,11 @@ export class TaskRepository {
       categoryColor: row.categoryColor ?? undefined,
       categoryIcon: row.categoryIcon ?? undefined,
       status: (row.status as TaskStatus) || 'pending',
+      eisenhowerQuadrant: quad ?? undefined,
+      accentColor: accent ?? undefined,
+      estimatedMinutes: estMin ?? undefined,
+      isLoudAlarm: isLoud ?? undefined,
+      isOvernight: isOvernight ?? undefined,
       recurrenceRule,
       reminderMinutes: row.reminderMinutes !== null ? Number(row.reminderMinutes) : 0,
       snoozeUntil: row.snoozeUntil ?? undefined,

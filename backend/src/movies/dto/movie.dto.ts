@@ -1,6 +1,10 @@
 import { IsNotEmpty, IsNumber, IsOptional, IsString, IsBoolean, IsArray } from 'class-validator';
 
 export class BookmarkMovieDto {
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
   @IsNotEmpty()
   @IsNumber()
   tmdbId!: number;
@@ -40,10 +44,18 @@ export class BookmarkMovieDto {
   @IsOptional()
   @IsBoolean()
   isWatched?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isTv?: boolean;
 }
 
 export class UpdateWatchedDto {
   @IsNotEmpty()
   @IsBoolean()
   isWatched!: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isTv?: boolean;
 }

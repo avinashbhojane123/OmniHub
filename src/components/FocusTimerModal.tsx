@@ -1,19 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import {
   Modal,
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Vibration,
-  Alert,
-  AppState,
+  ScrollView,
 } from 'react-native';
-import notifee, { TriggerType, AndroidImportance } from '@notifee/react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../hooks/useTheme';
 import { radius, spacing } from '../theme';
 import { Task } from '../types';
+import { useFocusTimer, TIMER_PRESETS, TimerMode } from '../context/FocusTimerContext';
 
 interface FocusTimerModalProps {
   visible: boolean;
@@ -21,15 +19,6 @@ interface FocusTimerModalProps {
   tasks?: Task[];
   initialTaskId?: string;
 }
-
-type TimerMode = 'pomodoro' | 'short_break' | 'long_break' | 'deep_work';
-
-const TIMER_PRESETS: { mode: TimerMode; label: string; icon: string; minutes: number }[] = [
-  { mode: 'pomodoro', label: 'Pomodoro', icon: '🍅', minutes: 25 },
-  { mode: 'short_break', label: 'Short Break', icon: '☕', minutes: 5 },
-  { mode: 'long_break', label: 'Long Break', icon: '🌴', minutes: 15 },
-  { mode: 'deep_work', label: 'Deep Work', icon: '⚡', minutes: 45 },
-];
 
 export const FocusTimerModal: React.FC<FocusTimerModalProps> = ({
   visible,
@@ -39,171 +28,62 @@ export const FocusTimerModal: React.FC<FocusTimerModalProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { colors } = useAppTheme();
-
-  const [activeMode, setActiveMode] = useState<TimerMode>('pomodoro');
-  const [totalSeconds, setTotalSeconds] = useState<number>(25 * 60);
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(25 * 60);
-  const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(initialTaskId);
-  const [completedSessions, setCompletedSessions] = useState<number>(0);
-
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const endTimeRef = useRef<number | null>(null);
+  const {
+    activeMode,
+    totalSeconds,
+    secondsRemaining,
+    isRunning,
+    selectedTaskId,
+    completedSessions,
+    startTimer,
+    pauseTimer,
+    resetTimer,
+    adjustTime,
+    selectPreset,
+    selectTask,
+    minimizeToFloating,
+    closeModal,
+  } = useFocusTimer();
 
   // Sync initialTaskId when modal opens
   useEffect(() => {
-    if (visible && initialTaskId) {
-      setSelectedTaskId(initialTaskId);
+    if (visible && initialTaskId && initialTaskId !== selectedTaskId) {
+      const match = tasks.find((t) => t.id === initialTaskId);
+      selectTask(initialTaskId, match?.title);
     }
-  }, [visible, initialTaskId]);
+  }, [visible, initialTaskId, selectedTaskId, tasks, selectTask]);
 
-  // Handle app coming back to foreground: recalculate seconds from wall-clock time
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active' && isRunning && endTimeRef.current) {
-        const remaining = Math.max(0, Math.round((endTimeRef.current - Date.now()) / 1000));
-        setSecondsRemaining(remaining);
-        if (remaining <= 0) {
-          setIsRunning(false);
-          endTimeRef.current = null;
-          try {
-            Vibration.vibrate([0, 500, 250, 500]);
-          } catch {}
-          setCompletedSessions((cnt) => cnt + 1);
-          Alert.alert('🎉 Session Complete!', 'Great focus! Take a well-deserved break.');
-        }
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [isRunning]);
-
-  // Set preset duration
-  const handleSelectPreset = useCallback((mode: TimerMode, minutes: number) => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    endTimeRef.current = null;
-    setIsRunning(false);
-    try {
-      notifee.cancelNotification('focus_timer_alarm');
-    } catch {}
-    setActiveMode(mode);
-    const secs = minutes * 60;
-    setTotalSeconds(secs);
-    setSecondsRemaining(secs);
-  }, []);
-
-  // Timer tick interval
-  useEffect(() => {
-    if (isRunning) {
-      timerRef.current = setInterval(() => {
-        setSecondsRemaining((prev) => {
-          if (prev <= 1) {
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
-            endTimeRef.current = null;
-            setIsRunning(false);
-            try {
-              Vibration.vibrate([0, 500, 250, 500]);
-            } catch {
-              // Ignore vibration failure
-            }
-            setCompletedSessions((cnt) => cnt + 1);
-            Alert.alert(
-              '🎉 Session Complete!',
-              activeMode === 'pomodoro' || activeMode === 'deep_work'
-                ? 'Great focus! Take a well-deserved break.'
-                : 'Break is over! Ready for another focus round?'
-            );
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [isRunning, activeMode]);
+  const handleSelectPreset = useCallback(
+    (mode: TimerMode, minutes: number) => {
+      selectPreset(mode, minutes);
+    },
+    [selectPreset]
+  );
 
   const handleTogglePlayPause = async () => {
-    if (!isRunning) {
-      const initialSecs = secondsRemaining === 0 ? totalSeconds : secondsRemaining;
-      if (secondsRemaining === 0) {
-        setSecondsRemaining(totalSeconds);
-      }
-      const targetTime = Date.now() + initialSecs * 1000;
-      endTimeRef.current = targetTime;
-      setIsRunning(true);
-
-      // Schedule background notification so alarm fires even if screen locks
-      try {
-        await notifee.createTriggerNotification(
-          {
-            id: 'focus_timer_alarm',
-            title: '🎉 Focus Session Complete!',
-            body: activeMode === 'pomodoro' || activeMode === 'deep_work'
-              ? 'Great focus! Take a well-deserved break.'
-              : 'Break is over! Ready for another focus round?',
-            android: {
-              channelId: 'alarm_clock_channel_v3',
-              smallIcon: 'ic_notification',
-              importance: AndroidImportance.HIGH,
-              sound: 'default',
-            },
-          },
-          {
-            type: TriggerType.TIMESTAMP,
-            timestamp: targetTime,
-          }
-        );
-      } catch {}
+    if (isRunning) {
+      await pauseTimer();
     } else {
-      setIsRunning(false);
-      endTimeRef.current = null;
-      try {
-        await notifee.cancelNotification('focus_timer_alarm');
-      } catch {}
+      await startTimer();
     }
   };
 
   const handleReset = async () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    endTimeRef.current = null;
-    setIsRunning(false);
-    setSecondsRemaining(totalSeconds);
-    try {
-      await notifee.cancelNotification('focus_timer_alarm');
-    } catch {}
+    await resetTimer();
   };
 
   const handleAdjustTime = (deltaMinutes: number) => {
-    const deltaSecs = deltaMinutes * 60;
-    setSecondsRemaining((prev) => {
-      const next = Math.max(60, prev + deltaSecs);
-      if (isRunning) {
-        const targetTime = Date.now() + next * 1000;
-        endTimeRef.current = targetTime;
-      }
-      return next;
-    });
-    setTotalSeconds((prev) => Math.max(60, prev + deltaSecs));
+    adjustTime(deltaMinutes);
+  };
+
+  const handleClose = () => {
+    closeModal();
+    onClose();
+  };
+
+  const handleMinimize = () => {
+    minimizeToFloating();
+    onClose();
   };
 
   // Format mm:ss
@@ -211,9 +91,10 @@ export const FocusTimerModal: React.FC<FocusTimerModalProps> = ({
   const seconds = secondsRemaining % 60;
   const timeFormatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-  const progressPercent = totalSeconds > 0
-    ? Math.max(0, Math.min(100, Math.round(((totalSeconds - secondsRemaining) / totalSeconds) * 100)))
-    : 0;
+  const progressPercent =
+    totalSeconds > 0
+      ? Math.max(0, Math.min(100, Math.round(((totalSeconds - secondsRemaining) / totalSeconds) * 100)))
+      : 0;
 
   const currentTask = tasks.find((t) => t.id === selectedTaskId);
 
@@ -222,7 +103,7 @@ export const FocusTimerModal: React.FC<FocusTimerModalProps> = ({
       visible={visible}
       animationType="slide"
       transparent
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
       <View style={styles.backdrop}>
         <View
@@ -245,14 +126,24 @@ export const FocusTimerModal: React.FC<FocusTimerModalProps> = ({
                   : 'Stay centered with timed deep work blocks'}
               </Text>
             </View>
-            <TouchableOpacity
-              onPress={onClose}
-              style={[styles.closeBtn, { backgroundColor: colors.surfaceElevated }]}
-              accessibilityRole="button"
-              accessibilityLabel="Close Focus Timer"
-            >
-              <Text style={[styles.closeBtnText, { color: colors.text }]}>✕</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TouchableOpacity
+                onPress={handleMinimize}
+                style={[styles.closeBtn, { backgroundColor: colors.surfaceElevated, marginRight: 8 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Minimize to floating widget"
+              >
+                <Text style={[styles.closeBtnText, { color: colors.primary, fontSize: 13, fontWeight: '800' }]}>⤓</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleClose}
+                style={[styles.closeBtn, { backgroundColor: colors.surfaceElevated }]}
+                accessibilityRole="button"
+                accessibilityLabel="Close Focus Timer"
+              >
+                <Text style={[styles.closeBtnText, { color: colors.text }]}>✕</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Mode Selector Chips */}
@@ -270,116 +161,175 @@ export const FocusTimerModal: React.FC<FocusTimerModalProps> = ({
                       borderColor: isActive ? colors.primary : colors.borderSubtle,
                     },
                   ]}
+                  activeOpacity={0.7}
                 >
                   <Text style={styles.modeIcon}>{preset.icon}</Text>
                   <Text
                     style={[
                       styles.modeLabel,
-                      { color: isActive ? '#FFFFFF' : colors.text },
+                      { color: isActive ? '#FFFFFF' : colors.textSecondary, fontWeight: isActive ? '700' : '500' },
                     ]}
                   >
-                    {preset.minutes}m
+                    {preset.label}
                   </Text>
                 </TouchableOpacity>
               );
             })}
           </View>
 
-          {/* Associated Task Pill if selected */}
-          {currentTask ? (
-            <View style={[styles.taskPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
-              <Text style={styles.taskPillIcon}>🎯</Text>
-              <Text
-                style={[styles.taskPillText, { color: colors.text }]}
-                numberOfLines={1}
-              >
-                Focusing on: <Text style={{ fontWeight: '700' }}>{currentTask.title}</Text>
+          {/* Task Association Badge */}
+          {tasks.length > 0 && (
+            <View style={styles.taskPickerSection}>
+              <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
+                LINKED TASK:
               </Text>
-              <TouchableOpacity onPress={() => setSelectedTaskId(undefined)}>
-                <Text style={[styles.taskPillRemove, { color: colors.textMuted }]}>✕</Text>
-              </TouchableOpacity>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.taskScroll}>
+                <TouchableOpacity
+                  onPress={() => selectTask(undefined, undefined)}
+                  style={[
+                    styles.taskChip,
+                    {
+                      backgroundColor: !selectedTaskId ? colors.surfaceHighlight : colors.surfaceElevated,
+                      borderColor: !selectedTaskId ? colors.primary : colors.borderSubtle,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.taskChipText,
+                      { color: !selectedTaskId ? colors.primary : colors.textMuted },
+                    ]}
+                  >
+                    None (General Focus)
+                  </Text>
+                </TouchableOpacity>
+                {tasks
+                  .filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
+                  .slice(0, 10)
+                  .map((t) => {
+                    const isSelected = selectedTaskId === t.id;
+                    return (
+                      <TouchableOpacity
+                        key={t.id}
+                        onPress={() => selectTask(t.id, t.title)}
+                        style={[
+                          styles.taskChip,
+                          {
+                            backgroundColor: isSelected ? colors.surfaceHighlight : colors.surfaceElevated,
+                            borderColor: isSelected ? colors.primary : colors.borderSubtle,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.taskChipText,
+                            { color: isSelected ? colors.primary : colors.textSecondary },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {t.title}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+              </ScrollView>
             </View>
-          ) : tasks.length > 0 ? (
-            <View style={styles.taskPickerRow}>
-              <Text style={[styles.pickerPrompt, { color: colors.textSecondary }]}>Link Task:</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  const pending = tasks.filter((t) => t.status !== 'completed');
-                  if (pending.length > 0) {
-                    setSelectedTaskId(pending[0].id);
-                  }
-                }}
-                style={[styles.linkTaskBtn, { borderColor: colors.borderSubtle }]}
-              >
-                <Text style={[styles.linkTaskText, { color: colors.primary }]}>
-                  {tasks[0]?.title ? `+ "${tasks[0].title.slice(0, 18)}..."` : '+ Choose Task'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
+          )}
 
-          {/* Big Circular/Glowing Timer Display */}
-          <View style={[styles.timerCircle, { backgroundColor: colors.surfaceElevated, borderColor: colors.primary }]}>
-            <Text style={[styles.timeDigits, { color: colors.text }]}>{timeFormatted}</Text>
-            <Text style={[styles.progressIndicator, { color: colors.primary }]}>
-              {isRunning ? '🔥 Focus Mode' : secondsRemaining === 0 ? 'Done' : 'Paused'} • {progressPercent}%
+          {/* Display Timer Dial */}
+          <View
+            style={[
+              styles.timerDialWrapper,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: isRunning ? colors.primary : colors.borderSubtle,
+              },
+            ]}
+          >
+            {/* Progress track bar */}
+            <View
+              style={[
+                styles.progressBarFill,
+                {
+                  width: `${progressPercent}%`,
+                  backgroundColor: isRunning ? colors.primary : colors.textMuted,
+                },
+              ]}
+            />
+
+            <Text style={[styles.timerDigits, { color: colors.text }]}>{timeFormatted}</Text>
+
+            {currentTask && (
+              <Text style={[styles.timerSubtask, { color: colors.primary }]} numberOfLines={1}>
+                🎯 {currentTask.title}
+              </Text>
+            )}
+
+            <Text style={[styles.timerStatus, { color: isRunning ? colors.primary : colors.textMuted }]}>
+              {isRunning ? 'FOCUSING' : secondsRemaining === totalSeconds ? 'READY' : 'PAUSED'}
             </Text>
           </View>
 
-          {/* Quick Adjustment Controls */}
+          {/* Quick Adjustment Buttons (+/- 1m, 5m) */}
           <View style={styles.adjustRow}>
             <TouchableOpacity
               onPress={() => handleAdjustTime(-5)}
-              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-              disabled={isRunning}
+              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated }]}
+              disabled={secondsRemaining <= 60}
             >
               <Text style={[styles.adjustBtnText, { color: colors.textSecondary }]}>-5m</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => handleAdjustTime(-1)}
-              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-              disabled={isRunning}
+              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated }]}
+              disabled={secondsRemaining <= 60}
             >
               <Text style={[styles.adjustBtnText, { color: colors.textSecondary }]}>-1m</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => handleAdjustTime(1)}
-              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-              disabled={isRunning}
+              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated }]}
             >
               <Text style={[styles.adjustBtnText, { color: colors.textSecondary }]}>+1m</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => handleAdjustTime(5)}
-              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-              disabled={isRunning}
+              style={[styles.adjustBtn, { backgroundColor: colors.surfaceElevated }]}
             >
               <Text style={[styles.adjustBtnText, { color: colors.textSecondary }]}>+5m</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Main Action Buttons */}
-          <View style={styles.actionRow}>
+          {/* Primary Controls */}
+          <View style={styles.controlsRow}>
             <TouchableOpacity
               onPress={handleReset}
-              style={[styles.resetBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-              activeOpacity={0.75}
+              style={[
+                styles.secondaryActionBtn,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.borderSubtle,
+                },
+              ]}
+              activeOpacity={0.7}
             >
-              <Text style={[styles.resetBtnText, { color: colors.text }]}>↺ Reset</Text>
+              <Text style={[styles.secondaryActionText, { color: colors.textSecondary }]}>
+                ↺ Reset
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               onPress={handleTogglePlayPause}
               style={[
-                styles.playBtn,
+                styles.primaryActionBtn,
                 {
-                  backgroundColor: isRunning ? '#EF4444' : colors.primary,
+                  backgroundColor: isRunning ? colors.warning : colors.primary,
                 },
               ]}
               activeOpacity={0.8}
             >
-              <Text style={styles.playBtnText}>
-                {isRunning ? '⏸ Pause' : secondsRemaining === 0 ? '▶ Restart' : '▶ Start Focus'}
+              <Text style={styles.primaryActionText}>
+                {isRunning ? '⏸ Pause' : secondsRemaining === 0 ? '↺ Restart' : '▶ Start'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -396,17 +346,22 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   container: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderWidth: 1,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.md,
+    alignItems: 'center',
+    marginBottom: 16,
   },
   title: {
     fontSize: 20,
@@ -415,7 +370,6 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 12,
-    fontWeight: '500',
     marginTop: 2,
   },
   closeBtn: {
@@ -426,147 +380,132 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   closeBtnText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   modeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: spacing.md,
+    marginBottom: 16,
   },
   modeChip: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
+    paddingVertical: 8,
+    marginHorizontal: 3,
     borderRadius: radius.md,
     borderWidth: 1,
-    gap: 4,
   },
   modeIcon: {
     fontSize: 14,
+    marginRight: 4,
   },
   modeLabel: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
   },
-  taskPill: {
+  taskPickerSection: {
+    marginBottom: 16,
+  },
+  sectionHeading: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  taskScroll: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    marginBottom: spacing.md,
-    gap: 6,
   },
-  taskPillIcon: {
-    fontSize: 14,
-  },
-  taskPillText: {
-    flex: 1,
-    fontSize: 12,
-  },
-  taskPillRemove: {
-    fontSize: 14,
-    fontWeight: '700',
-    paddingHorizontal: 4,
-  },
-  taskPickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: spacing.md,
-  },
-  pickerPrompt: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  linkTaskBtn: {
-    borderWidth: 1,
-    borderRadius: radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  linkTaskText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  timerCircle: {
-    alignSelf: 'center',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    borderWidth: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginVertical: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  timeDigits: {
-    fontSize: 52,
-    fontWeight: '800',
-    letterSpacing: -1,
-    fontVariant: ['tabular-nums'],
-  },
-  progressIndicator: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  adjustRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 10,
-    marginBottom: spacing.lg,
-  },
-  adjustBtn: {
+  taskChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: radius.full,
     borderWidth: 1,
+    marginRight: 8,
+    maxWidth: 160,
+  },
+  taskChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  timerDialWrapper: {
+    borderRadius: radius.xl,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 28,
+    marginBottom: 16,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  progressBarFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    opacity: 0.1,
+  },
+  timerDigits: {
+    fontSize: 54,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -1,
+  },
+  timerSubtask: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 4,
+    paddingHorizontal: 16,
+  },
+  timerStatus: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginTop: 6,
+  },
+  adjustRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  adjustBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    borderRadius: radius.sm,
+    alignItems: 'center',
   },
   adjustBtnText: {
     fontSize: 12,
     fontWeight: '700',
   },
-  actionRow: {
+  controlsRow: {
     flexDirection: 'row',
-    gap: 12,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  resetBtn: {
+  secondaryActionBtn: {
     flex: 1,
     paddingVertical: 14,
     borderRadius: radius.lg,
     borderWidth: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    marginRight: 10,
   },
-  resetBtnText: {
+  secondaryActionText: {
     fontSize: 15,
     fontWeight: '700',
   },
-  playBtn: {
+  primaryActionBtn: {
     flex: 2,
     paddingVertical: 14,
     borderRadius: radius.lg,
     alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  playBtnText: {
+  primaryActionText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
   },
 });

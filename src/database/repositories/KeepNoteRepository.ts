@@ -1,14 +1,18 @@
 import { getDatabase } from '../connection';
-import { KeepNote, KeepColorKey, ChecklistItem, DrawingStroke } from '../../types';
+import {
+  KeepNote,
+  KeepColorKey,
+  ChecklistItem,
+  DrawingStroke,
+  KeepNoteFilter,
+  CreateKeepNoteDTO,
+  UpdateKeepNoteDTO,
+} from '../../types';
 import { settingsRepository } from './SettingsRepository';
 import { tombstoneRepository } from './TombstoneRepository';
+import { syncEventBus } from '../../services/backup/SyncEventBus';
 
-export interface KeepNoteFilter {
-  status?: 'active' | 'archived' | 'trash' | 'reminders';
-  search?: string;
-  label?: string;
-  color?: KeepColorKey;
-}
+export type { KeepNoteFilter };
 
 export class KeepNoteRepository {
   private parseRow(r: any): KeepNote {
@@ -33,11 +37,18 @@ export class KeepNoteRepository {
       drawingData = undefined;
     }
 
+    const noteType = r.type || 'text';
+    // Enforce mutual exclusivity to prevent legacy/stale data from duplicating across content and checklist
+    if (noteType === 'text') {
+      checklistData = [];
+    }
+    const noteContent = noteType === 'checklist' ? '' : (r.content || '');
+
     return {
       id: r.id,
       title: r.title || '',
-      content: r.content || '',
-      type: r.type || 'text',
+      content: noteContent,
+      type: noteType,
       color: (r.color as KeepColorKey) || 'default',
       isPinned: Boolean(r.isPinned),
       isArchived: Boolean(r.isArchived),
@@ -104,7 +115,7 @@ export class KeepNoteRepository {
     return this.parseRow(result.rows[0]);
   }
 
-  async create(noteData: Partial<KeepNote>): Promise<KeepNote> {
+  async create(noteData: CreateKeepNoteDTO): Promise<KeepNote> {
     const db = await getDatabase();
     const now = new Date().toISOString();
     const id = noteData.id || `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -123,10 +134,10 @@ export class KeepNoteRepository {
       labels: noteData.labels || [],
       checklistData: noteData.checklistData || [],
       drawingData: noteData.drawingData,
-      audioUri: noteData.audioUri,
-      imageUri: noteData.imageUri,
+      audioUri: noteData.audioUri || undefined,
+      imageUri: noteData.imageUri || undefined,
       createdAt: noteData.createdAt || now,
-      updatedAt: now,
+      updatedAt: noteData.updatedAt || now,
     };
 
     await db.execute(
@@ -156,10 +167,16 @@ export class KeepNoteRepository {
       ]
     );
 
+    syncEventBus.notifyDataChanged({
+      entityType: 'keepNote',
+      operation: 'upsert',
+      id: newNote.id,
+      item: newNote,
+    });
     return newNote;
   }
 
-  async update(id: string, updates: Partial<KeepNote>): Promise<KeepNote | null> {
+  async update(id: string, updates: UpdateKeepNoteDTO): Promise<KeepNote | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
 
@@ -169,7 +186,17 @@ export class KeepNoteRepository {
     const merged: KeepNote = {
       ...existing,
       ...updates,
-      updatedAt: now,
+      trashedAt:
+        updates.trashedAt !== undefined ? (updates.trashedAt || undefined) : existing.trashedAt,
+      reminderTime:
+        updates.reminderTime !== undefined
+          ? (updates.reminderTime || undefined)
+          : existing.reminderTime,
+      audioUri:
+        updates.audioUri !== undefined ? (updates.audioUri || undefined) : existing.audioUri,
+      imageUri:
+        updates.imageUri !== undefined ? (updates.imageUri || undefined) : existing.imageUri,
+      updatedAt: updates.updatedAt || now,
     };
 
     await db.execute(
@@ -210,6 +237,20 @@ export class KeepNoteRepository {
       ]
     );
 
+    if (merged.isTrashed) {
+      syncEventBus.notifyDataChanged({
+        entityType: 'keepNote',
+        operation: 'delete',
+        id,
+      });
+    } else {
+      syncEventBus.notifyDataChanged({
+        entityType: 'keepNote',
+        operation: 'upsert',
+        id,
+        item: merged,
+      });
+    }
     return merged;
   }
 
@@ -235,10 +276,17 @@ export class KeepNoteRepository {
       const { notificationService } = await import('../../services/notifications/NotificationService');
       await notificationService.cancelNoteReminder(id);
     } catch {}
+    await tombstoneRepository.recordDeleted(id, 'keepNote');
     const updated = await this.update(id, {
       isTrashed: true,
       trashedAt: now,
       isPinned: false,
+    });
+    // Explicitly notify sync bus with delete operation to remove row from Google Sheet
+    syncEventBus.notifyDataChanged({
+      entityType: 'keepNote',
+      operation: 'delete',
+      id,
     });
     return Boolean(updated);
   }
@@ -265,6 +313,11 @@ export class KeepNoteRepository {
       await notificationService.cancelNoteReminder(id);
     } catch {}
     const result = await db.execute('DELETE FROM keep_notes WHERE id = ?', [id]);
+    syncEventBus.notifyDataChanged({
+      entityType: 'keepNote',
+      operation: 'delete',
+      id,
+    });
     return result.rowsAffected > 0;
   }
 
@@ -279,6 +332,7 @@ export class KeepNoteRepository {
       }
     } catch {}
     const result = await db.execute('DELETE FROM keep_notes WHERE isTrashed = 1');
+    syncEventBus.notifyDataChanged();
     return result.rowsAffected;
   }
 

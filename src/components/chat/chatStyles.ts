@@ -353,6 +353,9 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
+  storyRingGradientViewed: {
+    backgroundColor: '#475569',
+  },
   storyAvatarCircle: {
     width: 44,
     height: 44,
@@ -1635,5 +1638,47 @@ export const styles = StyleSheet.create({
     color: '#F59E0B',
     lineHeight: 16,
     fontWeight: '600',
+  },
+  watchPartyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1E1B4B',
+    borderBottomWidth: 1,
+    borderBottomColor: '#4338CA',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    zIndex: 99,
+  },
+  watchPartyBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  watchPartyBannerIcon: {
+    fontSize: 22,
+  },
+  watchPartyBannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  watchPartyBannerSub: {
+    fontSize: 11,
+    color: '#A5B4FC',
+    marginTop: 2,
+  },
+  watchPartyJoinBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: '#4F46E5',
+    marginLeft: 8,
+  },
+  watchPartyJoinText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
 });

@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { getTrailerEmbedUrl } from '../../types';
 
 interface TrailerModalProps {
   visible: boolean;
@@ -54,11 +55,12 @@ export const TrailerModal: React.FC<TrailerModalProps> = React.memo(
             </View>
 
             {/* Embedded Player */}
-            {trailerKey ? (
+            {visible && trailerKey ? (
               <View style={styles.webviewContainer}>
                 <WebView
+                  key={trailerKey}
                   source={{
-                    uri: `https://www.youtube.com/embed/${trailerKey}?autoplay=1&playsinline=1&modestbranding=1`,
+                    uri: getTrailerEmbedUrl(trailerKey),
                   }}
                   allowsFullscreenVideo
                   javaScriptEnabled

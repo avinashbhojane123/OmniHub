@@ -127,6 +127,8 @@ export class Message {
   pollData!: {
     question: string;
     options: Array<{ id: number; text: string; votes: string[] }>;
+    allowMultiple?: boolean;
+    expiresAt?: string | Date;
   } | null;
 
   @Column({

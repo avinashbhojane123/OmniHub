@@ -18,6 +18,7 @@ interface TodayTasksSectionProps {
   overdueTaskIds?: Set<string>;
   onSetTaskFilter: (filter: TaskFilterType) => void;
   onOpenCreateTask: () => void;
+  onViewAllTasks?: () => void;
   onCompleteAllPending?: () => void;
   onToggleTask: (task: Task) => void;
   onPressTask: (task: Task) => void;
@@ -40,6 +41,7 @@ export const TodayTasksSectionComponent: React.FC<TodayTasksSectionProps> = ({
   overdueTaskIds,
   onSetTaskFilter,
   onOpenCreateTask,
+  onViewAllTasks,
   onCompleteAllPending,
   onToggleTask,
   onPressTask,
@@ -57,6 +59,18 @@ export const TodayTasksSectionComponent: React.FC<TodayTasksSectionProps> = ({
           Scheduled Tasks ({totalCount})
         </Text>
         <View style={styles.headerRightActionsRow}>
+          {onViewAllTasks && (
+            <TouchableOpacity
+              onPress={onViewAllTasks}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="View All Tasks and Plan"
+            >
+              <Text style={[styles.seeAllText, { color: colors.primary, marginRight: 6 }]}>
+                📋 All Tasks
+              </Text>
+            </TouchableOpacity>
+          )}
           {onCompleteAllPending && pendingCount > 1 && (
             <TouchableOpacity
               onPress={onCompleteAllPending}

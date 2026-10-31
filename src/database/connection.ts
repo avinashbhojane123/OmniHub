@@ -30,8 +30,10 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
     this.tables.set('notes', []);
     this.tables.set('keep_notes', []);
     this.tables.set('movie_bookmarks', []);
+    this.tables.set('battery_sessions', []);
     this.tables.set('reminders', []);
     this.tables.set('notification_schedules', []);
+    this.tables.set('pending_sync_queue', []);
     this.tables.set(
       'settings',
       Object.entries(DEFAULT_SETTINGS).map(([key, value]) => ({
@@ -78,6 +80,10 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       } else if (trimmed.includes('seriesId = ?')) {
         const sid = params[0];
         rows = rows.filter((r) => r.seriesId === sid);
+      } else if (trimmed.includes('WHERE tmdbId = ? AND isTv = ?')) {
+        const tid = Number(params[0]);
+        const isTvVal = Boolean(params[1]);
+        rows = rows.filter((r) => Number(r.tmdbId) === tid && Boolean(r.isTv) === isTvVal);
       } else if (trimmed.includes('WHERE tmdbId = ?')) {
         const tid = Number(params[0]);
         rows = rows.filter((r) => Number(r.tmdbId) === tid);
@@ -222,6 +228,24 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       const match = trimmed.match(/UPDATE\s+([a-zA-Z_]+)/i);
       const tableName = match ? match[1].toLowerCase() : '';
       const table = this.tables.get(tableName) || [];
+      if (trimmed.includes('WHERE tmdbId = ? AND isTv = ?')) {
+        const tid = Number(params[params.length - 2]);
+        const isTvVal = Boolean(params[params.length - 1]);
+        const targetIndex = table.findIndex(
+          (r) => Number(r.tmdbId) === tid && Boolean(r.isTv) === isTvVal,
+        );
+        if (targetIndex >= 0) {
+          const setPart = trimmed.substring(trimmed.indexOf('SET') + 3, trimmed.indexOf('WHERE'));
+          const assignments = setPart.split(',').map((a) => a.trim().split('=')[0].trim());
+          assignments.forEach((field, i) => {
+            table[targetIndex][field] = params[i];
+          });
+          this.tables.set(tableName, table);
+          return { rows: [], rowsAffected: 1 };
+        }
+        return { rows: [], rowsAffected: 0 };
+      }
+
       const idParam = params[params.length - 1];
       const targetIndex = table.findIndex(
         (r) =>
@@ -248,6 +272,16 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       const table = this.tables.get(tableName) || [];
 
 
+      if (trimmed.includes('WHERE tmdbId = ? AND isTv = ?')) {
+        const tid = Number(params[0]);
+        const isTvVal = Boolean(params[1]);
+        const filtered = table.filter(
+          (r) => !(Number(r.tmdbId) === tid && Boolean(r.isTv) === isTvVal),
+        );
+        this.tables.set(tableName, filtered);
+        return { rows: [], rowsAffected: table.length - filtered.length };
+      }
+
       if (trimmed.includes('WHERE tmdbId = ?')) {
         const tid = Number(params[0]);
         const filtered = table.filter((r) => Number(r.tmdbId) !== tid);
@@ -258,6 +292,13 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
       if (trimmed.includes('WHERE seriesId = ?')) {
         const sid = params[0];
         const filtered = table.filter((r) => r.seriesId !== sid);
+        this.tables.set(tableName, filtered);
+        return { rows: [], rowsAffected: table.length - filtered.length };
+      }
+
+      if (trimmed.includes('WHERE id IN')) {
+        const idSet = new Set(params);
+        const filtered = table.filter((r) => !idSet.has(r.id));
         this.tables.set(tableName, filtered);
         return { rows: [], rowsAffected: table.length - filtered.length };
       }
@@ -495,7 +536,7 @@ class DatabaseManager {
       await this.adapter.execute(
         `CREATE TABLE IF NOT EXISTS movie_bookmarks (
           id TEXT PRIMARY KEY,
-          tmdbId INTEGER UNIQUE NOT NULL,
+          tmdbId INTEGER NOT NULL,
           title TEXT NOT NULL,
           overview TEXT,
           posterPath TEXT,
@@ -505,9 +546,16 @@ class DatabaseManager {
           genres TEXT,
           runtime INTEGER DEFAULT 0,
           isWatched INTEGER NOT NULL DEFAULT 0,
+          isTv INTEGER NOT NULL DEFAULT 0,
           savedAt TEXT NOT NULL
         );`
       );
+      try {
+        await this.adapter.execute('ALTER TABLE movie_bookmarks ADD COLUMN isTv INTEGER NOT NULL DEFAULT 0;');
+      } catch { }
+      try {
+        await this.adapter.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_bookmarks_tmdb_tv ON movie_bookmarks(tmdbId, isTv);');
+      } catch { }
       await this.adapter.execute(
         `CREATE TABLE IF NOT EXISTS sync_tombstones (
           id TEXT PRIMARY KEY,
@@ -517,6 +565,40 @@ class DatabaseManager {
       );
       await this.adapter.execute(
         'CREATE INDEX IF NOT EXISTS idx_tombstones_type ON sync_tombstones(entityType);'
+      );
+      await this.adapter.execute(
+        `CREATE TABLE IF NOT EXISTS battery_sessions (
+          id TEXT PRIMARY KEY,
+          startTime TEXT NOT NULL,
+          endTime TEXT,
+          startLevel INTEGER NOT NULL,
+          endLevel INTEGER,
+          gained INTEGER DEFAULT 0,
+          durationMinutes INTEGER DEFAULT 0,
+          chargingType TEXT DEFAULT 'AC',
+          peakTemperature REAL DEFAULT 0,
+          peakWattage REAL DEFAULT 0,
+          avgSpeedPerHour REAL DEFAULT 0,
+          completed INTEGER DEFAULT 0
+        );`
+      );
+      await this.adapter.execute(
+        'CREATE INDEX IF NOT EXISTS idx_battery_sessions_start ON battery_sessions(startTime);'
+      );
+      await this.adapter.execute(
+        `CREATE TABLE IF NOT EXISTS pending_sync_queue (
+          id TEXT PRIMARY KEY,
+          tabName TEXT NOT NULL,
+          entityType TEXT NOT NULL,
+          op TEXT NOT NULL,
+          itemId TEXT NOT NULL,
+          rowJson TEXT,
+          itemJson TEXT,
+          createdAt TEXT NOT NULL
+        );`
+      );
+      await this.adapter.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_queue_created ON pending_sync_queue(createdAt);'
       );
     } catch { }
 
@@ -547,6 +629,9 @@ class DatabaseManager {
       }
       if (!taskColNames.has('isLoudAlarm')) {
         await this.adapter.execute('ALTER TABLE tasks ADD COLUMN isLoudAlarm INTEGER DEFAULT 0');
+      }
+      if (!taskColNames.has('isOvernight')) {
+        await this.adapter.execute('ALTER TABLE tasks ADD COLUMN isOvernight INTEGER DEFAULT 0');
       }
       if (!taskColNames.has('eisenhowerQuadrant')) {
         await this.adapter.execute('ALTER TABLE tasks ADD COLUMN eisenhowerQuadrant TEXT');
@@ -655,7 +740,63 @@ class DatabaseManager {
       }
     } catch { }
 
-    // 8. Performance Indexes (using valid column names)
+    // 8. Ensure movie_bookmarks columns exist & migrate legacy tmdbId UNIQUE constraint if present
+    try {
+      const tableSqlRes = await this.adapter.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='movie_bookmarks'"
+      );
+      const createTableSql = String(tableSqlRes.rows[0]?.sql || '');
+
+      if (/tmdbId\s+INTEGER\s+UNIQUE/i.test(createTableSql)) {
+        await this.adapter.execute(`
+          CREATE TABLE movie_bookmarks_v2 (
+            id TEXT PRIMARY KEY,
+            tmdbId INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            overview TEXT,
+            posterPath TEXT,
+            backdropPath TEXT,
+            voteAverage REAL DEFAULT 0,
+            releaseDate TEXT,
+            genres TEXT,
+            runtime INTEGER DEFAULT 0,
+            isWatched INTEGER NOT NULL DEFAULT 0,
+            isTv INTEGER NOT NULL DEFAULT 0,
+            savedAt TEXT NOT NULL
+          );
+        `);
+        const hasIsTv = createTableSql.includes('isTv');
+        if (hasIsTv) {
+          await this.adapter.execute(`
+            INSERT OR IGNORE INTO movie_bookmarks_v2 (
+              id, tmdbId, title, overview, posterPath, backdropPath,
+              voteAverage, releaseDate, genres, runtime, isWatched, isTv, savedAt
+            ) SELECT id, tmdbId, title, overview, posterPath, backdropPath,
+                     voteAverage, releaseDate, genres, runtime, isWatched, isTv, savedAt
+              FROM movie_bookmarks;
+          `);
+        } else {
+          await this.adapter.execute(`
+            INSERT OR IGNORE INTO movie_bookmarks_v2 (
+              id, tmdbId, title, overview, posterPath, backdropPath,
+              voteAverage, releaseDate, genres, runtime, isWatched, isTv, savedAt
+            ) SELECT id, tmdbId, title, overview, posterPath, backdropPath,
+                     voteAverage, releaseDate, genres, runtime, isWatched, 0, savedAt
+              FROM movie_bookmarks;
+          `);
+        }
+        await this.adapter.execute('DROP TABLE movie_bookmarks;');
+        await this.adapter.execute('ALTER TABLE movie_bookmarks_v2 RENAME TO movie_bookmarks;');
+      } else {
+        const bookmarkCols = await this.adapter.execute('PRAGMA table_info(movie_bookmarks)');
+        const bookmarkColNames = new Set(bookmarkCols.rows.map((r: any) => r.name));
+        if (!bookmarkColNames.has('isTv')) {
+          await this.adapter.execute('ALTER TABLE movie_bookmarks ADD COLUMN isTv INTEGER NOT NULL DEFAULT 0');
+        }
+      }
+    } catch { }
+
+    // 9. Performance Indexes (using valid column names)
     try {
       await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status_date ON tasks(status, date);');
       await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date);');
@@ -666,6 +807,7 @@ class DatabaseManager {
       await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_keep_notes_reminder ON keep_notes(reminderTime);');
       await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_habit_logs_habit_date ON habit_logs(habitId, completedDate);');
       await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(date);');
+      await this.adapter.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_bookmarks_tmdb_tv ON movie_bookmarks(tmdbId, isTv);');
       await this.adapter.execute('CREATE INDEX IF NOT EXISTS idx_movie_bookmarks_watched ON movie_bookmarks(isWatched);');
     } catch { }
   }

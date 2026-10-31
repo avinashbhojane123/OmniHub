@@ -39,7 +39,7 @@ describe('OTAService Test Suite', () => {
 
   it('1. should return default server URL and allow updating it', async () => {
     const defaultUrl = await otaService.getServerUrl();
-    expect(defaultUrl).toBe('http://10.16.64.73:8888');
+    expect(defaultUrl).toBe('http://10.34.159.73:8888');
 
     await otaService.setServerUrl('http://192.168.1.50:8888/');
     const updatedUrl = await otaService.getServerUrl();

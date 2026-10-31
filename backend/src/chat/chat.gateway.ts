@@ -25,7 +25,7 @@ import { User } from '../users/user.entity';
 import { Status } from '../status/status.entity';
 
 import { JoinRoomDto } from './dto/join-room.dto';
-import { SendMessageDto } from './dto/send-message.dto';
+import { SendMessageDto, SendDirectMessageDto } from './dto/send-message.dto';
 import { TypingDto } from './dto/typing.dto';
 import { GetRoomDto } from './dto/get-room.dto';
 import {
@@ -139,6 +139,7 @@ export class ChatGateway
     }, userCleanupInterval);
 
     await this.wallpaperService.cleanupDeadWallpapers();
+    void this.messageService.cleanupOrphanUploadFiles();
   }
 
   onModuleDestroy() {
@@ -207,9 +208,12 @@ export class ChatGateway
     nickname?: string,
     excludeSocketId?: string,
   ): { socketId: string; nickname: string } | undefined {
-    const cleanPass = passcode.trim();
+    const cleanPass = passcode.trim().toLowerCase();
     for (const [id, user] of this.users.entries()) {
-      if (user.passcode.trim() === cleanPass && id !== excludeSocketId) {
+      if (
+        (user.passcode || '').trim().toLowerCase() === cleanPass &&
+        id !== excludeSocketId
+      ) {
         if (
           !nickname ||
           user.nickname.trim().toLowerCase() === nickname.trim().toLowerCase()
@@ -269,12 +273,18 @@ export class ChatGateway
 
     if (isStillConnected) return;
 
-    this.server.to(userInfo.passcode).emit('userStoppedTyping', {
-      nickname: userInfo.nickname,
-    });
-    this.server.to(userInfo.passcode).emit('userStopTyping', {
-      nickname: userInfo.nickname,
-    });
+    this.server
+      .to(userInfo.passcode)
+      .to(cleanPass)
+      .emit('userStoppedTyping', {
+        nickname: userInfo.nickname,
+      });
+    this.server
+      .to(userInfo.passcode)
+      .to(cleanPass)
+      .emit('userStopTyping', {
+        nickname: userInfo.nickname,
+      });
 
     const userKey = `${cleanPass}:${cleanNick}`;
     this.clearUserDisconnectDebounceTimer(userKey);
@@ -290,9 +300,7 @@ export class ChatGateway
         );
         if (isReconnected) return;
 
-        const room = await this.roomRepo.findOne({
-          where: { passcode: userInfo.passcode },
-        });
+        const room = await this.findRoomByPasscode(userInfo.passcode);
 
         if (room) {
           const user = await this.userRepo
@@ -400,13 +408,19 @@ export class ChatGateway
           );
         }
 
-        this.server.to(userInfo.passcode).emit('userOffline', {
-          nickname: userInfo.nickname,
-          lastSeen: new Date(),
-        });
-        this.server.to(userInfo.passcode).emit('userLeft', {
-          nickname: userInfo.nickname,
-        });
+        this.server
+          .to(userInfo.passcode)
+          .to(cleanPass)
+          .emit('userOffline', {
+            nickname: userInfo.nickname,
+            lastSeen: new Date(),
+          });
+        this.server
+          .to(userInfo.passcode)
+          .to(cleanPass)
+          .emit('userLeft', {
+            nickname: userInfo.nickname,
+          });
       })();
     }, 12000);
 
@@ -626,6 +640,19 @@ export class ChatGateway
 
     if (user) {
       cleanNick = user.nickname;
+      if (
+        user.sessionToken &&
+        data.sessionToken &&
+        user.sessionToken !== data.sessionToken
+      ) {
+        client.emit('error', {
+          message: `The nickname "${cleanNick}" is already in use by another session in this room. Please choose another nickname.`,
+        });
+        return {
+          success: false,
+          message: `Nickname "${cleanNick}" is already taken in this room`,
+        };
+      }
     }
 
     if (user && user.isBanned) {
@@ -686,7 +713,10 @@ export class ChatGateway
     });
 
     const defaultRole =
-      !existingHost || existingHost.nickname === cleanNick ? 'host' : 'member';
+      !existingHost ||
+      existingHost.nickname.trim().toLowerCase() === cleanNick.toLowerCase()
+        ? 'host'
+        : 'member';
 
     if (!user) {
       const isRoomCreator = !existingHost;
@@ -786,10 +816,11 @@ export class ChatGateway
       .andWhere('(m.expiresAt IS NULL OR m.expiresAt > :now)', {
         now: new Date(),
       })
-      .orderBy('m.createdAt', 'ASC')
+      .orderBy('m.createdAt', 'DESC')
+      .take(50)
       .getMany();
 
-    client.emit('chatHistory', messages);
+    client.emit('chatHistory', messages.reverse());
 
     const activeWallpaper = this.wallpaperService.getRoomWallpaperState(
       roomPasscode,
@@ -904,17 +935,7 @@ export class ChatGateway
   @SubscribeMessage('sendDirectMessage')
   async sendDirectMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      passcode: string;
-      targetNickname: string;
-      message: string;
-      fileUrl?: string;
-      fileName?: string;
-      fileType?: string;
-      fileSize?: number;
-      tempId?: string;
-    },
+    @MessageBody() data: SendDirectMessageDto,
   ) {
     if (!this.checkRateLimit(client, 10, 3000)) {
       return { success: false, message: 'Rate limit exceeded' };
@@ -935,7 +956,13 @@ export class ChatGateway
     @MessageBody() payload: MarkReadDto,
   ) {
     const session = this.users.get(client.id);
-    return this.messageService.markRead(this.server, client, session, payload);
+    return this.messageService.markRead(
+      this.server,
+      client,
+      session,
+      payload,
+      this.findSocketsInRoom.bind(this),
+    );
   }
 
   @SubscribeMessage('votePoll')
@@ -968,7 +995,13 @@ export class ChatGateway
     @MessageBody() data: EditMessageDto,
   ) {
     const session = this.users.get(client.id);
-    return this.messageService.editMessage(this.server, client, session, data);
+    return this.messageService.editMessage(
+      this.server,
+      client,
+      session,
+      data,
+      (passcode, nickname) => this.findSocketsInRoom(passcode, nickname),
+    );
   }
 
   @SubscribeMessage('deleteMessage')
@@ -982,6 +1015,7 @@ export class ChatGateway
       client,
       session,
       data,
+      (passcode, nickname) => this.findSocketsInRoom(passcode, nickname),
     );
   }
 
@@ -1014,6 +1048,7 @@ export class ChatGateway
       client,
       session,
       data,
+      this.findSocketsInRoom.bind(this),
     );
   }
 
@@ -1034,9 +1069,12 @@ export class ChatGateway
     if (!session || session.isMuted) return;
 
     const trimmedPasscode = (data.passcode || session.passcode).trim();
-    client.to(trimmedPasscode).emit('userTyping', {
-      nickname: session.nickname,
-    });
+    client
+      .to(trimmedPasscode)
+      .to(trimmedPasscode.toLowerCase())
+      .emit('userTyping', {
+        nickname: session.nickname,
+      });
   }
 
   @SubscribeMessage('stopTyping')
@@ -1048,12 +1086,18 @@ export class ChatGateway
     if (!session || session.isMuted) return;
 
     const trimmedPasscode = (data.passcode || session.passcode).trim();
-    client.to(trimmedPasscode).emit('userStoppedTyping', {
-      nickname: session.nickname,
-    });
-    client.to(trimmedPasscode).emit('userStopTyping', {
-      nickname: session.nickname,
-    });
+    client
+      .to(trimmedPasscode)
+      .to(trimmedPasscode.toLowerCase())
+      .emit('userStoppedTyping', {
+        nickname: session.nickname,
+      });
+    client
+      .to(trimmedPasscode)
+      .to(trimmedPasscode.toLowerCase())
+      .emit('userStopTyping', {
+        nickname: session.nickname,
+      });
   }
 
   // --- Moderation & Roster Handlers ---

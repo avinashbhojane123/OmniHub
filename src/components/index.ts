@@ -2,7 +2,6 @@ export { AlarmRingingModal } from './AlarmRingingModal';
 export { BellIllustration } from './BellIllustration';
 export { CalendarGraphic } from './CalendarGraphic';
 export { ConflictBanner } from './ConflictBanner';
-export { GoogleKeepNotesEditor } from './GoogleKeepNotesEditor';
 export { HabitRow } from './HabitRow';
 export { NewHabitModal } from './NewHabitModal';
 export { ProfileModal } from './ProfileModal';

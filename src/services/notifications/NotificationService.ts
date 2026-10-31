@@ -14,7 +14,16 @@ import { taskRepository } from '../../database/repositories/TaskRepository';
 import { settingsRepository } from '../../database/repositories/SettingsRepository';
 import { parseISO, addMinutes, isBefore, isValid } from 'date-fns';
 
+export const ALARM_CLOCK_CHANNEL_ID = 'alarm_clock_channel_v6';
+
 export const CHANNELS = {
+  ALARM_CLOCK: {
+    id: ALARM_CLOCK_CHANNEL_ID,
+    name: 'Alarm Clock Ringing',
+    description: 'Loud ringing alarms with vibration for your scheduled routines and tasks',
+    importance: AndroidImportance.HIGH,
+    visibility: AndroidVisibility.PUBLIC,
+  },
   LIFE_PLANNER: {
     id: 'life_planner_tasks',
     name: 'Life Planner Reminders',
@@ -128,6 +137,19 @@ export class NotificationService {
 
   private async setupChannels(): Promise<void> {
     await notifee.createChannel({
+      id: ALARM_CLOCK_CHANNEL_ID,
+      name: 'Alarm Clock Ringing',
+      description: 'Loud ringing alarms with vibration for your scheduled routines and tasks',
+      importance: AndroidImportance.HIGH,
+      visibility: AndroidVisibility.PUBLIC,
+      sound: 'default',
+      vibration: true,
+      vibrationPattern: [0, 800, 400, 800],
+      lights: true,
+      bypassDnd: true,
+    });
+
+    await notifee.createChannel({
       id: CHANNELS.LIFE_PLANNER.id,
       name: CHANNELS.LIFE_PLANNER.name,
       description: CHANNELS.LIFE_PLANNER.description,
@@ -224,7 +246,7 @@ export class NotificationService {
       const channelId = !soundEnabled
         ? CHANNELS.SILENT.id
         : isLoudTask
-        ? 'alarm_clock_channel_v3'
+        ? ALARM_CLOCK_CHANNEL_ID
         : CHANNELS.LIFE_PLANNER.id;
 
       const notificationId = `task_${task.id}`;
@@ -244,6 +266,11 @@ export class NotificationService {
 
       // Schedule native exact alarm with Android AlarmManager for loud alarm tasks
       // (Native AlarmReceiver handles loud audio + persistent full-screen alarm notification without clashing with Notifee)
+      try {
+        const { alarmService } = await import('../alarm/AlarmService');
+        await alarmService.scheduleTaskAlarm(task.id, task.title, task.date, effectiveTime, task.description || subtitle, isLoudTask);
+      } catch {}
+
       if (isLoudTask && AlarmRingtone?.scheduleExactAlarm) {
         try {
           await AlarmRingtone.scheduleExactAlarm(
@@ -417,6 +444,10 @@ export class NotificationService {
           await AlarmRingtone.cancelExactAlarm(`alarm_task_${taskId}`);
         } catch {}
       }
+      try {
+        const { alarmService } = await import('../alarm/AlarmService');
+        await alarmService.cancelTaskAlarm(taskId);
+      } catch {}
     } catch (e) {
       console.warn('cancelTaskReminder error:', e);
     }
@@ -451,7 +482,7 @@ export class NotificationService {
       await notifee.cancelNotification(notificationId);
 
       const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
-      const channelId = soundEnabled ? 'alarm_clock_channel_v3' : CHANNELS.SILENT.id;
+      const channelId = soundEnabled ? ALARM_CLOCK_CHANNEL_ID : CHANNELS.SILENT.id;
 
       // Also register native exact alarm for guaranteed wake-up even if app is cleared from Recents
       if (AlarmRingtone?.scheduleExactAlarm) {

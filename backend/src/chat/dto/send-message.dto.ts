@@ -75,3 +75,53 @@ export class SendMessageDto {
   @IsString()
   tempId?: string | null;
 }
+
+export class SendDirectMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  passcode!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  targetNickname!: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(10000)
+  message!: string;
+
+  @IsString()
+  @IsOptional()
+  fileUrl?: string | null;
+
+  @IsString()
+  @IsOptional()
+  fileName?: string | null;
+
+  @IsString()
+  @IsOptional()
+  fileType?: string | null;
+
+  @IsOptional()
+  fileSize?: number | string | null;
+
+  @IsOptional()
+  isVoiceNote?: boolean;
+
+  @IsOptional()
+  isVideoNote?: boolean;
+
+  @IsOptional()
+  isWithoutSound?: boolean;
+
+  @IsOptional()
+  expiresIn?: number | null;
+
+  @IsOptional()
+  @IsString()
+  tempId?: string | null;
+}

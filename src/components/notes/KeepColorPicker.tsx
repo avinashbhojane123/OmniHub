@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { KeepColorKey, KEEP_COLORS } from '../../types';
+import { KeepColorKey, KEEP_COLOR_KEYS, resolveKeepColor } from '../../types';
 import { useAppTheme } from '../../hooks/useTheme';
 
 interface KeepColorPickerProps {
@@ -13,7 +13,6 @@ export const KeepColorPicker: React.FC<KeepColorPickerProps> = ({
   onSelectColor,
 }) => {
   const { isDark } = useAppTheme();
-  const colorKeys = Object.keys(KEEP_COLORS) as KeepColorKey[];
 
   return (
     <View style={styles.container}>
@@ -25,10 +24,8 @@ export const KeepColorPicker: React.FC<KeepColorPickerProps> = ({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollList}
       >
-        {colorKeys.map((key) => {
-          const colorDef = KEEP_COLORS[key];
-          const bg = isDark ? colorDef.darkBg : colorDef.lightBg;
-          const border = isDark ? colorDef.darkBorder : colorDef.lightBorder;
+        {KEEP_COLOR_KEYS.map((key) => {
+          const resolved = resolveKeepColor(key, isDark);
           const isSelected = selectedColor === key;
 
           return (
@@ -37,8 +34,8 @@ export const KeepColorPicker: React.FC<KeepColorPickerProps> = ({
               style={[
                 styles.colorCircle,
                 {
-                  backgroundColor: bg,
-                  borderColor: isSelected ? (isDark ? '#F8FAFC' : '#0F172A') : border,
+                  backgroundColor: resolved.bg,
+                  borderColor: isSelected ? (isDark ? '#F8FAFC' : '#0F172A') : resolved.border,
                   borderWidth: isSelected ? 2.5 : 1.5,
                 },
               ]}

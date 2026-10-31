@@ -12,8 +12,8 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 class MainActivity : ReactActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(null)
     applyLockScreenFlags()
+    super.onCreate(null)
     handleAlarmIntent(intent)
   }
 
@@ -47,22 +47,30 @@ class MainActivity : ReactActivity() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
       setShowWhenLocked(true)
       setTurnScreenOn(true)
-      val keyguardManager = getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
-      keyguardManager?.requestDismissKeyguard(this, null)
-    } else {
-      @Suppress("DEPRECATION")
-      window.addFlags(
-        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-      )
     }
-    // Keep screen on while alarm / activity is displayed so it doesn't immediately sleep
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      window.statusBarColor = android.graphics.Color.TRANSPARENT
+      window.navigationBarColor = android.graphics.Color.parseColor("#0B081E")
+    }
+    @Suppress("DEPRECATION")
     window.addFlags(
       WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
       WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-      WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+      WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+      WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
     )
+  }
+
+  override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+    val action = event.action
+    val keyCode = event.keyCode
+    if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+      if (AlarmRingtoneModule.isPlaying && action == android.view.KeyEvent.ACTION_DOWN) {
+        AlarmRingtoneModule.stopRingtone(this)
+        return true
+      }
+    }
+    return super.dispatchKeyEvent(event)
   }
 
   /**

@@ -18,32 +18,34 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { movieService, GENRE_LIST, HARDCODED_CLIENT_MOVIES } from '../services/movies/MovieService';
-import { traktService } from '../services/movies/TraktService';
+import { movieService, GENRE_LIST } from '../services/movies/MovieService';
 import { tvMazeService } from '../services/movies/TVMazeService';
 import {
   Movie,
   MovieCategoryTab,
   MovieBookmark,
   Genre,
-  StreamableMedia,
+  WorkspaceLanguage,
+  WORKSPACE_LANGUAGES,
+  bookmarkToMovie,
+  movieToBookmark,
+  getMovieBookmarkKey,
 } from '../types';
 import {
   MovieCard,
   MovieDetailModal,
   TrailerModal,
   StreamPlayerModal,
-  StreamCatalogView,
   DownloadModal,
   DownloadItemState,
   STREAMING_SERVERS,
   StreamingServer,
   ActiveStreamState,
-  TraktSyncModal,
   TVEpisodeGuideModal,
 } from '../components/movies';
 
-
+export type { WorkspaceLanguage };
+export { WORKSPACE_LANGUAGES };
 
 export { STREAMING_SERVERS };
 export type { StreamingServer, ActiveStreamState, DownloadItemState };
@@ -64,13 +66,13 @@ export const MovieWorkspaceScreen: React.FC = () => {
   // Navigation & Category States
   const [activeTab, setActiveTab] = useState<MovieCategoryTab>('trending');
   const [selectedGenre, setSelectedGenre] = useState<number | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [watchlist, setWatchlist] = useState<MovieBookmark[]>([]);
-  const [streamCatalog, setStreamCatalog] = useState<StreamableMedia[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -95,22 +97,10 @@ export const MovieWorkspaceScreen: React.FC = () => {
   const [downloadItem, setDownloadItem] = useState<DownloadItemState | null>(null);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
 
-  // Trakt Social & Sync State
-  const [isTraktModalOpen, setIsTraktModalOpen] = useState(false);
-  const [traktFilter, setTraktFilter] = useState<
-    'trending' | 'watched' | 'anticipated' | 'history'
-  >('trending');
-  const [traktConnectedUser, setTraktConnectedUser] = useState<string>('');
-
   // TVmaze TV Series & Guide State
   const [isEpisodeGuideOpen, setIsEpisodeGuideOpen] = useState(false);
   const [selectedTvShow, setSelectedTvShow] = useState<Movie | null>(null);
   const [tvFilter, setTvFilter] = useState<'popular' | 'schedule' | 'drama' | 'scifi'>('popular');
-
-  // Load connected Trakt account
-  useEffect(() => {
-    traktService.getConnectedUsername().then((u) => setTraktConnectedUser(u || ''));
-  }, []);
 
   // Async sequence references to prevent race conditions during rapid switching (Problem 11 fix)
   const loadSeqRef = useRef<number>(0);
@@ -172,22 +162,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
             return;
           }
 
-          if (activeTab === 'streams') {
-            const catalog = await movieService.getStreamCatalog();
-            if (seq !== loadSeqRef.current) return;
-            const filteredCatalog = catalog.filter(
-              (s) =>
-                s.title.toLowerCase().includes(q) ||
-                (s.overview && s.overview.toLowerCase().includes(q)),
-            );
-            setStreamCatalog(filteredCatalog);
-            setHasMore(false);
-            setIsLoading(false);
-            setIsSearching(false);
-            setIsRefreshing(false);
-            return;
-          }
-
           if (activeTab === 'tv_shows') {
             const results = await tvMazeService.searchShows(debouncedSearchQuery);
             if (seq !== loadSeqRef.current) return;
@@ -207,6 +181,7 @@ export const MovieWorkspaceScreen: React.FC = () => {
           const results = await movieService.searchMovies(
             debouncedSearchQuery,
             selectedGenre || undefined,
+            selectedLanguage !== 'all' ? selectedLanguage : undefined,
           );
           if (seq !== loadSeqRef.current) return;
           setMovies(results);
@@ -228,103 +203,21 @@ export const MovieWorkspaceScreen: React.FC = () => {
           return;
         }
 
-        if (activeTab === 'streams') {
-          const catalog = await movieService.getStreamCatalog();
-          if (seq !== loadSeqRef.current) return;
-          setStreamCatalog(catalog);
-          setHasMore(false);
-          setIsLoading(false);
-          setIsRefreshing(false);
-          return;
-        }
-
-        if (activeTab === 'trakt_social') {
-          let results: Movie[] = [];
-          if (traktFilter === 'trending') {
-            results = await traktService.getTrending(pageNumber);
-          } else if (traktFilter === 'watched') {
-            results = await traktService.getMostWatched('weekly', pageNumber);
-          } else if (traktFilter === 'anticipated') {
-            results = await traktService.getAnticipated(pageNumber);
-          } else if (traktFilter === 'history') {
-            const history = await traktService.getUserWatchHistory(
-              traktConnectedUser || undefined,
-            );
-            if (history.length > 0) {
-              results = history.map((item, idx) => {
-                const tmdbId = item.movie.ids.tmdb || item.movie.ids.trakt || idx + 1;
-                const localMatch = HARDCODED_CLIENT_MOVIES.find(
-                  (m) =>
-                    m.id === tmdbId ||
-                    m.title.toLowerCase() === (item.movie.title || '').toLowerCase(),
-                );
-
-                const poster =
-                  localMatch?.poster_path ||
-                  'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80';
-                const backdrop =
-                  localMatch?.backdrop_path ||
-                  'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1200&q=80';
-
-                return {
-                  id: tmdbId,
-                  title: item.movie.title,
-                  overview: `Logged on Trakt: ${new Date(item.watched_at).toLocaleDateString(
-                    [],
-                    {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    },
-                  )} (${item.action})`,
-                  poster_path: poster,
-                  backdrop_path: backdrop,
-                  vote_average: item.movie.rating
-                    ? Number(Number(item.movie.rating).toFixed(1))
-                    : (localMatch?.vote_average || 8.0),
-                  release_date: item.movie.year ? `${item.movie.year}-01-01` : '2024-01-01',
-                  genre_ids: localMatch?.genre_ids || [28, 18],
-                  genres: localMatch?.genres,
-                  category: 'trending',
-                  trakt_watchers: undefined,
-                  trakt_id: item.movie.ids.trakt,
-                };
-              });
-            } else {
-              results = [];
-            }
-          }
-
-          if (seq !== loadSeqRef.current) return;
-
-          // Problem 16 fix: hasMore is determined from raw API response before client genre filter
-          const hasMoreRaw = traktFilter === 'history' ? false : results.length >= 6;
-          let displayResults = results;
-          if (selectedGenre) {
-            displayResults = results.filter((m) => m.genre_ids?.includes(selectedGenre));
-          }
-
-          setHasMore(hasMoreRaw);
-
-          if (isAppend) {
-            setMovies((prev) => {
-              const existingIds = new Set(prev.map((m) => m.id));
-              return [...prev, ...displayResults.filter((m) => !existingIds.has(m.id))];
-            });
-          } else {
-            setMovies(displayResults);
-          }
-          setIsLoading(false);
-          setIsRefreshing(false);
-          setIsLoadingMore(false);
-          return;
-        }
-
         if (activeTab === 'tv_shows') {
           let results: Movie[] = [];
+          let rawShowCount = 0;
           let canPaginate = true;
 
-          if (tvFilter === 'schedule') {
+          // If a language is chosen for TV series, query language-specific TV directory
+          if (selectedLanguage && selectedLanguage !== 'all') {
+            results = await movieService.getByLanguage(
+              selectedLanguage,
+              true,
+              pageNumber,
+              selectedGenre || undefined,
+            );
+            rawShowCount = results.length;
+          } else if (tvFilter === 'schedule') {
             const schedule = await tvMazeService.getScheduleToday();
             results = schedule.map((item) => {
               const baseMovie = tvMazeService.showToMovie(item.show);
@@ -336,15 +229,17 @@ export const MovieWorkspaceScreen: React.FC = () => {
                 overview: `📅 Airing Today at ${airTime} on ${net} • Season ${item.season}, Episode ${item.number}: "${item.name}". ${baseMovie.overview}`,
               };
             });
-            // Problem 17 fix: schedule today is unpaginated single response
+            rawShowCount = results.length;
             canPaginate = false;
           } else if (tvFilter === 'drama') {
-            const shows = await tvMazeService.getPopularShows(pageNumber - 1);
+            const shows = await tvMazeService.getPopularShows(pageNumber - 1, selectedLanguage);
+            rawShowCount = shows.length;
             results = shows.filter((s) =>
               s.genres?.some((g) => g.name.toLowerCase().includes('drama')),
             );
           } else if (tvFilter === 'scifi') {
-            const shows = await tvMazeService.getPopularShows(pageNumber - 1);
+            const shows = await tvMazeService.getPopularShows(pageNumber - 1, selectedLanguage);
+            rawShowCount = shows.length;
             results = shows.filter((s) =>
               s.genres?.some(
                 (g) =>
@@ -354,15 +249,15 @@ export const MovieWorkspaceScreen: React.FC = () => {
               ),
             );
           } else {
-            results = await tvMazeService.getPopularShows(pageNumber - 1);
+            results = await tvMazeService.getPopularShows(pageNumber - 1, selectedLanguage);
+            rawShowCount = results.length;
           }
 
           if (seq !== loadSeqRef.current) return;
 
-          // Problem 16 & 17 fix
-          const hasMoreRaw = canPaginate && results.length >= 6;
+          const hasMoreRaw = canPaginate && rawShowCount >= 20;
           let displayResults = results;
-          if (selectedGenre) {
+          if (selectedGenre && (!selectedLanguage || selectedLanguage === 'all')) {
             displayResults = results.filter((m) => m.genre_ids?.includes(selectedGenre));
           }
 
@@ -382,29 +277,25 @@ export const MovieWorkspaceScreen: React.FC = () => {
           return;
         }
 
-        // Standard TMDb tabs
+        // Standard TMDb tabs or Language-Filtered Discovery
         let rawResults: Movie[] = [];
-        switch (activeTab) {
-          case 'trending':
-            rawResults = await movieService.getTrending(pageNumber);
-            break;
-          case 'now_playing':
-            rawResults = await movieService.getNowPlaying(pageNumber);
-            break;
-          case 'top_rated':
-            rawResults = await movieService.getTopRated(pageNumber);
-            break;
-          case 'upcoming':
-            rawResults = await movieService.getUpcoming(pageNumber);
-            break;
+        if (selectedLanguage && selectedLanguage !== 'all') {
+          rawResults = await movieService.getByLanguage(
+            selectedLanguage,
+            false,
+            pageNumber,
+            selectedGenre || undefined,
+          );
+        } else if (activeTab === 'trending') {
+          rawResults = await movieService.getTrending(pageNumber);
         }
 
         if (seq !== loadSeqRef.current) return;
 
-        // Problem 16 fix: hasMore is determined from raw API response before client genre filter
-        const hasMoreRaw = rawResults.length >= 6;
+        // Full TMDb page size is 20
+        const hasMoreRaw = rawResults.length >= 20;
         let displayResults = rawResults;
-        if (selectedGenre) {
+        if (selectedGenre && (!selectedLanguage || selectedLanguage === 'all')) {
           displayResults = rawResults.filter((m) => m.genre_ids?.includes(selectedGenre));
         }
 
@@ -431,7 +322,7 @@ export const MovieWorkspaceScreen: React.FC = () => {
         }
       }
     },
-    [activeTab, debouncedSearchQuery, selectedGenre, traktFilter, traktConnectedUser, tvFilter],
+    [activeTab, debouncedSearchQuery, selectedGenre, tvFilter, selectedLanguage],
   );
 
   // Initial load when tab or filter changes
@@ -462,7 +353,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
       isRefreshing ||
       !hasMore ||
       activeTab === 'watchlist' ||
-      activeTab === 'streams' ||
       debouncedSearchQuery.length > 0
     ) {
       return;
@@ -483,45 +373,38 @@ export const MovieWorkspaceScreen: React.FC = () => {
   ]);
 
   // Problem 21 fix: O(1) Set lookup for watchlist
-  const bookmarkedIdSet = useMemo(
-    () => new Set(watchlist.map((item) => item.tmdbId)),
+  // Composite key map for O(1) bookmark lookup differentiating Movies and TV Shows
+  const bookmarkedKeySet = useMemo(
+    () => new Set(watchlist.map((item) => getMovieBookmarkKey(item.tmdbId, item.isTv))),
     [watchlist],
   );
 
   const isInWatchlist = useCallback(
-    (movieId: number) => bookmarkedIdSet.has(movieId),
-    [bookmarkedIdSet],
+    (movieId: number, isTv = false) =>
+      bookmarkedKeySet.has(getMovieBookmarkKey(movieId, isTv)),
+    [bookmarkedKeySet],
   );
 
   // Toggle watchlist with optimistic state & rollback on error (Problem 2 fix: preserve isTv)
   const handleToggleWatchlist = useCallback(
     async (movie: Movie) => {
-      const isBookmarked = isInWatchlist(movie.id);
+      const isBookmarked = isInWatchlist(movie.id, Boolean(movie.is_tv));
 
       if (isBookmarked) {
-        setWatchlist((prev) => prev.filter((item) => item.tmdbId !== movie.id));
+        setWatchlist((prev) =>
+          prev.filter(
+            (item) =>
+              !(item.tmdbId === movie.id && Boolean(item.isTv) === Boolean(movie.is_tv)),
+          ),
+        );
         try {
-          await movieService.removeFromWatchlist(movie.id);
+          await movieService.removeFromWatchlist(movie.id, Boolean(movie.is_tv));
         } catch {
           loadWatchlist();
           Alert.alert('Error', 'Failed to remove from watchlist');
         }
       } else {
-        const newBookmark: MovieBookmark = {
-          id: `bm-${movie.id}`,
-          tmdbId: movie.id,
-          title: movie.title,
-          overview: movie.overview,
-          posterPath: movie.poster_path,
-          backdropPath: movie.backdrop_path,
-          voteAverage: movie.vote_average,
-          releaseDate: movie.release_date,
-          genres: movie.genres ? movie.genres.map((g) => g.name) : [],
-          runtime: movie.runtime,
-          isWatched: false,
-          savedAt: new Date().toISOString(),
-          isTv: Boolean(movie.is_tv),
-        };
+        const newBookmark: MovieBookmark = movieToBookmark(movie);
         setWatchlist((prev) => [newBookmark, ...prev]);
         try {
           await movieService.addToWatchlist(movie);
@@ -536,23 +419,29 @@ export const MovieWorkspaceScreen: React.FC = () => {
 
   // Toggle watched state with optimistic state & functional rollback on error (Problem 14 fix)
   const handleToggleWatched = useCallback(
-    async (tmdbId: number) => {
+    async (tmdbId: number, isTv?: boolean) => {
       setWatchlist((prev) =>
         prev.map((item) =>
-          item.tmdbId === tmdbId ? { ...item, isWatched: !item.isWatched } : item,
+          item.tmdbId === tmdbId && (isTv === undefined || Boolean(item.isTv) === Boolean(isTv))
+            ? { ...item, isWatched: !item.isWatched }
+            : item,
         ),
       );
       try {
-        const nextWatched = await movieService.toggleWatched(tmdbId);
+        const nextWatched = await movieService.toggleWatched(tmdbId, isTv);
         setWatchlist((prev) =>
           prev.map((item) =>
-            item.tmdbId === tmdbId ? { ...item, isWatched: nextWatched } : item,
+            item.tmdbId === tmdbId && (isTv === undefined || Boolean(item.isTv) === Boolean(isTv))
+              ? { ...item, isWatched: nextWatched }
+              : item,
           ),
         );
       } catch {
         setWatchlist((prev) =>
           prev.map((item) =>
-            item.tmdbId === tmdbId ? { ...item, isWatched: !item.isWatched } : item,
+            item.tmdbId === tmdbId && (isTv === undefined || Boolean(item.isTv) === Boolean(isTv))
+              ? { ...item, isWatched: !item.isWatched }
+              : item,
           ),
         );
         Alert.alert('Error', 'Failed to update watched status');
@@ -585,60 +474,79 @@ export const MovieWorkspaceScreen: React.FC = () => {
       preferredServer?: StreamingServer['id'];
     }) => {
       const { movie, isTv = false, season = 1, episode = 1, episodeTitle, preferredServer } = options;
-      // TVmaze shows map to their TMDb ID if available, otherwise fallback to movie.id (Problem 1 fix)
-      const resolvedTmdbId = (movie as Movie).tmdb_id || movie.id;
+      // Dynamically resolve TMDb ID if TV show has no tmdb_id yet
+      const imdbId = (movie as any).imdb_id || (movie as any).externals?.imdb;
+      let resolvedTmdbId = (movie as Movie).tmdb_id;
+      if (!resolvedTmdbId && isTv) {
+        resolvedTmdbId = await tvMazeService.ensureTmdbId(movie.id, movie.title, imdbId);
+      }
+      // Prefer resolved numeric TMDb ID, then string IMDb ID (e.g. tt0944947), and finally movie.id
+      const finalMediaId: number | string = resolvedTmdbId || imdbId || movie.id;
+
       const displayTitle = episodeTitle
         ? `${movie.title} - S${season}:E${episode} "${episodeTitle}"`
         : isTv
           ? `${movie.title} - S${season}:E${episode}`
           : movie.title;
 
-      const serverToUse = preferredServer || 'direct_hls';
+      const serverToUse = preferredServer || 'vidsrc_sh';
       const seq = ++resolveSeqRef.current;
 
       setStreamError(null);
-      setIsPlayerBuffering(true);
+      setIsPlayerBuffering(false);
       setIsStreamModalOpen(true);
       failedMirrorsRef.current.clear();
 
       setActiveStreamItem({
         title: displayTitle,
-        tmdbId: resolvedTmdbId,
+        tmdbId: finalMediaId,
+        imdbId,
         isTv,
         season,
         episode,
         serverId: serverToUse,
-        quality: serverToUse === 'direct_hls' ? '1080p Ad-Free' : '1080p Ultra',
+        quality: '1080p Ultra',
         directUrl: undefined,
         isHls: false,
+        totalSeasons: (movie as any).total_seasons || (movie as any).seasons?.length,
+        episodesInSeason: (movie as any).total_episodes,
       });
 
       if (serverToUse === 'direct_hls') {
         try {
-          const direct = await movieService.resolveDirectStream(resolvedTmdbId, isTv, season, episode);
-          if (seq !== resolveSeqRef.current) return;
-
-          if (direct && direct.url) {
-            setActiveStreamItem((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    serverId: 'direct_hls',
-                    directUrl: direct.url,
-                    quality: direct.quality,
-                    isHls: true,
-                  }
-                : null,
+          const numericTmdbId = typeof finalMediaId === 'number' ? finalMediaId : Number(finalMediaId) || 0;
+          if (numericTmdbId > 0) {
+            const directPromise = movieService.resolveDirectStream(numericTmdbId, isTv, season, episode);
+            const timeoutPromise = new Promise<{ isTimeout: boolean }>((resolve) =>
+              setTimeout(() => resolve({ isTimeout: true }), 3500),
             );
-            setIsPlayerBuffering(false);
-            return;
+
+            const result: any = await Promise.race([directPromise, timeoutPromise]);
+            if (seq !== resolveSeqRef.current) return;
+
+            if (result && !result.isTimeout && result.url) {
+              setActiveStreamItem((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      serverId: 'direct_hls',
+                      directUrl: result.url,
+                      quality: result.quality,
+                      headers: result.headers,
+                      isHls: true,
+                    }
+                  : null,
+              );
+              setIsPlayerBuffering(false);
+              return;
+            }
           }
         } catch {}
 
         if (seq !== resolveSeqRef.current) return;
         failedMirrorsRef.current.add('direct_hls');
 
-        // Problem 3 fix: fallback to VidSrc Live mirror without permanent lock
+        // Instant Auto-Failover to VidSrc Live mirror without long spinner wait
         setActiveStreamItem((prev) =>
           prev
             ? {
@@ -682,17 +590,30 @@ export const MovieWorkspaceScreen: React.FC = () => {
           prev ? { ...prev, serverId: 'direct_hls', directUrl: undefined } : null,
         );
         const seq = ++resolveSeqRef.current;
-        const direct = await movieService.resolveDirectStream(
-          activeStreamItem.tmdbId,
-          activeStreamItem.isTv,
-          activeStreamItem.season,
-          activeStreamItem.episode,
-        );
+        const numericId = typeof activeStreamItem.tmdbId === 'number'
+          ? activeStreamItem.tmdbId
+          : Number(activeStreamItem.tmdbId) || 0;
+
+        let direct: any = null;
+        if (numericId > 0) {
+          try {
+            const directPromise = movieService.resolveDirectStream(
+              numericId,
+              activeStreamItem.isTv,
+              activeStreamItem.season,
+              activeStreamItem.episode,
+            );
+            const timeoutPromise = new Promise<{ isTimeout: boolean }>((resolve) =>
+              setTimeout(() => resolve({ isTimeout: true }), 3500),
+            );
+            direct = await Promise.race([directPromise, timeoutPromise]);
+          } catch {}
+        }
         if (seq !== resolveSeqRef.current) return;
 
-        if (direct && direct.url) {
+        if (direct && !direct.isTimeout && direct.url) {
           setActiveStreamItem((prev) =>
-            prev ? { ...prev, directUrl: direct.url, quality: direct.quality, isHls: true } : null,
+            prev ? { ...prev, directUrl: direct.url, quality: direct.quality, headers: direct.headers, isHls: true } : null,
           );
           setIsPlayerBuffering(false);
           return;
@@ -724,14 +645,22 @@ export const MovieWorkspaceScreen: React.FC = () => {
       );
 
       const seq = ++resolveSeqRef.current;
-      if (activeStreamItem.serverId === 'direct_hls') {
+      const numericId = typeof activeStreamItem.tmdbId === 'number'
+        ? activeStreamItem.tmdbId
+        : Number(activeStreamItem.tmdbId) || 0;
+
+      if (activeStreamItem.serverId === 'direct_hls' && numericId > 0) {
         try {
-          const direct = await movieService.resolveDirectStream(activeStreamItem.tmdbId, true, s, 1);
+          const directPromise = movieService.resolveDirectStream(numericId, true, s, 1);
+          const timeoutPromise = new Promise<{ isTimeout: boolean }>((resolve) =>
+            setTimeout(() => resolve({ isTimeout: true }), 3500),
+          );
+          const direct: any = await Promise.race([directPromise, timeoutPromise]);
           if (seq !== resolveSeqRef.current) return;
 
-          if (direct && direct.url) {
+          if (direct && !direct.isTimeout && direct.url) {
             setActiveStreamItem((prev) =>
-              prev ? { ...prev, directUrl: direct.url, quality: direct.quality, isHls: true } : null,
+              prev ? { ...prev, directUrl: direct.url, quality: direct.quality, headers: direct.headers, isHls: true } : null,
             );
           } else {
             setActiveStreamItem((prev) =>
@@ -758,19 +687,27 @@ export const MovieWorkspaceScreen: React.FC = () => {
       setActiveStreamItem((prev) => (prev ? { ...prev, episode: e, directUrl: undefined } : null));
 
       const seq = ++resolveSeqRef.current;
-      if (activeStreamItem.serverId === 'direct_hls') {
+      const numericId = typeof activeStreamItem.tmdbId === 'number'
+        ? activeStreamItem.tmdbId
+        : Number(activeStreamItem.tmdbId) || 0;
+
+      if (activeStreamItem.serverId === 'direct_hls' && numericId > 0) {
         try {
-          const direct = await movieService.resolveDirectStream(
-            activeStreamItem.tmdbId,
+          const directPromise = movieService.resolveDirectStream(
+            numericId,
             true,
             activeStreamItem.season,
             e,
           );
+          const timeoutPromise = new Promise<{ isTimeout: boolean }>((resolve) =>
+            setTimeout(() => resolve({ isTimeout: true }), 3500),
+          );
+          const direct: any = await Promise.race([directPromise, timeoutPromise]);
           if (seq !== resolveSeqRef.current) return;
 
-          if (direct && direct.url) {
+          if (direct && !direct.isTimeout && direct.url) {
             setActiveStreamItem((prev) =>
-              prev ? { ...prev, directUrl: direct.url, quality: direct.quality, isHls: true } : null,
+              prev ? { ...prev, directUrl: direct.url, quality: direct.quality, headers: direct.headers, isHls: true } : null,
             );
           } else {
             setActiveStreamItem((prev) =>
@@ -808,49 +745,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
       handleSelectServer(STREAMING_SERVERS[nextIndex]);
     }
   }, [activeStreamItem, handleSelectServer]);
-
-  // Launch Full Stream from Stream Catalog (TMDb Universal or Local Server)
-  const handlePlayStream = useCallback(
-    async (item: StreamableMedia, episodeStreamId?: string, episodeTitle?: string) => {
-      if (item.tmdbId) {
-        handleStreamMovie(
-          {
-            id: item.tmdbId,
-            title: item.title,
-            overview: item.overview,
-            poster_path: item.posterUrl,
-            backdrop_path: item.backdropUrl,
-            vote_average: 8.5,
-            release_date: item.releaseYear,
-            genre_ids: [],
-          },
-          item.type === 'series',
-        );
-        return;
-      }
-
-      const streamId = episodeStreamId || item.id;
-      const url =
-        item.sourceUrl && item.sourceType === 'remote'
-          ? item.sourceUrl
-          : await movieService.getStreamVideoUrl(streamId);
-
-      setStreamError(null);
-      setActiveStreamItem({
-        title: episodeTitle ? `${item.title} - ${episodeTitle}` : item.title,
-        directUrl: url,
-        quality: item.quality,
-        isTv: item.type === 'series',
-        season: 1,
-        episode: 1,
-        serverId: 'local_server',
-        isHls: false,
-      });
-      setIsPlayerBuffering(false);
-      setIsStreamModalOpen(true);
-    },
-    [handleStreamMovie],
-  );
 
   // Launch Download Manager for any TMDb Movie / Series (Problems 6 & 19 fix)
   const handleDownloadMovie = useCallback(
@@ -891,15 +785,13 @@ export const MovieWorkspaceScreen: React.FC = () => {
             episode,
           });
         } else {
-          // Problem 6 fix: updated domain vidsrc.sh
-          const fallbackUrl = `https://vidsrc.sh/embed/${
-            isTv ? `tv/${resolvedTmdbId}/${season}/${episode}` : `movie/${resolvedTmdbId}`
-          }`;
           setDownloadItem({
             title: displayTitle,
             posterUrl: movie.poster_path,
-            downloadUrl: fallbackUrl,
-            quality: '1080p HD Stream',
+            downloadUrl: undefined,
+            error:
+              'Direct MP4 stream file is not available on current mirrors for offline saving. Please use Instant Universal Stream to watch directly.',
+            quality: 'Stream Mirror Only',
             isResolving: false,
             movie,
             isTv,
@@ -968,59 +860,10 @@ export const MovieWorkspaceScreen: React.FC = () => {
     [handleDownloadMovie],
   );
 
-  // Trigger download from stream catalog items
-  const handleDownloadCatalog = useCallback(
-    async (item: StreamableMedia) => {
-      if (item.tmdbId) {
-        handleDownloadMovie(
-          {
-            id: item.tmdbId,
-            title: item.title,
-            poster_path: item.posterUrl,
-          } as Movie,
-          item.type === 'series',
-        );
-        return;
-      }
-
-      setDownloadItem({
-        title: item.title,
-        posterUrl: item.posterUrl,
-        isResolving: true,
-      });
-      setIsDownloadModalOpen(true);
-
-      try {
-        const url =
-          item.sourceUrl && item.sourceType === 'remote'
-            ? item.sourceUrl
-            : await movieService.getStreamVideoUrl(item.id);
-        setDownloadItem({
-          title: item.title,
-          posterUrl: item.posterUrl,
-          downloadUrl: url,
-          quality: item.quality,
-          isResolving: false,
-        });
-      } catch (err: any) {
-        setDownloadItem((prev) =>
-          prev
-            ? {
-                ...prev,
-                isResolving: false,
-                error: err?.message || 'Could not fetch catalog download link.',
-              }
-            : null,
-        );
-      }
-    },
-    [handleDownloadMovie],
-  );
-
   // Featured spotlight movie
   const spotlightMovie = useMemo(() => {
     if (
-      (activeTab === 'trending' || activeTab === 'trakt_social' || activeTab === 'tv_shows') &&
+      (activeTab === 'trending' || activeTab === 'tv_shows') &&
       !debouncedSearchQuery &&
       !searchQuery &&
       movies.length > 0
@@ -1050,7 +893,7 @@ export const MovieWorkspaceScreen: React.FC = () => {
       <MovieCard
         movie={item}
         cardWidth={cardWidth}
-        isBookmarked={isInWatchlist(item.id)}
+        isBookmarked={isInWatchlist(item.id, Boolean(item.is_tv))}
         onPress={handleCardPress}
         onToggleWatchlist={handleToggleWatchlist}
       />
@@ -1084,10 +927,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
       setIsDetailOpen(false);
       return true;
     }
-    if (isTraktModalOpen) {
-      setIsTraktModalOpen(false);
-      return true;
-    }
     if (isSearchActive) {
       setIsSearchActive(false);
       setSearchQuery('');
@@ -1108,7 +947,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
     activeStreamItem,
     isEpisodeGuideOpen,
     isDetailOpen,
-    isTraktModalOpen,
     isSearchActive,
     navigation,
   ]);
@@ -1134,15 +972,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
       {/* Top Header */}
       <View style={styles.header}>
         <View style={styles.headerLeftRow}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleGoBack}
-            activeOpacity={0.8}
-            accessibilityLabel="Go Back"
-          >
-            <Text style={styles.backButtonText}>‹</Text>
-          </TouchableOpacity>
-
           <View style={styles.workspacePill}>
             <Text style={styles.workspaceIcon}>🎬</Text>
             <View>
@@ -1153,26 +982,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
         </View>
 
         <View style={styles.headerRight}>
-          {/* Trakt Sync Indicator Button */}
-          <TouchableOpacity
-            style={[
-              styles.traktHeaderBtn,
-              Boolean(traktConnectedUser) && styles.traktHeaderBtnConnected,
-            ]}
-            onPress={() => setIsTraktModalOpen(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.traktHeaderBtnIcon}>⚡</Text>
-            <Text style={styles.traktHeaderBtnText}>
-              {traktConnectedUser ? `@${traktConnectedUser}` : 'Trakt'}
-            </Text>
-            <View
-              style={[
-                styles.traktHeaderDot,
-                Boolean(traktConnectedUser) && styles.traktHeaderDotConnected,
-              ]}
-            />
-          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.headerButton, isSearchActive && styles.headerButtonActive]}
@@ -1272,11 +1081,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
             [
               { id: 'trending', label: '🔥 Trending' },
               { id: 'tv_shows', label: '📺 TV & Series' },
-              { id: 'trakt_social', label: '⚡ Trakt Social' },
-              { id: 'streams', label: '📡 Full Stream & Series' },
-              { id: 'now_playing', label: '🎬 In Theaters' },
-              { id: 'top_rated', label: '⭐ Top Rated' },
-              { id: 'upcoming', label: '🚀 Upcoming' },
               { id: 'watchlist', label: `❤️ Watchlist (${watchlist.length})` },
             ] as const
           ).map((tab) => {
@@ -1303,6 +1107,42 @@ export const MovieWorkspaceScreen: React.FC = () => {
           })}
         </ScrollView>
       </View>
+
+      {/* Language Filter Bar for Movies & TV Series */}
+      {activeTab !== 'watchlist' && (
+        <View style={styles.languageFilterContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.languageFilterScroll}
+          >
+            {WORKSPACE_LANGUAGES.map((lang) => {
+              const isSelected = selectedLanguage === lang.code;
+              return (
+                <TouchableOpacity
+                  key={`lang-filter-${lang.code}`}
+                  style={[
+                    styles.langFilterPill,
+                    isSelected && styles.langFilterPillActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedLanguage(lang.code);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.langFilterPillText,
+                      isSelected && styles.langFilterPillTextActive,
+                    ]}
+                  >
+                    {lang.flag} {lang.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
 
       {/* TVmaze Sub-Filters when in TV & Series tab */}
       {activeTab === 'tv_shows' && (
@@ -1345,59 +1185,8 @@ export const MovieWorkspaceScreen: React.FC = () => {
         </View>
       )}
 
-      {/* Trakt Sub-Filters when in Trakt Social tab */}
-      {activeTab === 'trakt_social' && (
-        <View style={styles.genresContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.genresScrollContent}
-          >
-            {(
-              [
-                { id: 'trending', label: '🔥 Watching Now (Live)' },
-                { id: 'watched', label: '📊 Weekly Most Watched' },
-                { id: 'anticipated', label: '🎯 Most Anticipated' },
-                { id: 'history', label: '🕒 My Watch History' },
-              ] as const
-            ).map((sub) => {
-              const isSelected = traktFilter === sub.id;
-              return (
-                <TouchableOpacity
-                  key={sub.id}
-                  style={[
-                    styles.traktSubChip,
-                    isSelected && styles.traktSubChipActive,
-                  ]}
-                  onPress={() => setTraktFilter(sub.id)}
-                >
-                  <Text
-                    style={[
-                      styles.traktSubChipText,
-                      isSelected && styles.traktSubChipTextActive,
-                    ]}
-                  >
-                    {sub.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-
-            <TouchableOpacity
-              style={styles.traktSyncActionChip}
-              onPress={() => setIsTraktModalOpen(true)}
-            >
-              <Text style={styles.traktSyncActionChipText}>⚡ Sync Trakt</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      )}
-
       {/* Genre Chips */}
-      {activeTab !== 'watchlist' &&
-        activeTab !== 'streams' &&
-        activeTab !== 'trakt_social' &&
-        activeTab !== 'tv_shows' && (
+      {activeTab !== 'watchlist' && (
           <View style={styles.genresContainer}>
             <ScrollView
               horizontal
@@ -1460,21 +1249,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
           <ActivityIndicator size="large" color="#E11D48" />
           <Text style={styles.loadingText}>Connecting to Cinema Streamer...</Text>
         </View>
-      ) : activeTab === 'streams' ? (
-        <StreamCatalogView
-          catalog={streamCatalog}
-          insets={insets}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              tintColor="#E11D48"
-              colors={['#E11D48']}
-            />
-          }
-          onPlayStream={handlePlayStream}
-          onDownload={handleDownloadCatalog}
-        />
       ) : activeTab === 'watchlist' ? (
         <FlatList
           data={watchlist}
@@ -1508,29 +1282,22 @@ export const MovieWorkspaceScreen: React.FC = () => {
               style={styles.watchlistRow}
               activeOpacity={0.88}
               onPress={() => {
-                setSelectedMovie({
-                  id: item.tmdbId,
-                  title: item.title,
-                  overview: item.overview || '',
-                  poster_path: item.posterPath || '',
-                  backdrop_path: item.backdropPath || '',
-                  vote_average: item.voteAverage,
-                  release_date: item.releaseDate || '',
-                  genre_ids: [],
-                  runtime: item.runtime,
-                  is_tv: Boolean(item.isTv),
-                });
+                setSelectedMovie(bookmarkToMovie(item));
                 setIsDetailOpen(true);
               }}
             >
-              <Image
-                source={{
-                  uri:
-                    item.posterPath ||
-                    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80',
-                }}
-                style={styles.watchlistPoster}
-              />
+              {item.posterPath ? (
+                <Image
+                  source={{ uri: item.posterPath }}
+                  style={styles.watchlistPoster}
+                />
+              ) : (
+                <View style={[styles.watchlistPoster, styles.fallbackWatchlistPoster]}>
+                  <Text style={styles.fallbackWatchlistPosterIcon}>
+                    {item.isTv ? '📺' : '🎬'}
+                  </Text>
+                </View>
+              )}
               <View style={styles.watchlistInfo}>
                 <View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1584,7 +1351,7 @@ export const MovieWorkspaceScreen: React.FC = () => {
 
                   <TouchableOpacity
                     style={[styles.watchedBtn, item.isWatched && styles.watchedBtnActive]}
-                    onPress={() => handleToggleWatched(item.tmdbId)}
+                    onPress={() => handleToggleWatched(item.tmdbId, item.isTv)}
                   >
                     <Text
                       style={[
@@ -1653,42 +1420,8 @@ export const MovieWorkspaceScreen: React.FC = () => {
             ) : undefined
           }
           ListHeaderComponent={
-            activeTab === 'trakt_social' || activeTab === 'tv_shows' || spotlightMovie ? (
+            activeTab === 'tv_shows' || spotlightMovie ? (
               <View>
-                {/* Trakt Social Live Banner */}
-                {activeTab === 'trakt_social' && (
-                  <View style={styles.traktLiveBanner}>
-                    <View style={styles.traktLiveTopRow}>
-                      <View style={styles.traktLiveBadge}>
-                        <View style={styles.traktPulseDot} />
-                        <Text style={styles.traktLiveBadgeText}>
-                          TRAKT.TV SOCIAL RADAR
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.traktLiveSyncBtn}
-                        onPress={() => setIsTraktModalOpen(true)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.traktLiveSyncBtnText}>
-                          {traktConnectedUser
-                            ? `@${traktConnectedUser} 🔄`
-                            : '⚡ Link Account'}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                    <Text style={styles.traktLiveHeadline}>
-                      {traktFilter === 'trending'
-                        ? '🔥 Real-Time Watching Activity Across Global Media Centers'
-                        : traktFilter === 'watched'
-                          ? '📊 Most Watched Titles This Week (Plex, Kodi & Trakt)'
-                          : traktFilter === 'anticipated'
-                            ? '🎯 Top Anticipated Films on Community Watchlists'
-                            : `🕒 Watch History Logged for @${traktConnectedUser || 'You'}`}
-                    </Text>
-                  </View>
-                )}
-
                 {/* TVmaze Schedule & Series Live Banner */}
                 {activeTab === 'tv_shows' && (
                   <View style={styles.tvLiveBanner}>
@@ -1718,26 +1451,25 @@ export const MovieWorkspaceScreen: React.FC = () => {
                 {/* Spotlight Feature */}
                 {spotlightMovie ? (
                   <View style={styles.spotlightWrapper}>
-                    <Image
-                      source={{
-                        uri:
-                          spotlightMovie.backdrop_path ||
-                          spotlightMovie.poster_path ||
-                          'https://images.unsplash.com/photo-1518676590629-3dcbd9c5a5c9?w=1280&q=80',
-                      }}
-                      style={styles.spotlightBackdrop}
-                      resizeMode="cover"
-                    />
+                    {spotlightMovie.backdrop_path || spotlightMovie.poster_path ? (
+                      <Image
+                        source={{
+                          uri:
+                            spotlightMovie.backdrop_path ||
+                            spotlightMovie.poster_path,
+                        }}
+                        style={styles.spotlightBackdrop}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={[styles.spotlightBackdrop, styles.fallbackSpotlightBackdrop]} />
+                    )}
                     <View style={styles.spotlightGradient}>
                       <View style={styles.spotlightBadge}>
                         <Text style={styles.spotlightBadgeText}>
-                          {activeTab === 'trakt_social'
-                            ? spotlightMovie.trakt_watchers
-                              ? `⚡ TRAKT RADAR • ${spotlightMovie.trakt_watchers} WATCHING`
-                              : '⚡ TRAKT RADAR • LIVE COMMUNITY'
-                            : activeTab === 'tv_shows'
-                              ? `📺 TVMAZE • ${spotlightMovie.network || 'SERIES'}`
-                              : '🔥 TOP TRENDING'}
+                          {activeTab === 'tv_shows'
+                            ? `📺 TVMAZE • ${spotlightMovie.network || 'SERIES'}`
+                            : '🔥 TOP TRENDING'}
                         </Text>
                       </View>
                       <Text style={styles.spotlightTitle} numberOfLines={2}>
@@ -1745,12 +1477,8 @@ export const MovieWorkspaceScreen: React.FC = () => {
                       </Text>
                       <View style={styles.spotlightMeta}>
                         <Text style={styles.spotlightRating}>
-                          ★ {spotlightMovie.trakt_rating || spotlightMovie.vote_average}{' '}
-                          {activeTab === 'trakt_social'
-                            ? 'Trakt'
-                            : activeTab === 'tv_shows'
-                              ? 'TVmaze'
-                              : 'TMDb'}
+                          ★ {spotlightMovie.vote_average}{' '}
+                          {activeTab === 'tv_shows' ? 'TVmaze' : 'TMDb'}
                         </Text>
                         <Text style={styles.spotlightDot}>•</Text>
                         <Text style={styles.spotlightYear}>
@@ -1795,13 +1523,13 @@ export const MovieWorkspaceScreen: React.FC = () => {
                         <TouchableOpacity
                           style={[
                             styles.spotlightWatchlistBtn,
-                            isInWatchlist(spotlightMovie.id) &&
+                            isInWatchlist(spotlightMovie.id, Boolean(spotlightMovie.is_tv)) &&
                             styles.spotlightWatchlistBtnActive,
                           ]}
                           onPress={() => handleToggleWatchlist(spotlightMovie)}
                         >
                           <Text style={styles.spotlightWatchlistBtnText}>
-                            {isInWatchlist(spotlightMovie.id)
+                            {isInWatchlist(spotlightMovie.id, Boolean(spotlightMovie.is_tv))
                               ? '❤️ Saved'
                               : '+ Watchlist'}
                           </Text>
@@ -1834,24 +1562,7 @@ export const MovieWorkspaceScreen: React.FC = () => {
                     : 'Loading movies...'}
                 </Text>
               </View>
-            ) : activeTab === 'trakt_social' && traktFilter === 'history' ? (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyIcon}>🕒</Text>
-                <Text style={styles.emptyTitle}>No Trakt Watch History</Text>
-                <Text style={styles.emptySubtitle}>
-                  {traktConnectedUser
-                    ? `No watched movies logged yet for @${traktConnectedUser}. Stream titles to build your history.`
-                    : 'Connect your Trakt.tv account to see your real-time watch history and scrobbles.'}
-                </Text>
-                {!traktConnectedUser && (
-                  <TouchableOpacity
-                    style={[styles.retryBtn, { marginTop: 14 }]}
-                    onPress={() => setIsTraktModalOpen(true)}
-                  >
-                    <Text style={styles.retryBtnText}>⚡ Link Trakt Account</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+
             ) : (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyIcon}>🎬</Text>
@@ -1871,7 +1582,7 @@ export const MovieWorkspaceScreen: React.FC = () => {
         <MovieDetailModal
           visible={isDetailOpen}
           movie={selectedMovie}
-          isBookmarked={isInWatchlist(selectedMovie.id)}
+          isBookmarked={isInWatchlist(selectedMovie.id, Boolean(selectedMovie.is_tv))}
           insets={insets}
           onClose={() => setIsDetailOpen(false)}
           onStream={(m) => handleStreamMovie(m, Boolean(m.is_tv))}
@@ -1922,6 +1633,26 @@ export const MovieWorkspaceScreen: React.FC = () => {
           isBuffering={isPlayerBuffering}
           streamError={streamError}
           playerReloadKey={playerReloadKey}
+          isBookmarked={
+            activeStreamItem.tmdbId
+              ? isInWatchlist(Number(activeStreamItem.tmdbId), activeStreamItem.isTv)
+              : false
+          }
+          onToggleBookmark={() => {
+            if (activeStreamItem.tmdbId) {
+              handleToggleWatchlist({
+                id: activeStreamItem.tmdbId,
+                title: activeStreamItem.title,
+                is_tv: activeStreamItem.isTv,
+                overview: '',
+                poster_path: '',
+                backdrop_path: '',
+                vote_average: 0,
+                release_date: '',
+                genre_ids: [],
+              } as Movie);
+            }
+          }}
           onClose={() => {
             setIsStreamModalOpen(false);
             setActiveStreamItem(null);
@@ -1935,9 +1666,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
           onSelectSeason={handleSelectSeason}
           onSelectEpisode={handleSelectEpisode}
           onSwitchNextServer={handleSwitchToNextServer}
-          onToggleMediaType={(isTv) =>
-            setActiveStreamItem((prev) => (prev ? { ...prev, isTv } : null))
-          }
           onLoadStart={() => {
             setIsPlayerBuffering(true);
             setStreamError(null);
@@ -1987,19 +1715,6 @@ export const MovieWorkspaceScreen: React.FC = () => {
         />
       )}
 
-      {/* --- TRAKT.TV SOCIAL & WATCHLIST SYNC MODAL (Lazy Loaded) --- */}
-      {isTraktModalOpen && (
-        <TraktSyncModal
-          visible={isTraktModalOpen}
-          insets={insets}
-          onClose={() => setIsTraktModalOpen(false)}
-          onSyncComplete={() => {
-            loadWatchlist();
-            traktService.getConnectedUsername().then((u) => setTraktConnectedUser(u || ''));
-            loadMovies(1, false);
-          }}
-        />
-      )}
     </View>
 
   );
@@ -2276,6 +1991,9 @@ const styles = StyleSheet.create({
     height: '100%',
     position: 'absolute',
   },
+  fallbackSpotlightBackdrop: {
+    backgroundColor: '#161B26',
+  },
   spotlightGradient: {
     flex: 1,
     backgroundColor: 'rgba(9, 11, 16, 0.72)',
@@ -2416,6 +2134,14 @@ const styles = StyleSheet.create({
     height: 135,
     backgroundColor: '#1A1E29',
   },
+  fallbackWatchlistPoster: {
+    backgroundColor: '#161B26',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackWatchlistPosterIcon: {
+    fontSize: 28,
+  },
   watchlistInfo: {
     flex: 1,
     padding: 10,
@@ -2507,133 +2233,6 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontSize: 11,
     fontWeight: '600',
-  },
-  // --- Trakt Header Button Styles ---
-  traktHeaderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#161B26',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#262D3D',
-    gap: 5,
-  },
-  traktHeaderBtnConnected: {
-    borderColor: '#ED1C24',
-    backgroundColor: 'rgba(237, 28, 36, 0.12)',
-  },
-  traktHeaderBtnIcon: {
-    color: '#ED1C24',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  traktHeaderBtnText: {
-    color: '#F9FAFB',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  traktHeaderDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#6B7280',
-  },
-  traktHeaderDotConnected: {
-    backgroundColor: '#10B981',
-  },
-  // --- Trakt Sub-Filter Chips ---
-  traktSubChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: '#11141D',
-    borderWidth: 1,
-    borderColor: '#1E2433',
-  },
-  traktSubChipActive: {
-    backgroundColor: 'rgba(237, 28, 36, 0.2)',
-    borderColor: '#ED1C24',
-  },
-  traktSubChipText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  traktSubChipTextActive: {
-    color: '#ED1C24',
-    fontWeight: '700',
-  },
-  traktSyncActionChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: '#ED1C24',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  traktSyncActionChipText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  // --- Trakt Live Radar Banner ---
-  traktLiveBanner: {
-    marginHorizontal: 12,
-    marginTop: 6,
-    marginBottom: 10,
-    backgroundColor: '#121622',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#242C3D',
-  },
-  traktLiveTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  traktLiveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(237, 28, 36, 0.18)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 0.5,
-    borderColor: '#ED1C24',
-    gap: 6,
-  },
-  traktPulseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#ED1C24',
-  },
-  traktLiveBadgeText: {
-    color: '#ED1C24',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  traktLiveSyncBtn: {
-    backgroundColor: '#1A202E',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  traktLiveSyncBtnText: {
-    color: '#E5E7EB',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  traktLiveHeadline: {
-    color: '#E5E7EB',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18,
   },
   // --- TVmaze Sub-Filter Chips ---
   tvSubChip: {
@@ -2728,6 +2327,37 @@ const styles = StyleSheet.create({
     color: '#60A5FA',
     fontSize: 12,
     fontWeight: '700',
+  },
+  languageFilterContainer: {
+    paddingVertical: 6,
+    backgroundColor: '#090B10',
+    borderBottomWidth: 1,
+    borderBottomColor: '#161B26',
+  },
+  languageFilterScroll: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  langFilterPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: '#121620',
+    borderWidth: 1,
+    borderColor: '#1E2433',
+  },
+  langFilterPillActive: {
+    backgroundColor: 'rgba(225, 29, 72, 0.15)',
+    borderColor: '#E11D48',
+  },
+  langFilterPillText: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  langFilterPillTextActive: {
+    color: '#F43F5E',
+    fontWeight: '800',
   },
 });
 

@@ -1,3 +1,6 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
+
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -33,7 +36,7 @@ export class User {
   isOnline!: boolean;
 
   @Column({
-    type: 'timestamptz',
+    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'datetime' : 'timestamptz') as any,
     nullable: true,
   })
   lastSeen!: Date | null;
@@ -126,7 +129,7 @@ export class User {
   isBanned!: boolean;
 
   @Column({
-    type: 'timestamptz',
+    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'datetime' : 'timestamptz') as any,
     nullable: true,
   })
   bannedAt!: Date | null;
@@ -144,7 +147,7 @@ export class User {
   isCreator!: boolean;
 
   @Column({
-    type: 'timestamptz',
+    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'datetime' : 'timestamptz') as any,
     nullable: true,
   })
   mutedUntil!: Date | null;

@@ -50,6 +50,10 @@ class ChatSocketManager {
   private typingTimeout?: ReturnType<typeof setTimeout>;
   private callDurationTimer?: ReturnType<typeof setInterval>;
   private expirationSweepTimer?: ReturnType<typeof setInterval>;
+  private batteryUnsub: (() => void) | null = null;
+  private isJoinedRoom: boolean = false;
+  private typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private webrtcSignalListeners: Set<(signal: { type: string; payload: any }) => void> = new Set();
 
   constructor() {
     this.sessionToken = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -58,6 +62,10 @@ class ChatSocketManager {
   // --- Getters ---
   public get isConnected(): boolean {
     return Boolean(this.socket && this.socket.connected);
+  }
+
+  public get isJoined(): boolean {
+    return this.isJoinedRoom;
   }
 
   public get connectionState(): 'disconnected' | 'connecting' | 'connected' {
@@ -136,6 +144,23 @@ class ChatSocketManager {
 
   public get isAdmin(): boolean {
     return this.currentUser?.role === 'host' || this.currentUser?.role === 'admin';
+  }
+
+  public resolveFileUrl(url?: string | null): string {
+    if (!url || typeof url !== 'string') return '';
+    const trimmed = url.trim();
+    if (
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('file://') ||
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:')
+    ) {
+      return trimmed;
+    }
+    const base = (this.serverUrl || '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
+    const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    return `${base}${cleanPath}`;
   }
 
   // --- Subscriptions ---
@@ -284,7 +309,7 @@ class ChatSocketManager {
   }
 
   private persistOutboxQueue() {
-    settingsRepository.set('chat_offline_outbox', JSON.stringify(this.outboxQueue)).catch(() => {});
+    settingsRepository.set('chat_offline_outbox', JSON.stringify(this.outboxQueue)).catch(() => { });
   }
 
   private flushOutboxQueue() {
@@ -398,10 +423,16 @@ class ChatSocketManager {
 
       // Emit joinRoom first to establish server session before flushing queued messages
       this.socket?.emit('joinRoom', joinPayload, (res: any) => {
-        if (res && !res.success) {
+        if (res && res.success === false) {
           console.warn('[JoinRoom] Server response failed:', res.message);
+          this.connectionStatus = 'disconnected';
+          this.connectionError = res.message || 'Failed to join room';
+          this.isJoinedRoom = false;
+          this.notify();
         } else {
+          this.isJoinedRoom = true;
           this.flushOutboxQueue();
+          this.notify();
         }
       });
 
@@ -414,9 +445,27 @@ class ChatSocketManager {
       this.socket?.emit('getStatuses', { passcode: this.currentPasscode });
       this.socket?.emit('getWatchPartyState', { passcode: this.currentPasscode });
 
-      // Start ping loop for latency & server time offset sync
-      if (this.pingTimer) clearInterval(this.pingTimer);
-      this.pingTimer = setInterval(() => {
+      // Subscribe to real-time battery status changes to keep room presence accurate
+      if (this.batteryUnsub) {
+        this.batteryUnsub();
+      }
+      this.batteryUnsub = batteryService.subscribeStatus((st) => {
+        if (this.socket?.connected && this.currentPasscode) {
+          const newLabel = `${st.level}%`;
+          if (newLabel !== batteryLabel || st.isCharging !== batteryIsCharging) {
+            batteryLabel = newLabel;
+            batteryIsCharging = st.isCharging;
+            this.socket.emit('updateMetadata', {
+              passcode: this.currentPasscode,
+              batteryLabel: newLabel,
+              batteryIsCharging: st.isCharging,
+            });
+          }
+        }
+      });
+
+      // Start ping loop for latency & server time offset sync with immediate initial calibration
+      const runPing = () => {
         if (this.socket?.connected) {
           const start = Date.now();
           this.socket.emit('clientPing', { clientTime: start }, (res?: any) => {
@@ -426,7 +475,8 @@ class ChatSocketManager {
             this.latencyMs = newLatency;
             if (res && typeof res.serverTime === 'number') {
               const estimatedHalfRoundTrip = (now - start) / 2;
-              this.serverTimeOffsetMs = res.serverTime - (start + estimatedHalfRoundTrip);
+              this.serverTimeOffsetMs =
+                res.serverTime - (start + estimatedHalfRoundTrip);
             }
             const pruned = this.pruneExpiredMessages();
             // Throttle notifications to only significant latency changes (>=15ms) or expired message pruning
@@ -435,7 +485,11 @@ class ChatSocketManager {
             }
           });
         }
-      }, 10000);
+      };
+
+      runPing();
+      if (this.pingTimer) clearInterval(this.pingTimer);
+      this.pingTimer = setInterval(runPing, 10000);
 
       this.notify();
     });
@@ -443,6 +497,7 @@ class ChatSocketManager {
     this.socket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
       this.connectionStatus = 'disconnected';
+      this.isJoinedRoom = false;
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.notify();
     });
@@ -450,6 +505,7 @@ class ChatSocketManager {
     this.socket.on('connect_error', (err) => {
       console.warn('[Socket] Connect error:', err.message);
       this.connectionStatus = 'disconnected';
+      this.isJoinedRoom = false;
       this.connectionError = err.message || 'Connection refused or server offline';
       this.notify();
     });
@@ -458,6 +514,27 @@ class ChatSocketManager {
       this.socket.io.on('reconnect_attempt', () => {
         this.connectionStatus = 'connecting';
         this.notify();
+      });
+      this.socket.io.on('reconnect', () => {
+        console.log('[Socket] Reconnected, re-joining room and flushing outbox...');
+        if (this.currentPasscode && this.currentNickname) {
+          this.socket?.emit(
+            'joinRoom',
+            {
+              passcode: this.currentPasscode,
+              nickname: this.currentNickname,
+              sessionToken: this.sessionToken,
+            },
+            () => {
+              this.isJoinedRoom = true;
+              this.flushOutboxQueue();
+              this.notify();
+            }
+          );
+          setTimeout(() => {
+            this.flushOutboxQueue();
+          }, 1000);
+        }
       });
       this.socket.io.on('reconnect_failed', () => {
         console.warn('[Socket] Reconnection stopped after max attempts');
@@ -469,6 +546,7 @@ class ChatSocketManager {
 
     // Chat History & Messages (Preserves unconfirmed pending messages during sync)
     const mergeWithPending = (history: ChatMessage[]) => {
+      this.isJoinedRoom = true;
       const serverHistory = Array.isArray(history) ? history : [];
       const pendingMessages = this.messages.filter(
         (m) => typeof m.id === 'string' && (m.id.startsWith('offline_') || m.id.startsWith('pending_'))
@@ -668,34 +746,47 @@ class ChatSocketManager {
     this.socket.on('historyCleared', () => {
       this.messages = [];
       if (this.currentPasscode) {
-        settingsRepository.set(`chat_cache_${this.currentPasscode.trim().toLowerCase()}`, '[]').catch(() => {});
+        settingsRepository.set(`chat_cache_${this.currentPasscode.trim().toLowerCase()}`, '[]').catch(() => { });
       }
       this.notify();
     });
 
-    // Typing Indicators
+    // Typing Indicators with Auto-Expiration (4s TTL)
     this.socket.on('userTyping', ({ nickname }: { nickname: string }) => {
       if (nickname && nickname.toLowerCase() !== this.currentNickname.toLowerCase()) {
+        const lower = nickname.toLowerCase();
+        const existingTimer = this.typingTimers.get(lower);
+        if (existingTimer) clearTimeout(existingTimer);
+
         if (!this.typingUsers.includes(nickname)) {
           this.typingUsers = [...this.typingUsers, nickname];
           this.notify();
         }
+
+        const timer = setTimeout(() => {
+          this.typingUsers = this.typingUsers.filter((u) => u.toLowerCase() !== lower);
+          this.typingTimers.delete(lower);
+          this.notify();
+        }, 4000);
+        this.typingTimers.set(lower, timer);
       }
     });
 
-    this.socket.on('userStoppedTyping', ({ nickname }: { nickname: string }) => {
-      this.typingUsers = this.typingUsers.filter(
-        (u) => u.toLowerCase() !== (nickname || '').toLowerCase()
-      );
-      this.notify();
-    });
+    const handleUserStop = ({ nickname }: { nickname: string }) => {
+      if (nickname) {
+        const lower = nickname.toLowerCase();
+        const timer = this.typingTimers.get(lower);
+        if (timer) {
+          clearTimeout(timer);
+          this.typingTimers.delete(lower);
+        }
+        this.typingUsers = this.typingUsers.filter((u) => u.toLowerCase() !== lower);
+        this.notify();
+      }
+    };
 
-    this.socket.on('userStopTyping', ({ nickname }: { nickname: string }) => {
-      this.typingUsers = this.typingUsers.filter(
-        (u) => u.toLowerCase() !== (nickname || '').toLowerCase()
-      );
-      this.notify();
-    });
+    this.socket.on('userStoppedTyping', handleUserStop);
+    this.socket.on('userStopTyping', handleUserStop);
 
     // Users List & Presence
     this.socket.on('usersList', (users: RoomUser[]) => {
@@ -881,6 +972,39 @@ class ChatSocketManager {
       Alert.alert('User Busy', data?.message || 'The user is currently on another call.');
       this.resetCall();
     });
+
+    // WebRTC Signaling Events
+    this.socket.on('webrtcOffer', (payload: any) => {
+      this.webrtcSignalListeners.forEach((fn) => {
+        try {
+          fn({ type: 'offer', payload });
+        } catch { }
+      });
+    });
+
+    this.socket.on('webrtcAnswer', (payload: any) => {
+      this.webrtcSignalListeners.forEach((fn) => {
+        try {
+          fn({ type: 'answer', payload });
+        } catch { }
+      });
+    });
+
+    this.socket.on('webrtcCandidate', (payload: any) => {
+      this.webrtcSignalListeners.forEach((fn) => {
+        try {
+          fn({ type: 'candidate', payload });
+        } catch { }
+      });
+    });
+
+    this.socket.on('webrtcMediaState', (payload: any) => {
+      this.webrtcSignalListeners.forEach((fn) => {
+        try {
+          fn({ type: 'mediaState', payload });
+        } catch { }
+      });
+    });
   }
 
   private startCallDurationTimer() {
@@ -965,7 +1089,7 @@ class ChatSocketManager {
   }
 
   public sendDirectMessage(targetNickname: string, text: string, extraProps: Record<string, any> = {}) {
-    if (!text.trim() || !targetNickname.trim()) return;
+    if ((!text.trim() && !extraProps.fileUrl && !extraProps.pollData) || !targetNickname.trim()) return;
 
     const tempId = `offline_dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const payload = {
@@ -1050,19 +1174,56 @@ class ChatSocketManager {
     if (!this.socket) return;
     if (typeof messageId === 'string' && messageId.startsWith('offline_')) return;
 
-    // Instant optimistic poll feedback
+    // Instant optimistic poll feedback matching backend toggle/multi-choice semantics
     const myNick = this.currentNickname.trim().toLowerCase();
     this.messages = this.messages.map((m) => {
       if (String(m.id) === String(messageId) && m.pollData?.options) {
+        const isMulti = Boolean(m.pollData.allowMultiple);
+        const targetOpt = m.pollData.options.find(
+          (o: any) => String(o.id) === String(optionId)
+        );
+        const alreadyVotedTarget = Boolean(
+          targetOpt?.votes?.some(
+            (v: string) => (v || '').trim().toLowerCase() === myNick
+          )
+        );
+
         const nextOptions = m.pollData.options.map((opt: any) => {
-          const votesWithoutMe = (opt.votes || []).filter(
-            (v: string) => (v || '').trim().toLowerCase() !== myNick
-          );
+          const votes = opt.votes || [];
           if (String(opt.id) === String(optionId)) {
-            votesWithoutMe.push(this.currentNickname);
+            if (alreadyVotedTarget) {
+              // Unvote / toggle off
+              return {
+                ...opt,
+                votes: votes.filter(
+                  (v: string) => (v || '').trim().toLowerCase() !== myNick
+                ),
+              };
+            } else {
+              // Cast vote
+              return {
+                ...opt,
+                votes: [
+                  ...votes.filter(
+                    (v: string) => (v || '').trim().toLowerCase() !== myNick
+                  ),
+                  this.currentNickname,
+                ],
+              };
+            }
+          } else if (!isMulti) {
+            // In single-choice mode, remove my vote from all other options
+            return {
+              ...opt,
+              votes: votes.filter(
+                (v: string) => (v || '').trim().toLowerCase() !== myNick
+              ),
+            };
           }
-          return { ...opt, votes: votesWithoutMe };
+          // In multi-choice mode, keep votes on other options
+          return opt;
         });
+
         return { ...m, pollData: { ...m.pollData, options: nextOptions } };
       }
       return m;
@@ -1235,6 +1396,47 @@ class ChatSocketManager {
     });
   }
 
+  // --- WebRTC Signaling Methods ---
+  public subscribeWebrtcSignal(listener: (signal: { type: string; payload: any }) => void): () => void {
+    this.webrtcSignalListeners.add(listener);
+    return () => {
+      this.webrtcSignalListeners.delete(listener);
+    };
+  }
+
+  public sendWebrtcOffer(offer: any, targetSocketId?: string, isVoiceOnly: boolean = false) {
+    if (!this.socket) return;
+    this.socket.emit('webrtcOffer', {
+      passcode: this.currentPasscode,
+      offer,
+      targetSocketId,
+      isVoiceOnly,
+      callerName: this.currentNickname,
+      from: this.currentNickname,
+    });
+  }
+
+  public sendWebrtcAnswer(answer: any, targetSocketId?: string) {
+    if (!this.socket) return;
+    this.socket.emit('webrtcAnswer', {
+      passcode: this.currentPasscode,
+      answer,
+      targetSocketId,
+      receiverName: this.currentNickname,
+      from: this.currentNickname,
+    });
+  }
+
+  public sendWebrtcCandidate(candidate: any, targetSocketId?: string) {
+    if (!this.socket) return;
+    this.socket.emit('webrtcCandidate', {
+      passcode: this.currentPasscode,
+      candidate,
+      targetSocketId,
+      from: this.currentNickname,
+    });
+  }
+
   // --- Watch Party Actions ---
   public watchPartyAction(
     action: 'open' | 'invite' | 'accept' | 'play' | 'pause' | 'seek' | 'rate' | 'change_video' | 'close' | 'lock_controls',
@@ -1372,8 +1574,18 @@ class ChatSocketManager {
     if (this.typingTimeout) clearTimeout(this.typingTimeout);
     if (this.callDurationTimer) clearInterval(this.callDurationTimer);
     if (this.expirationSweepTimer) clearInterval(this.expirationSweepTimer);
+    if (this.batteryUnsub) {
+      this.batteryUnsub();
+      this.batteryUnsub = null;
+    }
+
+    for (const timer of this.typingTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.typingTimers.clear();
 
     this.connectionStatus = 'disconnected';
+    this.isJoinedRoom = false;
     this.messages = [];
     this.users = [];
     this.statuses = [];

@@ -14,18 +14,8 @@ import {
 } from 'react-native';
 import { EdgeInsets } from 'react-native-safe-area-context';
 
-export interface DownloadItemState {
-  title: string;
-  posterUrl?: string;
-  quality?: string;
-  downloadUrl?: string;
-  isResolving: boolean;
-  error?: string;
-  movie?: any;
-  isTv?: boolean;
-  season?: number;
-  episode?: number;
-}
+import { DownloadItemState } from '../../types';
+export type { DownloadItemState };
 
 interface DownloadModalProps {
   visible: boolean;
@@ -41,42 +31,12 @@ export const DownloadModal: React.FC<DownloadModalProps> = React.memo(
 
     const handleSystemDownload = async () => {
       if (!item.downloadUrl) {
-        Alert.alert('Download Error', 'No active download link available.');
-        return;
-      }
-
-      if (item.downloadUrl.includes('.m3u8')) {
-        Alert.alert(
-          '🎬 HLS Stream Download',
-          'This movie is an HD streaming manifest. Mobile browsers (like Chrome) cannot assemble streaming chunks into an MP4 video file.\n\nTo download the full movie directly into your phone Gallery as an MP4, please use 1DM or ADM (free on Play Store)!',
-          [
-            {
-              text: '⚡ Open in 1DM / ADM (Recommended)',
-              onPress: handleShareOrExternalDownloader,
-            },
-            {
-              text: '🌐 Open in Browser Anyway',
-              onPress: async () => {
-                try {
-                  await Linking.openURL(item.downloadUrl!);
-                } catch {
-                  handleShareOrExternalDownloader();
-                }
-              },
-            },
-            { text: 'Cancel', style: 'cancel' },
-          ],
-        );
+        Alert.alert('Download Notice', 'No direct download link is currently available for this title.');
         return;
       }
 
       try {
-        const supported = await Linking.canOpenURL(item.downloadUrl);
-        if (supported) {
-          await Linking.openURL(item.downloadUrl);
-        } else {
-          await Linking.openURL(item.downloadUrl);
-        }
+        await Linking.openURL(item.downloadUrl);
       } catch {
         handleShareOrExternalDownloader();
       }

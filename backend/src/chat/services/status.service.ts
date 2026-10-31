@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
+import * as fs from 'fs';
+import { join } from 'path';
 
 import { Status } from '../../status/status.entity';
 import { Room } from '../../rooms/room.entity';
@@ -33,13 +35,19 @@ export class StatusService {
     session: UserSession | undefined,
     data: CreateStatusDto,
   ) {
-    if (!session || session.passcode !== data.passcode.trim()) {
+    const cleanPass = data.passcode.trim();
+    if (!session || session.passcode.trim().toLowerCase() !== cleanPass.toLowerCase()) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
+    let room = await this.roomRepo.findOne({
+      where: { passcode: cleanPass },
     });
+    if (!room) {
+      room = await this.roomRepo.findOne({
+        where: { passcode: cleanPass.toLowerCase() },
+      });
+    }
     if (!room) return { success: false, message: 'Room not found' };
 
     const user = await this.userRepo.findOne({
@@ -61,11 +69,14 @@ export class StatusService {
         user.mutedUntil = null;
         await this.userRepo.save(user);
         session.isMuted = false;
-        server.to(room.passcode).emit('userMuteToggled', {
-          targetNickname: user.nickname,
-          isMuted: false,
-          mutedBy: 'System (Timed Mute Expired)',
-        });
+        server
+          .to(room.passcode)
+          .to(room.passcode.toLowerCase())
+          .emit('userMuteToggled', {
+            targetNickname: user.nickname,
+            isMuted: false,
+            mutedBy: 'System (Timed Mute Expired)',
+          });
       } else {
         client.emit('error', {
           message: 'You are muted and cannot post status stories.',
@@ -136,7 +147,9 @@ export class StatusService {
 
     server
       .to(roomPasscode)
+      .to(roomPasscode.toLowerCase())
       .to(dataPasscode)
+      .to(dataPasscode.toLowerCase())
       .emit('statusCreated', statusPayload);
 
     return { success: true, status: savedStatus };
@@ -149,9 +162,14 @@ export class StatusService {
   ) {
     const targetPasscode = (data?.passcode || session?.passcode || '').trim();
 
-    const room = await this.roomRepo.findOne({
+    let room = await this.roomRepo.findOne({
       where: { passcode: targetPasscode },
     });
+    if (!room) {
+      room = await this.roomRepo.findOne({
+        where: { passcode: targetPasscode.toLowerCase() },
+      });
+    }
     if (!room) return [];
 
     const now = new Date();
@@ -187,11 +205,14 @@ export class StatusService {
       await this.statusRepo.save(status);
     }
 
-    const trimmedPasscode = (data.passcode || session.passcode).trim();
-    server.to(trimmedPasscode).emit('statusViewed', {
-      statusId: status.id,
-      viewers: status.viewers,
-    });
+    const trimmedPasscode = (data.passcode || session.passcode || '').trim();
+    server
+      .to(trimmedPasscode)
+      .to(trimmedPasscode.toLowerCase())
+      .emit('statusViewed', {
+        statusId: status.id,
+        viewers: status.viewers,
+      });
   }
 
   async deleteStatus(
@@ -206,26 +227,75 @@ export class StatusService {
     });
     if (!status) return;
 
-    if (status.nickname !== session.nickname) {
+    if (status.nickname !== session.nickname && session.role !== 'host') {
       return; // Unauthorized delete attempt
+    }
+
+    if (
+      status.mediaUrl &&
+      (status.mediaUrl.includes('/uploads/') || status.mediaUrl.includes('/api/uploads/'))
+    ) {
+      try {
+        const uploadDirName = process.env.UPLOAD_DIR || 'uploads';
+        const filename = status.mediaUrl.split('/').pop()?.split('?')[0];
+        if (filename) {
+          const filePath = join(process.cwd(), uploadDirName, filename);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        }
+      } catch (err) {
+        console.warn('[DeleteStatus] Could not unlink media file:', err);
+      }
     }
 
     await this.statusRepo.remove(status);
 
-    const trimmedPasscode = (data.passcode || session.passcode).trim();
-    server.to(trimmedPasscode).emit('statusDeleted', {
-      statusId: data.statusId,
-    });
+    const trimmedPasscode = (data.passcode || session.passcode || '').trim();
+    server
+      .to(trimmedPasscode)
+      .to(trimmedPasscode.toLowerCase())
+      .emit('statusDeleted', {
+        statusId: data.statusId,
+      });
   }
 
   async cleanupExpiredStatuses(now: Date = new Date()) {
     try {
-      await this.statusRepo
-        .createQueryBuilder()
-        .delete()
-        .from(Status)
-        .where('expiresAt IS NOT NULL AND expiresAt <= :now', { now })
-        .execute();
+      const expired = await this.statusRepo
+        .createQueryBuilder('status')
+        .where('status.expiresAt IS NOT NULL AND status.expiresAt <= :now', { now })
+        .getMany();
+
+      if (expired.length > 0) {
+        const uploadDirName = process.env.UPLOAD_DIR || 'uploads';
+        for (const st of expired) {
+          if (
+            st.mediaUrl &&
+            (st.mediaUrl.includes('/uploads/') || st.mediaUrl.includes('/api/uploads/'))
+          ) {
+            try {
+              const filename = st.mediaUrl.split('/').pop()?.split('?')[0];
+              if (filename) {
+                const filePath = join(process.cwd(), uploadDirName, filename);
+                if (fs.existsSync(filePath)) {
+                  fs.unlinkSync(filePath);
+                }
+              }
+            } catch (err) {
+              console.warn('[StatusCleanup] Could not unlink media file:', err);
+            }
+          }
+        }
+
+        const ids = expired.map((s) => s.id);
+        await this.statusRepo
+          .createQueryBuilder()
+          .delete()
+          .from(Status)
+          .where('id IN (:...ids)', { ids })
+          .execute();
+      }
     } catch {
       // Non-critical if table not yet initialized
     }

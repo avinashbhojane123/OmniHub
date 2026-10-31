@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,8 @@ import {
   StatusBar,
   Linking,
 } from 'react-native';
-import notifee from '@notifee/react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import notifee, { EventType } from '@notifee/react-native';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { getDatabase } from './src/database/connection';
 import { notificationService } from './src/services/notifications/NotificationService';
@@ -18,14 +18,27 @@ import { batteryService } from './src/services/battery/BatteryService';
 import { AlarmRingingModal } from './src/components/AlarmRingingModal';
 import { ThemeProvider, useAppTheme } from './src/hooks/useTheme';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { settingsRepository } from './src/database/repositories/SettingsRepository';
+import { googleSheetsSyncService } from './src/services/backup/GoogleSheetsSyncService';
+import { taskBackendSyncService } from './src/services/tasks/TaskBackendSyncService';
+import { FocusTimerProvider } from './src/context/FocusTimerContext';
+
+type StartupWorkspaceRoute =
+  | 'WorkspaceSelect'
+  | 'MainTabs'
+  | 'BatteryAlarm'
+  | 'ChatRoom'
+  | 'MovieWorkspace';
 
 function MainApp() {
   const [ready, setReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
-  const [initialRoute, setInitialRoute] = useState<string>('WorkspaceSelect');
+  const [initialRoute, setInitialRoute] = useState<StartupWorkspaceRoute>('WorkspaceSelect');
   const { colors } = useAppTheme();
+  const isMountedRef = useRef(true);
 
   const bootstrap = useCallback(async () => {
+    if (!isMountedRef.current) return;
     setInitError(null);
     setReady(false);
     try {
@@ -63,8 +76,11 @@ function MainApp() {
             notifId === 'active_ringing_alarm')
         ) {
           await alarmService.handleNotificationAction({
-            type: 1, // EventType.PRESS
-            detail: initialNotif as any,
+            type: EventType.PRESS,
+            detail: {
+              notification: initialNotif.notification,
+              pressAction: initialNotif.pressAction,
+            },
           });
         }
 
@@ -79,7 +95,15 @@ function MainApp() {
           }
         }
 
-        if (deepLinkWs) {
+        if (!deepLinkWs) {
+          // Check saved default workspace setting on cold start
+          const savedDefault = await settingsRepository.get('default_workspace');
+          if (savedDefault && savedDefault !== 'select') {
+            deepLinkWs = savedDefault;
+          }
+        }
+
+        if (isMountedRef.current) {
           if (deepLinkWs === 'planner') {
             setInitialRoute('MainTabs');
           } else if (deepLinkWs === 'battery') {
@@ -87,35 +111,43 @@ function MainApp() {
           } else if (deepLinkWs === 'chat') {
             setInitialRoute('ChatRoom');
           } else if (deepLinkWs === 'movies') {
-            setInitialRoute('MoviesScreen');
+            setInitialRoute('MovieWorkspace');
           } else {
             setInitialRoute('WorkspaceSelect');
           }
-        } else {
-          setInitialRoute('WorkspaceSelect');
         }
       } catch (wsErr) {
         console.warn('Failed to resolve startup workspace:', wsErr);
-        setInitialRoute('WorkspaceSelect');
+        if (isMountedRef.current) {
+          setInitialRoute('WorkspaceSelect');
+        }
       }
 
-      // Render UI frame 1 immediately
-      setReady(true);
+      // Render UI immediately
+      if (isMountedRef.current) {
+        setReady(true);
+      }
 
-      // In background: quietly restore scheduled alarms & pending reminders without stalling cold-start UI
+      // In background: quietly restore scheduled alarms, pending reminders, & cloud state without stalling cold-start UI
       Promise.all([
         notificationService.restoreAllReminders(),
-        alarmService.restoreAllHabitAlarms(),
-        alarmService.restoreAllEventAlarms(),
+        googleSheetsSyncService.autoRestoreIfEmptyOnStartup(),
+        taskBackendSyncService.syncWithBackend(),
       ]).catch((e) => console.warn('Background reminder restoration error:', e));
     } catch (err: any) {
       console.error('App bootstrap error:', err);
-      setInitError(err?.message || 'Database initialization failed.');
+      if (isMountedRef.current) {
+        setInitError(err?.message || 'Database initialization failed.');
+      }
     }
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
     bootstrap();
+    return () => {
+      isMountedRef.current = false;
+    };
   }, [bootstrap]);
 
   if (initError) {
@@ -153,20 +185,24 @@ function MainApp() {
   }
 
   return (
-    <SafeAreaProvider>
+    <>
       <StatusBar barStyle={colors.statusBar} />
       <RootNavigator initialRouteName={initialRoute} />
       <AlarmRingingModal />
-    </SafeAreaProvider>
+    </>
   );
 }
 
 export default function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider>
-        <MainApp />
-      </ThemeProvider>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics ?? undefined}>
+        <ThemeProvider>
+          <FocusTimerProvider>
+            <MainApp />
+          </FocusTimerProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
     </ErrorBoundary>
   );
 }

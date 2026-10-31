@@ -19,17 +19,24 @@ export const MovieCard: React.FC<MovieCardProps> = React.memo(
         onPress={() => onPress(movie)}
       >
         <View style={styles.posterContainer}>
-          <Image
-            source={{
-              uri:
-                movie.poster_path ||
-                'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80',
-            }}
-            style={styles.cardPoster}
-            resizeMode="cover"
-            progressiveRenderingEnabled
-            fadeDuration={200}
-          />
+          {movie.poster_path ? (
+            <Image
+              source={{ uri: movie.poster_path }}
+              style={styles.cardPoster}
+              resizeMode="cover"
+              progressiveRenderingEnabled
+              fadeDuration={200}
+            />
+          ) : (
+            <View style={styles.fallbackPosterWrap}>
+              <Text style={styles.fallbackPosterIcon}>
+                {movie.is_tv ? '📺' : '🎬'}
+              </Text>
+              <Text style={styles.fallbackPosterTitle} numberOfLines={2}>
+                {movie.title}
+              </Text>
+            </View>
+          )}
 
           {/* Rating Tag */}
           <View style={styles.ratingBadge}>
@@ -45,23 +52,11 @@ export const MovieCard: React.FC<MovieCardProps> = React.memo(
             </View>
           ) : null}
 
-          {/* Trakt Social Metrics Badge */}
-          {movie.trakt_watchers ? (
-            <View style={styles.traktSocialBadge}>
-              <Text style={styles.traktSocialBadgeText}>
-                🔥 {movie.trakt_watchers} watching
-              </Text>
-            </View>
-          ) : movie.trakt_plays ? (
-            <View style={styles.traktSocialBadge}>
-              <Text style={styles.traktSocialBadgeText}>
-                ▶ {Math.round(movie.trakt_plays / 1000)}k plays
-              </Text>
-            </View>
-          ) : movie.trakt_list_count ? (
-            <View style={styles.traktSocialBadge}>
-              <Text style={styles.traktSocialBadgeText}>
-                🎯 {Math.round(movie.trakt_list_count / 1000)}k wanted
+          {/* Spoken/Original Language Tag */}
+          {movie.original_language && movie.original_language !== 'en' ? (
+            <View style={styles.langBadge}>
+              <Text style={styles.langBadgeText}>
+                {movie.original_language.toUpperCase()}
               </Text>
             </View>
           ) : null}
@@ -94,11 +89,7 @@ export const MovieCard: React.FC<MovieCardProps> = React.memo(
               {movie.release_date ? movie.release_date.slice(0, 4) : ''}
               {movie.network ? ` • ${movie.network}` : ''}
             </Text>
-            {movie.trakt_rating ? (
-              <View style={styles.traktCardScore}>
-                <Text style={styles.traktCardScoreText}>⚡ {movie.trakt_rating}</Text>
-              </View>
-            ) : movie.is_tv ? (
+            {movie.is_tv ? (
               <View style={styles.tvCardBadge}>
                 <Text style={styles.tvCardBadgeText}>SERIES</Text>
               </View>
@@ -114,8 +105,11 @@ export const MovieCard: React.FC<MovieCardProps> = React.memo(
     prev.movie.id === next.movie.id &&
     prev.cardWidth === next.cardWidth &&
     prev.isBookmarked === next.isBookmarked &&
-    prev.movie.trakt_watchers === next.movie.trakt_watchers &&
-    prev.movie.network === next.movie.network,
+    prev.movie.network === next.movie.network &&
+    prev.movie.title === next.movie.title &&
+    prev.movie.poster_path === next.movie.poster_path &&
+    prev.movie.vote_average === next.movie.vote_average &&
+    prev.movie.original_language === next.movie.original_language,
 );
 
 
@@ -137,6 +131,24 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  fallbackPosterWrap: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#161B26',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  fallbackPosterIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  fallbackPosterTitle: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   ratingBadge: {
     position: 'absolute',
     top: 8,
@@ -152,37 +164,6 @@ const styles = StyleSheet.create({
     color: '#FBBF24',
     fontSize: 11,
     fontWeight: 'bold',
-  },
-  traktSocialBadge: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    right: 8,
-    backgroundColor: 'rgba(237, 28, 36, 0.90)',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  traktSocialBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  traktCardScore: {
-    backgroundColor: 'rgba(237, 28, 36, 0.15)',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 4,
-    borderWidth: 0.5,
-    borderColor: '#ED1C24',
-  },
-  traktCardScoreText: {
-    color: '#ED1C24',
-    fontSize: 10,
-    fontWeight: '700',
   },
   bookmarkShortcut: {
     position: 'absolute',
@@ -251,6 +232,23 @@ const styles = StyleSheet.create({
   tvCardBadgeText: {
     color: '#60A5FA',
     fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  langBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(225, 29, 72, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 0.5,
+    borderColor: '#FB7185',
+  },
+  langBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
     fontWeight: '800',
     letterSpacing: 0.5,
   },

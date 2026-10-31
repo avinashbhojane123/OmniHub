@@ -23,9 +23,12 @@ export interface AlarmState {
   description?: string;
   timeString?: string;
   secondsRemaining: number;
+  alarmType?: 'battery' | 'habit' | 'event' | 'task';
 }
 
 type AlarmListener = (state: AlarmState) => void;
+
+export const ALARM_CHANNEL_ID = 'alarm_clock_channel_v6';
 
 class AlarmService {
   private static instance: AlarmService;
@@ -35,6 +38,8 @@ class AlarmService {
   private lastTriggeredMinute: string = '';
   private cachedHabits: Array<{ id: string; name: string; reminderTime: string; daysOfWeek: number[] }> = [];
   private cachedEvents: Array<{ id: string; title: string; date: string; time: string; description?: string }> = [];
+  private cachedTasks: Array<{ id: string; title: string; date: string; time: string; description?: string; isLoud: boolean }> = [];
+  private autoSnoozeCounts: Map<string, number> = new Map();
 
   private currentState: AlarmState = {
     isRinging: false,
@@ -44,6 +49,7 @@ class AlarmService {
     description: undefined,
     timeString: undefined,
     secondsRemaining: 60,
+    alarmType: undefined,
   };
 
   public static getInstance(): AlarmService {
@@ -71,7 +77,7 @@ class AlarmService {
     try {
       // 1. Create Dedicated Alarm Notification Channel
       await notifee.createChannel({
-        id: 'alarm_clock_channel_v5',
+        id: ALARM_CHANNEL_ID,
         name: 'Alarm Clock Ringing',
         description: 'Loud ringing alarms with vibration for your scheduled routines',
         importance: AndroidImportance.HIGH,
@@ -91,9 +97,10 @@ class AlarmService {
       // 3. Start foreground minute-level clock checker (skipped in test runner)
       this.startForegroundMonitor();
 
-      // 4. Restore scheduled alarms from SQLite habits and calendar events
+      // 4. Restore scheduled alarms from SQLite habits, calendar events, and tasks
       await this.restoreAllHabitAlarms();
       await this.restoreAllEventAlarms();
+      await this.restoreAllTaskAlarms();
 
       // 5. Setup NativeEventEmitter for native onAlarmRinging events
       if (AlarmRingtone) {
@@ -104,15 +111,17 @@ class AlarmService {
               const rawId = data.alarmId || '';
               const isEv = rawId.startsWith('alarm_event_');
               const isTk = rawId.startsWith('alarm_task_');
-              const isHb = rawId.startsWith('alarm_') && !isEv && !isTk;
+              const isBat = rawId.startsWith('battery_') || rawId === 'battery_alarm';
+              const isHb = rawId.startsWith('alarm_') && !isEv && !isTk && !isBat;
               this.startRinging(
                 data.title || 'Alarm',
                 isHb ? rawId.replace('alarm_', '') : undefined,
-                undefined,
+                isBat ? 'Battery Alarm' : undefined,
                 isEv ? rawId.replace('alarm_event_', '') : undefined,
                 data.description,
                 isTk ? rawId.replace('alarm_task_', '') : undefined,
-                true // skipNativePlay = true because native AlarmReceiver is already playing
+                true, // skipNativePlay = true because native AlarmReceiver is already playing
+                isBat ? 'battery' : (isTk ? 'task' : (isEv ? 'event' : (isHb ? 'habit' : undefined)))
               );
             } else {
               this.stopRinging();
@@ -144,15 +153,17 @@ class AlarmService {
         const rawId = nativeState.alarmId || '';
         const isEv = rawId.startsWith('alarm_event_');
         const isTk = rawId.startsWith('alarm_task_');
-        const isHb = rawId.startsWith('alarm_') && !isEv && !isTk;
+        const isBat = rawId.startsWith('battery_') || rawId === 'battery_alarm';
+        const isHb = rawId.startsWith('alarm_') && !isEv && !isTk && !isBat;
         this.startRinging(
           nativeState.title || 'Alarm',
           isHb ? rawId.replace('alarm_', '') : undefined,
-          undefined,
+          isBat ? 'Battery Alarm' : undefined,
           isEv ? rawId.replace('alarm_event_', '') : undefined,
           nativeState.description,
           isTk ? rawId.replace('alarm_task_', '') : undefined,
-          true // skipNativePlay = true
+          true, // skipNativePlay = true
+          isBat ? 'battery' : (isTk ? 'task' : (isEv ? 'event' : (isHb ? 'habit' : undefined)))
         );
       }
     } catch {}
@@ -288,16 +299,28 @@ class AlarmService {
     eventId?: string,
     description?: string,
     taskId?: string,
-    skipNativePlay: boolean = false
+    skipNativePlay: boolean = false,
+    alarmType?: 'battery' | 'habit' | 'event' | 'task'
   ): Promise<void> {
     // If already ringing, don't restart
     if (this.currentState.isRinging) return;
 
-    const notifsEnabled = (await settingsRepository.get('notificationsEnabled', 'true')) === 'true';
-    if (!notifsEnabled) return;
+    const isBattery =
+      alarmType === 'battery' ||
+      timeString === 'Battery Alarm' ||
+      title.toLowerCase().includes('battery');
 
-    const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
-    const vibrationEnabled = (await settingsRepository.get('notificationVibration', 'true')) === 'true';
+    if (!isBattery) {
+      const notifsEnabled = (await settingsRepository.get('notificationsEnabled', 'true')) === 'true';
+      if (!notifsEnabled) return;
+    }
+
+    const soundEnabled = isBattery
+      ? (await settingsRepository.get('battery_sound', 'true')) === 'true'
+      : (await settingsRepository.get('notificationSound', 'true')) === 'true';
+    const vibrationEnabled = isBattery
+      ? (await settingsRepository.get('battery_vibration', 'true')) === 'true'
+      : (await settingsRepository.get('notificationVibration', 'true')) === 'true';
 
     this.currentState = {
       isRinging: true,
@@ -308,6 +331,15 @@ class AlarmService {
       description,
       timeString,
       secondsRemaining: 60,
+      alarmType: isBattery
+        ? 'battery'
+        : taskId
+        ? 'task'
+        : eventId
+        ? 'event'
+        : habitId
+        ? 'habit'
+        : undefined,
     };
     this.notify();
 
@@ -336,7 +368,7 @@ class AlarmService {
           title: `⏰ Alarm: ${title}`,
           body: `Ringing now! Tap to stop or snooze.`,
           android: {
-            channelId: 'alarm_clock_channel_v4',
+            channelId: ALARM_CHANNEL_ID,
             smallIcon: 'ic_notification',
             category: AndroidCategory.ALARM,
             importance: AndroidImportance.HIGH,
@@ -382,16 +414,98 @@ class AlarmService {
       this.rescheduleNextHabitAlarm(habitId);
     }
 
-    // Countdown timer up to 60 seconds (1 minute auto-stop)
+    // Countdown timer up to 60 seconds (1 minute auto-stop / auto-snooze)
     this.ringTimer = setInterval(() => {
       const nextRemaining = this.currentState.secondsRemaining - 1;
       if (nextRemaining <= 0) {
-        this.stopRinging();
+        this.handleAlarmTimeout();
       } else {
         this.currentState.secondsRemaining = nextRemaining;
         this.notify();
       }
     }, 1000);
+  }
+
+  /**
+   * Handles alarm timeout after 60 seconds without user response.
+   * Auto-snoozes up to 3 times (10 minutes each), and posts a high-priority missed alarm notification if exceeded.
+   */
+  private async handleAlarmTimeout(): Promise<void> {
+    const active = { ...this.currentState };
+    const alarmKey = active.habitId || active.eventId || active.taskId || active.title || 'alarm';
+    const currentCount = this.autoSnoozeCounts.get(alarmKey) || 0;
+
+    // Stop current audio/vibration ringing without wiping auto-snooze counter
+    this.stopRinging(false);
+
+    if (currentCount < 3) {
+      const nextCount = currentCount + 1;
+      this.autoSnoozeCounts.set(alarmKey, nextCount);
+
+      // Auto-snooze for 10 minutes
+      const snoozeMinutes = 10;
+      await this.snoozeAlarm(snoozeMinutes);
+
+      try {
+        await notifee.displayNotification({
+          id: `auto_snoozed_${alarmKey}`,
+          title: `⏰ Auto-Snoozed: ${active.title}`,
+          body: `Alarm rang for 60s and was auto-snoozed for ${snoozeMinutes}m (Attempt ${nextCount}/3). Tap to dismiss.`,
+          android: {
+            channelId: ALARM_CHANNEL_ID,
+            smallIcon: 'ic_notification',
+            category: AndroidCategory.ALARM,
+            importance: AndroidImportance.HIGH,
+            visibility: AndroidVisibility.PUBLIC,
+            pressAction: { id: 'default' },
+            actions: [
+              {
+                title: '🔕 DISMISS',
+                pressAction: { id: 'dismiss' },
+              },
+            ],
+          },
+          data: {
+            actionType: active.taskId ? 'task_alarm' : (active.eventId ? 'event_alarm' : 'habit_alarm'),
+            habitId: active.habitId || '',
+            eventId: active.eventId || '',
+            taskId: active.taskId || '',
+            taskTitle: active.title || '',
+            timeStr: active.timeString || '',
+          },
+        });
+      } catch (err) {
+        console.warn('Failed to display auto-snooze notification:', err);
+      }
+    } else {
+      // Reached maximum auto-snoozes (3 attempts) -> Mark as Missed Alarm
+      this.autoSnoozeCounts.delete(alarmKey);
+      try {
+        await notifee.displayNotification({
+          id: `missed_alarm_${alarmKey}`,
+          title: `⚠️ Missed Alarm: ${active.title}`,
+          body: `Scheduled alarm at ${active.timeString || 'routine time'} was not answered and has ended. Tap to view.`,
+          android: {
+            channelId: ALARM_CHANNEL_ID,
+            smallIcon: 'ic_notification',
+            category: AndroidCategory.REMINDER,
+            importance: AndroidImportance.HIGH,
+            visibility: AndroidVisibility.PUBLIC,
+            pressAction: { id: 'default' },
+          },
+          data: {
+            actionType: active.taskId ? 'task_alarm' : (active.eventId ? 'event_alarm' : 'habit_alarm'),
+            habitId: active.habitId || '',
+            eventId: active.eventId || '',
+            taskId: active.taskId || '',
+            taskTitle: active.title || '',
+            timeStr: active.timeString || '',
+          },
+        });
+      } catch (err) {
+        console.warn('Failed to display missed alarm notification:', err);
+      }
+    }
   }
 
   /**
@@ -464,11 +578,15 @@ class AlarmService {
     } catch {}
   }
 
-  /**
-   * Stop alarm ringing immediately
-   */
-  public stopRinging(): void {
+  public stopRinging(resetAutoSnooze: boolean = true): void {
     const ringingHabitId = this.currentState.habitId;
+
+    if (resetAutoSnooze) {
+      const alarmKey = this.currentState.habitId || this.currentState.eventId || this.currentState.taskId || this.currentState.title;
+      if (alarmKey) {
+        this.autoSnoozeCounts.delete(alarmKey);
+      }
+    }
 
     if (this.ringTimer) {
       clearInterval(this.ringTimer);
@@ -501,6 +619,7 @@ class AlarmService {
       description: undefined,
       timeString: undefined,
       secondsRemaining: 60,
+      alarmType: undefined,
     };
     this.notify();
 
@@ -513,16 +632,23 @@ class AlarmService {
    * Snooze alarm for given minutes
    */
   public async snoozeAlarm(minutes?: number): Promise<void> {
+    const isBattery = this.currentState.alarmType === 'battery';
     const habitId = this.currentState.habitId;
     const eventId = this.currentState.eventId;
+    const taskId = this.currentState.taskId;
     const description = this.currentState.description;
     const title = this.currentState.title;
     const timeString = this.currentState.timeString;
     this.stopRinging();
 
-    const notifsEnabled = (await settingsRepository.get('notificationsEnabled', 'true')) === 'true';
-    if (!notifsEnabled) return;
-    const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
+    if (!isBattery) {
+      const notifsEnabled = (await settingsRepository.get('notificationsEnabled', 'true')) === 'true';
+      if (!notifsEnabled) return;
+    }
+
+    const soundEnabled = isBattery
+      ? (await settingsRepository.get('battery_sound', 'true')) === 'true'
+      : (await settingsRepository.get('notificationSound', 'true')) === 'true';
     const defaultSnooze = await settingsRepository.get('defaultSnoozeMinutes', '5');
     const snoozeMinutes = minutes ?? (parseInt(defaultSnooze, 10) || 5);
 
@@ -535,8 +661,15 @@ class AlarmService {
       },
     };
 
-    const actionType = eventId ? 'event_alarm' : 'habit_alarm';
-    const targetId = eventId || habitId || Date.now();
+    const actionType = isBattery
+      ? 'battery_alarm'
+      : taskId
+      ? 'task_alarm'
+      : eventId
+      ? 'event_alarm'
+      : 'habit_alarm';
+    const targetId = isBattery ? 'battery' : (taskId || eventId || habitId || Date.now());
+    const channelId = isBattery ? 'battery_charge_channel' : ALARM_CHANNEL_ID;
 
     try {
       await notifee.createTriggerNotification(
@@ -545,7 +678,7 @@ class AlarmService {
           title: `⏰ Snoozed: ${title}`,
           body: description || `Snoozed alarm ringing now!`,
           android: {
-            channelId: 'alarm_clock_channel_v3',
+            channelId,
             smallIcon: 'ic_notification',
             category: AndroidCategory.ALARM,
             importance: AndroidImportance.HIGH,
@@ -561,8 +694,10 @@ class AlarmService {
           },
           data: {
             actionType,
+            taskId: String(taskId || ''),
             habitId: String(habitId || ''),
             eventId: String(eventId || ''),
+            taskTitle: String(title || ''),
             habitName: String(title || ''),
             timeStr: String(timeString || ''),
             description: description || '',
@@ -637,7 +772,7 @@ class AlarmService {
           title: `⏰ Alarm: ${habitName}`,
           body: `Time for your routine: ${habitName}!`,
           android: {
-            channelId: 'alarm_clock_channel_v3',
+            channelId: ALARM_CHANNEL_ID,
             smallIcon: 'ic_notification',
             category: AndroidCategory.ALARM,
             importance: AndroidImportance.HIGH,
@@ -761,7 +896,7 @@ class AlarmService {
           title: `⏰ Alarm: ${title}`,
           body: description ? `${description}` : `Scheduled event time reached!`,
           android: {
-            channelId: 'alarm_clock_channel_v3',
+            channelId: ALARM_CHANNEL_ID,
             smallIcon: 'ic_notification',
             category: AndroidCategory.ALARM,
             importance: AndroidImportance.HIGH,
@@ -863,6 +998,52 @@ class AlarmService {
     }
   }
 
+  public async scheduleTaskAlarm(
+    taskId: string,
+    title: string,
+    date: string,
+    timeStr: string,
+    description?: string,
+    isLoud: boolean = true
+  ): Promise<void> {
+    try {
+      const existingIdx = this.cachedTasks.findIndex((t) => t.id === taskId);
+      const item = { id: taskId, title, date, time: timeStr, description, isLoud };
+      if (existingIdx >= 0) {
+        this.cachedTasks[existingIdx] = item;
+      } else {
+        this.cachedTasks.push(item);
+      }
+    } catch (err) {
+      console.warn('Failed to schedule task alarm in AlarmService:', err);
+    }
+  }
+
+  public async cancelTaskAlarm(taskId: string): Promise<void> {
+    try {
+      this.cachedTasks = this.cachedTasks.filter((t) => t.id !== taskId);
+    } catch {}
+  }
+
+  public async restoreAllTaskAlarms(): Promise<void> {
+    try {
+      const { taskRepository } = await import('../../database/repositories/TaskRepository');
+      const allTasks = await taskRepository.findAll();
+      this.cachedTasks = allTasks
+        .filter((t) => t.status !== 'completed' && t.status !== 'cancelled' && Boolean(t.date && t.startTime))
+        .map((t) => ({
+          id: t.id,
+          title: t.title,
+          date: t.date,
+          time: t.startTime!,
+          description: t.description || t.notes,
+          isLoud: Boolean(t.isLoudAlarm || t.priority === 'high' || t.recurrenceRule?.isLoudAlarm),
+        }));
+    } catch (err) {
+      console.warn('Failed to restore task alarms in AlarmService:', err);
+    }
+  }
+
   /**
    * Foreground monitor checks every 5 seconds to trigger immediately if alarm time matches current minute
    */
@@ -937,6 +1118,17 @@ class AlarmService {
           if (parsed && parsed.hours === currentHours && parsed.minutes === currentMinutes) {
             this.lastTriggeredMinute = currentKey;
             this.startRinging(ev.title, undefined, ev.time, ev.id, ev.description);
+            break;
+          }
+        }
+
+        // Check scheduled loud task alarms
+        for (const tk of this.cachedTasks) {
+          if (tk.date !== todayIso || !tk.isLoud) continue;
+          const parsed = this.parseTime(tk.time);
+          if (parsed && parsed.hours === currentHours && parsed.minutes === currentMinutes) {
+            this.lastTriggeredMinute = currentKey;
+            this.startRinging(tk.title, undefined, tk.time, undefined, tk.description, tk.id);
             break;
           }
         }

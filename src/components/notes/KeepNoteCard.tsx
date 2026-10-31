@@ -7,7 +7,7 @@ import {
   Image,
 } from 'react-native';
 import { format, parseISO, isValid } from 'date-fns';
-import { KeepNote, KEEP_COLORS } from '../../types';
+import { KeepNote, resolveKeepColor } from '../../types';
 import { useAppTheme } from '../../hooks/useTheme';
 
 interface KeepNoteCardProps {
@@ -31,13 +31,9 @@ const KeepNoteCardComponent: React.FC<KeepNoteCardProps> = ({
 }) => {
   const { colors, isDark } = useAppTheme();
 
-  const colorDef = KEEP_COLORS[note.color] || KEEP_COLORS.default;
-  const cardBg = isDark ? colorDef.darkBg : colorDef.lightBg;
-  const cardBorder = isSelected
-    ? colors.primary
-    : isDark
-      ? colorDef.darkBorder
-      : colorDef.lightBorder;
+  const resolvedColor = resolveKeepColor(note.color, isDark);
+  const cardBg = resolvedColor.bg;
+  const cardBorder = isSelected ? colors.primary : resolvedColor.border;
 
   const formattedReminder =
     note.reminderTime && isValid(parseISO(note.reminderTime))
@@ -159,6 +155,21 @@ const KeepNoteCardComponent: React.FC<KeepNoteCardProps> = ({
               +{note.checklistData.length - 4} more items
             </Text>
           )}
+        </View>
+      ) : note.type === 'drawing' || (note.drawingData && note.drawingData.length > 0) ? (
+        <View
+          style={[
+            styles.drawingPreviewBox,
+            {
+              backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+              borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+            },
+          ]}
+        >
+          <Text style={styles.drawingIcon}>🎨</Text>
+          <Text style={[styles.drawingMetaText, { color: colors.textSecondary }]}>
+            Hand-drawn sketch • {note.drawingData?.length || 0} strokes
+          </Text>
         </View>
       ) : (
         /* Regular Content Preview with URL highlighting */
@@ -348,6 +359,25 @@ const styles = StyleSheet.create({
   cardImageBanner: {
     width: '100%',
     height: 120,
+  },
+  drawingPreviewBox: {
+    marginTop: 6,
+    marginBottom: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  drawingIcon: {
+    fontSize: 18,
+  },
+  drawingMetaText: {
+    fontSize: 11.5,
+    fontWeight: '500',
+    flex: 1,
   },
 });
 

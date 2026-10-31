@@ -61,6 +61,30 @@ export class RoomModerationService {
     }
   }
 
+  async findRoom(passcode: string): Promise<Room | null> {
+    if (!passcode) return null;
+    return await this.roomRepo
+      .createQueryBuilder('room')
+      .where('LOWER(TRIM(room.passcode)) = LOWER(TRIM(:passcode))', {
+        passcode: passcode.trim(),
+      })
+      .getOne();
+  }
+
+  async findUser(roomId: number, nickname: string): Promise<User | null> {
+    if (!nickname) return null;
+    return await this.userRepo
+      .createQueryBuilder('user')
+      .where(
+        'user.roomId = :roomId AND LOWER(TRIM(user.nickname)) = LOWER(TRIM(:nickname))',
+        {
+          roomId,
+          nickname: nickname.trim(),
+        },
+      )
+      .getOne();
+  }
+
   async getFormattedUsersList(
     roomPasscode: string,
     roomId: number,
@@ -202,7 +226,7 @@ export class RoomModerationService {
   ) {
     if (!session) return;
     const passcode = (data.passcode || session.passcode || '').trim();
-    const room = await this.roomRepo.findOne({ where: { passcode } });
+    const room = await this.findRoom(passcode);
     if (!room) return;
 
     const user = await this.userRepo
@@ -255,13 +279,19 @@ export class RoomModerationService {
 
     if (hasChanged) {
       await this.userRepo.save(user);
-      server.to(passcode).emit('userMetadataUpdated', {
-        nickname: session.nickname,
-        batteryLabel: user.batteryLabel,
-        batteryIsCharging: user.batteryIsCharging,
-        networkLabel: user.networkLabel,
-        avatarUrl: user.avatarUrl,
-      });
+      const cleanPass = passcode.trim();
+      server
+        .to(cleanPass)
+        .to(cleanPass.toLowerCase())
+        .to(room.passcode)
+        .to(room.passcode.toLowerCase())
+        .emit('userMetadataUpdated', {
+          nickname: session.nickname,
+          batteryLabel: user.batteryLabel,
+          batteryIsCharging: user.batteryIsCharging,
+          networkLabel: user.networkLabel,
+          avatarUrl: user.avatarUrl,
+        });
       if (data.avatarUrl !== undefined) {
         await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
       }
@@ -284,18 +314,18 @@ export class RoomModerationService {
     ) => Array<{ socketId: string; nickname: string }>,
     clearUserDisconnectDebounceTimer: (key: string) => void,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const hostUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const hostUser = await this.findUser(room.id, session.nickname);
     if (!hostUser || (hostUser.role !== 'host' && hostUser.role !== 'admin')) {
       return {
         success: false,
@@ -371,10 +401,16 @@ export class RoomModerationService {
     targetUser.lastSeen = new Date();
     await this.userRepo.save(targetUser);
 
-    server.to(data.passcode.trim()).emit('userKicked', {
-      targetNickname: targetUser.nickname,
-      kickedBy: session.nickname,
-    });
+    const cleanPass = data.passcode.trim();
+    server
+      .to(cleanPass)
+      .to(cleanPass.toLowerCase())
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('userKicked', {
+        targetNickname: targetUser.nickname,
+        kickedBy: session.nickname,
+      });
 
     await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
     return { success: true };
@@ -396,18 +432,18 @@ export class RoomModerationService {
     ) => Array<{ socketId: string; nickname: string }>,
     clearUserDisconnectDebounceTimer: (key: string) => void,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const hostUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const hostUser = await this.findUser(room.id, session.nickname);
     if (!hostUser || (hostUser.role !== 'host' && hostUser.role !== 'admin')) {
       return {
         success: false,
@@ -485,10 +521,16 @@ export class RoomModerationService {
     const bannedUserKey = `${data.passcode.trim().toLowerCase()}:${targetUser.nickname.trim().toLowerCase()}`;
     clearUserDisconnectDebounceTimer(bannedUserKey);
 
-    server.to(data.passcode.trim()).emit('userBanned', {
-      targetNickname: targetUser.nickname,
-      bannedBy: session.nickname,
-    });
+    const cleanPass = data.passcode.trim();
+    server
+      .to(cleanPass)
+      .to(cleanPass.toLowerCase())
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('userBanned', {
+        targetNickname: targetUser.nickname,
+        bannedBy: session.nickname,
+      });
 
     await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
     return { success: true };
@@ -504,18 +546,18 @@ export class RoomModerationService {
     },
     usersMap: Map<string, UserSession>,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const hostUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const hostUser = await this.findUser(room.id, session.nickname);
     if (!hostUser || (hostUser.role !== 'host' && hostUser.role !== 'admin')) {
       return {
         success: false,
@@ -540,10 +582,16 @@ export class RoomModerationService {
     targetUser.bannedAt = null;
     await this.userRepo.save(targetUser);
 
-    server.to(data.passcode.trim()).emit('userUnbanned', {
-      targetNickname: targetUser.nickname,
-      unbannedBy: session.nickname,
-    });
+    const cleanPass = data.passcode.trim();
+    server
+      .to(cleanPass)
+      .to(cleanPass.toLowerCase())
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('userUnbanned', {
+        targetNickname: targetUser.nickname,
+        unbannedBy: session.nickname,
+      });
 
     await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
     return { success: true };
@@ -560,18 +608,18 @@ export class RoomModerationService {
     },
     usersMap: Map<string, UserSession>,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const hostUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const hostUser = await this.findUser(room.id, session.nickname);
     if (!hostUser || hostUser.role !== 'host') {
       return {
         success: false,
@@ -611,18 +659,25 @@ export class RoomModerationService {
 
     for (const [, user] of usersMap.entries()) {
       if (
-        user.passcode === data.passcode.trim() &&
+        (user.passcode || '').trim().toLowerCase() ===
+          data.passcode.trim().toLowerCase() &&
         user.nickname.toLowerCase() === targetUser.nickname.toLowerCase()
       ) {
         user.role = targetUser.role;
       }
     }
 
-    server.to(data.passcode.trim()).emit('userPromoted', {
-      targetNickname: targetUser.nickname,
-      role: targetUser.role,
-      promotedBy: session.nickname,
-    });
+    const cleanPass = data.passcode.trim();
+    server
+      .to(cleanPass)
+      .to(cleanPass.toLowerCase())
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('userPromoted', {
+        targetNickname: targetUser.nickname,
+        role: targetUser.role,
+        promotedBy: session.nickname,
+      });
 
     await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
     return { success: true, role: targetUser.role };
@@ -643,18 +698,18 @@ export class RoomModerationService {
       excludeSocketId?: string,
     ) => Array<{ socketId: string; nickname: string }>,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const hostUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const hostUser = await this.findUser(room.id, session.nickname);
     if (!hostUser || hostUser.role !== 'host') {
       return {
         success: false,
@@ -706,7 +761,10 @@ export class RoomModerationService {
     await this.userRepo.save([hostUser, targetUser]);
 
     for (const [, user] of usersMap.entries()) {
-      if (user.passcode === data.passcode.trim()) {
+      if (
+        (user.passcode || '').trim().toLowerCase() ===
+        data.passcode.trim().toLowerCase()
+      ) {
         if (user.nickname.toLowerCase() === hostUser.nickname.toLowerCase())
           user.role = 'admin';
         if (user.nickname.toLowerCase() === targetUser.nickname.toLowerCase())
@@ -714,12 +772,18 @@ export class RoomModerationService {
       }
     }
 
-    server.to(data.passcode.trim()).emit('hostChanged', {
-      newHostNickname: targetUser.nickname,
-      newHost: targetUser.nickname,
-      previousHostNickname: hostUser.nickname,
-      previousHost: hostUser.nickname,
-    });
+    const cleanPass = data.passcode.trim();
+    server
+      .to(cleanPass)
+      .to(cleanPass.toLowerCase())
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('hostChanged', {
+        newHostNickname: targetUser.nickname,
+        newHost: targetUser.nickname,
+        previousHostNickname: hostUser.nickname,
+        previousHost: hostUser.nickname,
+      });
 
     await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
     return { success: true };
@@ -734,18 +798,18 @@ export class RoomModerationService {
     },
     usersMap: Map<string, UserSession>,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const creatorUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const creatorUser = await this.findUser(room.id, session.nickname);
     if (!creatorUser || !creatorUser.isCreator) {
       return {
         success: false,
@@ -774,7 +838,10 @@ export class RoomModerationService {
     await this.userRepo.save(creatorUser);
 
     for (const [, user] of usersMap.entries()) {
-      if (user.passcode === data.passcode.trim()) {
+      if (
+        (user.passcode || '').trim().toLowerCase() ===
+        data.passcode.trim().toLowerCase()
+      ) {
         if (
           currentHost &&
           user.nickname.toLowerCase() === currentHost.nickname.toLowerCase()
@@ -789,13 +856,19 @@ export class RoomModerationService {
       }
     }
 
-    server.to(data.passcode.trim()).emit('hostChanged', {
-      newHostNickname: creatorUser.nickname,
-      newHost: creatorUser.nickname,
-      previousHostNickname: currentHost?.nickname || 'Previous Host',
-      previousHost: currentHost?.nickname || 'Previous Host',
-      reason: 'Original creator reclaimed room host privileges',
-    });
+    const cleanPass = data.passcode.trim();
+    server
+      .to(cleanPass)
+      .to(cleanPass.toLowerCase())
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('hostChanged', {
+        newHostNickname: creatorUser.nickname,
+        newHost: creatorUser.nickname,
+        previousHostNickname: currentHost?.nickname || 'Previous Host',
+        previousHost: currentHost?.nickname || 'Previous Host',
+        reason: 'Original creator reclaimed room host privileges',
+      });
 
     await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
     return { success: true };
@@ -811,18 +884,18 @@ export class RoomModerationService {
     },
     usersMap: Map<string, UserSession>,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const hostUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const hostUser = await this.findUser(room.id, session.nickname);
     if (!hostUser || (hostUser.role !== 'host' && hostUser.role !== 'admin')) {
       return {
         success: false,
@@ -883,18 +956,18 @@ export class RoomModerationService {
       excludeSocketId?: string,
     ) => Array<{ socketId: string; nickname: string }>,
   ) {
-    if (!session || session.passcode.trim() !== data.passcode?.trim()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !==
+        data.passcode?.trim().toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
-    const room = await this.roomRepo.findOne({
-      where: { passcode: data.passcode.trim() },
-    });
+    const room = await this.findRoom(data.passcode);
     if (!room) return { success: false, message: 'Room not found' };
 
-    const hostUser = await this.userRepo.findOne({
-      where: { nickname: session.nickname, roomId: room.id },
-    });
+    const hostUser = await this.findUser(room.id, session.nickname);
     if (!hostUser || (hostUser.role !== 'host' && hostUser.role !== 'admin')) {
       return {
         success: false,
@@ -966,12 +1039,18 @@ export class RoomModerationService {
       }
     }
 
-    server.to(data.passcode.trim()).emit('userMuteToggled', {
-      targetNickname: targetUser.nickname,
-      isMuted: targetUser.isMuted,
-      mutedUntil: targetUser.mutedUntil,
-      mutedBy: session.nickname,
-    });
+    const cleanPass = data.passcode.trim();
+    server
+      .to(cleanPass)
+      .to(cleanPass.toLowerCase())
+      .to(room.passcode)
+      .to(room.passcode.toLowerCase())
+      .emit('userMuteToggled', {
+        targetNickname: targetUser.nickname,
+        isMuted: targetUser.isMuted,
+        mutedUntil: targetUser.mutedUntil,
+        mutedBy: session.nickname,
+      });
 
     await this.broadcastUsersList(server, room.passcode, room.id, usersMap);
     return {

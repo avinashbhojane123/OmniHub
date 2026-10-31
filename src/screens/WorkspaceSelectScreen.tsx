@@ -13,14 +13,16 @@ import {
   StatusBar,
   ScrollView,
   useWindowDimensions,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
   BackHandler,
   Alert,
   TextInput,
   Platform,
+  Modal,
+  ActivityIndicator,
+  Animated,
+  KeyboardAvoidingView,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import {
   useNavigation,
   useFocusEffect,
@@ -31,12 +33,15 @@ import { useAppTheme } from '../hooks/useTheme';
 import {
   settingsRepository,
   taskRepository,
+  movieRepository,
 } from '../database/repositories';
 import {
   batteryService,
   BatteryStatus,
 } from '../services/battery/BatteryService';
-import { otaService, OTAStatus } from '../services/ota/OTAService';
+import { otaService, OTAStatus, UpdateCheckResult } from '../services/ota/OTAService';
+import { alarmService } from '../services/alarm/AlarmService';
+import { chatSocketService } from '../services/chat/ChatSocketService';
 
 export type WorkspaceMode = 'planner' | 'battery' | 'chat' | 'movies';
 
@@ -105,101 +110,147 @@ const WORKSPACES: WorkspaceConfig[] = [
     darkBg: '#1C1014',
     lightBg: '#FFF1F2',
     route: 'MovieWorkspace',
-    features: ['Trending & In Theaters', 'Trailers & Cast Details', 'My Watchlist & Watched'],
+    features: ['Trending & TV Series', 'Trailers & Cast Details', 'My Watchlist & Watched'],
   },
 ];
 
+const formatVersion = (ver: number | string): string => {
+  const num = typeof ver === 'string' ? parseInt(ver, 10) : ver;
+  if (!num) return '0';
+  if (num > 1577836800000) {
+    try {
+      return format(new Date(num), 'MM.dd.HHmm');
+    } catch {
+      return String(num);
+    }
+  }
+  return String(num);
+};
+
 export const WorkspaceSelectScreen: React.FC = () => {
-  const insets = useSafeAreaInsets();
+  const insetsContext = React.useContext(SafeAreaInsetsContext);
+  const insets = insetsContext ?? {
+    top: StatusBar.currentHeight || 24,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  };
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { colors, isDark, changeTheme } = useAppTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
-  // Robust orientation detection: ensures portrait tablets aren't misclassified as landscape
+  // Responsive orientation layout: 4 columns in landscape/tablet, 2 columns in portrait
   const isLandscape = windowWidth > windowHeight && windowWidth > 580;
-
-  // Responsive dynamic widths to prevent flex-wrap layout breakage on any screen size
+  const numColumns = isLandscape ? 4 : 2;
   const horizontalPadding = 16;
   const gridGap = 12;
   const gridCardWidth = useMemo(() => {
-    return Math.floor((windowWidth - horizontalPadding * 2 - gridGap) / 2);
-  }, [windowWidth]);
-
-  const carouselCardWidth = useMemo(() => {
-    if (isLandscape) {
-      return Math.min(windowWidth * 0.45, 360);
-    }
-    return Math.min(windowWidth - 52, 340);
-  }, [windowWidth, isLandscape]);
-
-  const carouselSpacing = 14;
-  const carouselSnapStep = carouselCardWidth + carouselSpacing;
+    const totalGaps = (numColumns - 1) * gridGap;
+    return Math.floor((windowWidth - horizontalPadding * 2 - totalGaps) / numColumns);
+  }, [windowWidth, numColumns]);
 
   const [selectedMode, setSelectedMode] = useState<WorkspaceMode>(
     route?.params?.currentMode || route?.params?.initialMode || 'planner',
   );
-  const [viewMode, setViewMode] = useState<'grid' | 'carousel'>('grid');
 
-  // Live Telemetry states
-  const [batteryStatus, setBatteryStatus] = useState<BatteryStatus | null>(
-    null,
-  );
-  const [pendingTasksCount, setPendingTasksCount] = useState<number | null>(
-    null,
-  );
+  // Sync selectedMode when navigation params change
+  useEffect(() => {
+    const mode = route?.params?.currentMode || route?.params?.initialMode;
+    if (
+      mode &&
+      (mode === 'planner' || mode === 'battery' || mode === 'chat' || mode === 'movies')
+    ) {
+      setSelectedMode(mode as WorkspaceMode);
+    }
+  }, [route?.params?.currentMode, route?.params?.initialMode]);
+
+  // Live Telemetry states (no mock data)
+  const [batteryStatus, setBatteryStatus] = useState<BatteryStatus | null>(null);
+  const [todayTasksCount, setTodayTasksCount] = useState<number | null>(null);
+  const [pendingTasksCount, setPendingTasksCount] = useState<number | null>(null);
+  const [pendingOverdueCount, setPendingOverdueCount] = useState<number>(0);
+  const [watchlistCount, setWatchlistCount] = useState<number>(0);
+  const [isChatConnected, setIsChatConnected] = useState<boolean>(false);
+  const [isChatServerOnline, setIsChatServerOnline] = useState<boolean | null>(null);
+
+  // User Default Workspace preference
+  const [isAutoLaunchDefault, setIsAutoLaunchDefault] = useState<boolean>(false);
+
+  // Alarm State & Pulsing Animation (deduplicated boolean to prevent 1-second re-renders)
+  const [isAlarmRinging, setIsAlarmRinging] = useState(false);
+  const alarmPulseAnim = useRef(new Animated.Value(0)).current;
+
+  // Real-time subscription to AlarmService
+  useEffect(() => {
+    const unsub = alarmService.subscribe(st => {
+      setIsAlarmRinging(prev => (prev !== st.isRinging ? st.isRinging : prev));
+    });
+    return unsub;
+  }, []);
+
+  // Continuous pulsing loop while alarm is ringing
+  useEffect(() => {
+    if (isAlarmRinging) {
+      const pulseLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(alarmPulseAnim, {
+            toValue: 1,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+          Animated.timing(alarmPulseAnim, {
+            toValue: 0.1,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+      pulseLoop.start();
+      return () => pulseLoop.stop();
+    } else {
+      alarmPulseAnim.setValue(0);
+    }
+  }, [isAlarmRinging, alarmPulseAnim]);
 
   // OTA Updates State
   const [otaStatus, setOtaStatus] = useState<OTAStatus | null>(null);
   const [otaChecking, setOtaChecking] = useState(false);
-  const [otaServerHost, setOtaServerHost] = useState('10.16.64.73:8888');
+  const [otaServerHost, setOtaServerHost] = useState('10.105.247.73:8888');
+  const [isOtaModalVisible, setIsOtaModalVisible] = useState(false);
+  const isOtaModalVisibleRef = useRef(false);
+  useEffect(() => {
+    isOtaModalVisibleRef.current = isOtaModalVisible;
+  }, [isOtaModalVisible]);
 
-  const carouselScrollRef = useRef<any>(null);
+  const [otaStatusMessage, setOtaStatusMessage] = useState<string | null>(null);
+  const [otaUpdateInfo, setOtaUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [otaDownloading, setOtaDownloading] = useState(false);
+  const [otaDownloadSuccess, setOtaDownloadSuccess] = useState(false);
 
-  // Load preferences (view mode and default workspace) on mount
+  // Check default workspace preference on mount and mode change
   useEffect(() => {
     let isMounted = true;
-    Promise.all([
-      settingsRepository.get('workspace_view_mode', 'grid'),
-      settingsRepository.get('default_workspace', 'planner'),
-    ])
-      .then(([savedViewMode, savedDefaultWorkspace]) => {
+    settingsRepository
+      .get('default_workspace', 'select')
+      .then(saved => {
         if (!isMounted) return;
-        if (savedViewMode === 'grid' || savedViewMode === 'carousel') {
-          setViewMode(savedViewMode as 'grid' | 'carousel');
-        }
-        if (!route?.params?.currentMode && !route?.params?.initialMode) {
-          if (
-            savedDefaultWorkspace === 'planner' ||
-            savedDefaultWorkspace === 'battery' ||
-            savedDefaultWorkspace === 'chat' ||
-            savedDefaultWorkspace === 'movies'
-          ) {
-            setSelectedMode(savedDefaultWorkspace as WorkspaceMode);
-          }
-        }
+        setIsAutoLaunchDefault(saved === selectedMode);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => {
       isMounted = false;
     };
-  }, [route?.params?.currentMode, route?.params?.initialMode]);
+  }, [selectedMode]);
 
-  // Sync carousel scroll position on screen resize / orientation change
-  useEffect(() => {
-    if (viewMode === 'carousel' && carouselScrollRef.current) {
-      const targetIndex = WORKSPACES.findIndex(w => w.id === selectedMode);
-      if (targetIndex >= 0) {
-        requestAnimationFrame(() => {
-          carouselScrollRef.current?.scrollTo({
-            x: targetIndex * carouselSnapStep,
-            animated: false,
-          });
-        });
-      }
-    }
-  }, [windowWidth, isLandscape, viewMode, carouselSnapStep, selectedMode]);
+  const toggleAutoLaunchDefault = async () => {
+    const nextVal = !isAutoLaunchDefault;
+    setIsAutoLaunchDefault(nextVal);
+    await settingsRepository
+      .set('default_workspace', nextVal ? selectedMode : 'select')
+      .catch(() => { });
+  };
 
   // OTA Status refresh callback
   const refreshOtaStatus = useCallback(async () => {
@@ -210,19 +261,19 @@ export const WorkspaceSelectScreen: React.FC = () => {
       ]);
       setOtaStatus(status);
       if (serverUrl) {
-        setOtaServerHost(serverUrl.replace(/^https?:\/\//, ''));
+        setOtaServerHost(serverUrl.replace(/^https?:\/\//i, ''));
       }
     } catch {
       // Ignored non-critical OTA telemetry error
     }
   }, []);
 
-  // Fresh Telemetry on Every Screen Focus (fixes stale counts, includes overdue tasks)
+  // Fresh Telemetry on Every Screen Focus
   useFocusEffect(
     useCallback(() => {
       let isMounted = true;
 
-      // 1. Planner Tasks Telemetry (Include today's pending AND overdue pending tasks)
+      // 1. Planner Tasks Telemetry (real count, overdue separated from today)
       const refreshTasks = async () => {
         try {
           const now = new Date();
@@ -243,38 +294,79 @@ export const WorkspaceSelectScreen: React.FC = () => {
             t => t.status !== 'completed' && t.status !== 'cancelled',
           );
 
-          const uniqueTaskIds = new Set<string>();
-          pendingToday.forEach(t => uniqueTaskIds.add(t.id));
-          pendingOverdue.forEach(t => uniqueTaskIds.add(t.id));
-
-          setPendingTasksCount(uniqueTaskIds.size);
+          setTodayTasksCount(todayTasks.length);
+          setPendingTasksCount(pendingToday.length);
+          setPendingOverdueCount(pendingOverdue.length);
         } catch {
-          if (isMounted) setPendingTasksCount(null);
+          if (isMounted) {
+            setTodayTasksCount(null);
+            setPendingTasksCount(null);
+            setPendingOverdueCount(0);
+          }
+        }
+      };
+
+      // 2. Real Movie Bookmarks Telemetry
+      const refreshMovies = async () => {
+        try {
+          const bookmarks = await movieRepository.findAll();
+          if (isMounted) {
+            setWatchlistCount(bookmarks.length);
+          }
+        } catch {
+          if (isMounted) setWatchlistCount(0);
+        }
+      };
+
+      // 3. Real Chat Cloud & Socket Status (pre-warms Render backend)
+      const refreshChat = async () => {
+        if (!isMounted) return;
+        const socketConnected = chatSocketService.isConnected;
+        setIsChatConnected(socketConnected);
+        if (socketConnected) {
+          setIsChatServerOnline(true);
+          return;
+        }
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3500);
+          const resp = await fetch('https://backend-9i6w.onrender.com/api/keep-alive/ping', {
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          if (isMounted) setIsChatServerOnline(resp.ok);
+        } catch {
+          if (isMounted) setIsChatServerOnline(false);
         }
       };
 
       refreshTasks();
+      refreshMovies();
+      refreshChat();
       refreshOtaStatus();
-      // Low-frequency polling interval to prevent battery/CPU thrashing
-      const taskInterval = setInterval(refreshTasks, 15000);
 
-      // 2. Battery Telemetry: Subscribe to live events without duplicate immediate dispatch
+      const telemetryInterval = setInterval(() => {
+        refreshTasks();
+        refreshMovies();
+        refreshChat();
+      }, 15000);
+
+      // 4. Battery Telemetry subscription
       let unsubBattery: (() => void) | undefined;
       try {
         unsubBattery = batteryService.subscribeStatus(st => {
           if (isMounted) setBatteryStatus(st);
         });
-      } catch {
-        // Fallback gracefully
-      }
+      } catch { }
 
-      // 3. Hardware Back Handler support
+      // 5. Hardware Back Handler (Clean application exit without infinite back loop)
       const onBackPress = () => {
-        if (navigation.canGoBack()) {
-          navigation.goBack();
+        if (isOtaModalVisibleRef.current) {
+          setIsOtaModalVisible(false);
           return true;
         }
-        return false;
+        BackHandler.exitApp();
+        return true;
       };
       const backSub = BackHandler.addEventListener(
         'hardwareBackPress',
@@ -283,138 +375,130 @@ export const WorkspaceSelectScreen: React.FC = () => {
 
       return () => {
         isMounted = false;
-        clearInterval(taskInterval);
+        clearInterval(telemetryInterval);
         if (unsubBattery) unsubBattery();
         backSub.remove();
       };
-    }, [navigation, refreshOtaStatus]),
+    }, [refreshOtaStatus]),
   );
 
-  const handleSelectViewMode = async (mode: 'grid' | 'carousel') => {
-    if (viewMode === mode) return;
-    setViewMode(mode);
-    try {
-      await settingsRepository.set('workspace_view_mode', mode);
-    } catch {
-      // Ignored non-critical setting persistence failure
-    }
-
-    if (mode === 'carousel') {
-      const targetIndex = WORKSPACES.findIndex(w => w.id === selectedMode);
-      if (targetIndex >= 0) {
-        setTimeout(() => {
-          carouselScrollRef.current?.scrollTo({
-            x: targetIndex * carouselSnapStep,
-            animated: true,
-          });
-        }, 80);
-      }
-    }
-  };
-
-  const handleSelectMode = (mode: WorkspaceMode, scrollIndex?: number) => {
+  const handleSelectMode = (mode: WorkspaceMode) => {
     setSelectedMode(mode);
-    if (viewMode === 'carousel' && carouselScrollRef.current) {
-      const targetIndex =
-        scrollIndex !== undefined
-          ? scrollIndex
-          : WORKSPACES.findIndex(w => w.id === mode);
-      if (targetIndex >= 0) {
-        carouselScrollRef.current.scrollTo({
-          x: targetIndex * carouselSnapStep,
-          animated: true,
-        });
-      }
-    }
   };
 
   const handleLaunch = (modeToEnter: WorkspaceMode) => {
     const targetConfig = WORKSPACES.find(w => w.id === modeToEnter);
     const targetRoute = targetConfig?.route || 'MainTabs';
 
-    // Persist default workspace preference so future app launches remember the choice
-    settingsRepository.set('default_workspace', modeToEnter).catch(() => {});
+    // Only persist as default if the user explicitly enabled it
+    if (isAutoLaunchDefault) {
+      settingsRepository.set('default_workspace', modeToEnter).catch(() => { });
+    }
 
-    // Clean reset to the target workspace
+    // Reset stack with WorkspaceSelect as base route and targetRoute as active route.
+    // This allows any workspace screen to cleanly goBack() to WorkspaceSelect without an infinite loop!
     navigation.reset({
-      index: 0,
-      routes: [{ name: targetRoute }],
+      index: 1,
+      routes: [{ name: 'WorkspaceSelect' }, { name: targetRoute }],
     });
   };
 
-  const handleCheckOtaUpdate = async () => {
-    if (otaChecking) return;
+  const handleApplyUpdate = async (targetInfo?: UpdateCheckResult | null) => {
+    const info = targetInfo || otaUpdateInfo;
+    if (!info || otaDownloading) return;
+    setOtaDownloading(true);
+    setOtaStatusMessage(`Downloading update bundle v${formatVersion(info.remoteVersion)}...`);
+    try {
+      await otaService.downloadAndApplyUpdate(
+        info.bundleUrl,
+        info.remoteVersion,
+      );
+      await refreshOtaStatus();
+      setOtaDownloadSuccess(true);
+      setOtaStatusMessage('🎉 Update installed successfully! Restart required.');
+    } catch (e: any) {
+      const err = e.message || 'Unknown error occurred while downloading update';
+      setOtaStatusMessage(`❌ Update failed: ${err}`);
+      Alert.alert('Installation Failed', err);
+    } finally {
+      setOtaDownloading(false);
+    }
+  };
+
+  const handleCheckOtaUpdate = async (isManualClick = false) => {
+    if (otaChecking || otaDownloading) return;
     setOtaChecking(true);
+    setOtaDownloadSuccess(false);
+    setOtaStatusMessage(`Checking server at ${otaServerHost}...`);
     try {
       const result = await otaService.checkForUpdate();
+      setOtaUpdateInfo(result);
       if (result.available) {
-        Alert.alert(
-          'Update Available! 🚀',
-          `New Bundle v${result.remoteVersion} is ready to install.\n${
-            result.notes ? `\nNotes: ${result.notes}\n` : ''
-          }\nWould you like to download and install now?`,
-          [
-            { text: 'Later', style: 'cancel' },
-            {
-              text: 'Download & Apply',
-              onPress: async () => {
-                try {
-                  setOtaChecking(true);
-                  await otaService.downloadAndApplyUpdate(
-                    result.bundleUrl,
-                    result.remoteVersion,
-                  );
-                  await refreshOtaStatus();
-                  Alert.alert(
-                    'Update Installed! 🎉',
-                    'The update bundle was successfully installed. Restart the app to apply changes.',
-                    [
-                      { text: 'Later', style: 'cancel' },
-                      {
-                        text: 'Restart Now',
-                        onPress: () => otaService.restartApp(),
-                      },
-                    ],
-                  );
-                } catch (e: any) {
-                  Alert.alert('Installation Failed', e.message || 'Unknown error');
-                } finally {
-                  setOtaChecking(false);
-                }
+        const formattedVer = formatVersion(result.remoteVersion);
+        setOtaStatusMessage(
+          `🚀 Update v${formattedVer} available!${result.notes ? `\nNotes: ${result.notes}` : ''
+          }`,
+        );
+        // Only show native Alert if triggered manually from outside the modal
+        if (isManualClick && !isOtaModalVisibleRef.current) {
+          Alert.alert(
+            'Update Available! 🚀',
+            `New Bundle v${formattedVer} is ready to install.\n${result.notes ? `\nNotes: ${result.notes}\n` : ''
+            }\nWould you like to download and install now?`,
+            [
+              { text: 'Later', style: 'cancel' },
+              {
+                text: 'Download & Apply ⚡',
+                onPress: () => handleApplyUpdate(result),
               },
-            },
-          ],
-        );
+            ],
+          );
+        }
       } else {
-        Alert.alert(
-          'Up to Date ✨',
-          `You have the latest version (v${result.currentVersion || 0}).`,
+        setOtaStatusMessage(
+          `OmniHub is up to date (v${formatVersion(result.currentVersion || 0)}) ✨`,
         );
+        if (isManualClick && !isOtaModalVisibleRef.current) {
+          Alert.alert(
+            'Up to Date ✨',
+            `You have the latest version (v${formatVersion(result.currentVersion || 0)}).`,
+          );
+        }
       }
     } catch (e: any) {
-      Alert.alert(
-        'Update Check Failed',
-        e.message || 'Could not connect to update server.',
-      );
+      setOtaUpdateInfo(null);
+      const errMsg = e.message || 'Could not connect to update server.';
+      setOtaStatusMessage(`⚠️ ${errMsg}`);
+      if (isManualClick && !isOtaModalVisibleRef.current) {
+        Alert.alert('Update Check Failed', errMsg);
+      }
     } finally {
       setOtaChecking(false);
     }
   };
 
+  const handleOpenOtaModal = () => {
+    setIsOtaModalVisible(true);
+    refreshOtaStatus();
+    handleCheckOtaUpdate(false);
+  };
+
   const handleSaveServerHost = async () => {
     const raw = otaServerHost.trim();
     if (!raw) {
-      Alert.alert('Invalid Server', 'Please enter a valid IP:port or hostname.');
+      Alert.alert('Invalid Server', 'Please enter a valid IP:port or server URL.');
       return;
     }
-    let hostWithoutProtocol = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-    if (!hostWithoutProtocol.includes(':')) {
-      hostWithoutProtocol = `${hostWithoutProtocol}:8888`;
+    let url = raw;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `http://${url}`;
     }
-    const fullUrl = `http://${hostWithoutProtocol}`;
-    await otaService.setServerUrl(fullUrl);
-    setOtaServerHost(hostWithoutProtocol);
-    Alert.alert('Server Saved', `OTA Server URL updated to ${fullUrl}`);
+    url = url.replace(/\/+$/, '');
+
+    await otaService.setServerUrl(url);
+    setOtaServerHost(url.replace(/^https?:\/\//i, ''));
+    setOtaStatusMessage(`OTA server updated to ${url}`);
+    Alert.alert('Server Saved', `OTA Server URL updated to ${url}`);
     await refreshOtaStatus();
   };
 
@@ -437,18 +521,6 @@ export const WorkspaceSelectScreen: React.FC = () => {
     );
   };
 
-  // Carousel scroll sync bound to both momentum end and scroll drag end
-  const handleCarouselScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetX = e.nativeEvent.contentOffset.x;
-      const index = Math.round(offsetX / carouselSnapStep);
-      const clampedIndex = Math.max(0, Math.min(WORKSPACES.length - 1, index));
-      const currentMode = WORKSPACES[clampedIndex].id;
-      setSelectedMode(prev => (prev !== currentMode ? currentMode : prev));
-    },
-    [carouselSnapStep],
-  );
-
   const activeWorkspace = useMemo(() => {
     return WORKSPACES.find(w => w.id === selectedMode) || WORKSPACES[0];
   }, [selectedMode]);
@@ -456,30 +528,49 @@ export const WorkspaceSelectScreen: React.FC = () => {
   const getLiveTelemetryBadge = (id: WorkspaceMode) => {
     switch (id) {
       case 'planner':
-        if (pendingTasksCount === 0) {
-          return '✓ All Tasks Done';
+        if (isAlarmRinging) {
+          return '🔔 Ringing Now!';
+        }
+        if (todayTasksCount === 0) {
+          return '📅 No Tasks Today';
+        }
+        if (todayTasksCount !== null && todayTasksCount > 0 && pendingTasksCount === 0) {
+          return '✓ All Done Today';
         }
         if (pendingTasksCount !== null && pendingTasksCount > 0) {
+          if (pendingOverdueCount > 0) {
+            return `📅 ${pendingTasksCount} Today (+${pendingOverdueCount})`;
+          }
           return `📅 ${pendingTasksCount} Pending Today`;
         }
         return '📅 Schedule Ready';
       case 'battery':
-        if (batteryStatus) {
+        if (batteryStatus && batteryStatus.level > 0) {
           if (batteryStatus.level >= 99 && batteryStatus.isCharging) {
-            return '⚡ 100% • Fully Charged';
+            return '⚡ 100% • Charged';
           }
           if (batteryStatus.level <= 15 && !batteryStatus.isCharging) {
-            return `🪫 ${batteryStatus.level}% • Low Battery`;
+            return `🪫 ${batteryStatus.level}% • Low`;
           }
-          return `⚡ ${batteryStatus.level}% ${
-            batteryStatus.isCharging ? '• Charging' : '• Guarded'
-          }`;
+          return `⚡ ${batteryStatus.level}% ${batteryStatus.isCharging ? '• Charging' : '• Guarded'
+            }`;
         }
         return '⚡ Guard Active';
       case 'chat':
-        return '💬 ChatRoom & Calling Ready';
+        if (isChatConnected) {
+          return '💬 Online & Connected';
+        }
+        if (isChatServerOnline === true) {
+          return '💬 Cloud Active & Ready';
+        }
+        if (isChatServerOnline === false) {
+          return '💬 Cloud Idle • Tap to Wake';
+        }
+        return '💬 Checking Cloud...';
       case 'movies':
-        return '🍿 TMDb Trending Live';
+        return watchlistCount > 0
+          ? `🍿 ${watchlistCount} in Watchlist`
+          : '🍿 TMDb Catalog';
       default:
         return 'Ready';
     }
@@ -509,25 +600,48 @@ export const WorkspaceSelectScreen: React.FC = () => {
         <View style={styles.header}>
           <View style={styles.topRow}>
             <View style={styles.topLeftGroup}>
-              <View
+              <TouchableOpacity
                 style={[
                   styles.brandPill,
                   {
                     backgroundColor: isDark
                       ? 'rgba(255, 255, 255, 0.08)'
                       : 'rgba(15, 23, 42, 0.05)',
-                    borderColor: colors.borderSubtle,
+                    borderColor: otaStatus?.hasCustomBundle
+                      ? '#10B981'
+                      : colors.borderSubtle,
                   },
                 ]}
+                onPress={handleOpenOtaModal}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="OmniHub Updates"
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
                 <Text style={styles.brandIcon}>💎</Text>
                 <Text style={[styles.brandText, { color: colors.text }]}>
                   OmniHub
                 </Text>
-              </View>
+                {otaChecking ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#8B5CF6"
+                    style={{ marginLeft: 6 }}
+                  />
+                ) : otaStatus?.hasCustomBundle ? (
+                  <View style={styles.brandLiveBadge}>
+                    <View style={styles.brandLiveDot} />
+                    <Text style={styles.brandLiveText}>Live</Text>
+                  </View>
+                ) : (
+                  <View style={styles.brandOtaBadge}>
+                    <Text style={styles.brandOtaText}>OTA</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
 
-            {/* Top Right Group: Quick Theme Toggle & Segmented View Switcher */}
+            {/* Top Right Group: Quick Theme Toggle */}
             <View style={styles.topRightGroup}>
               <TouchableOpacity
                 style={[
@@ -542,88 +656,14 @@ export const WorkspaceSelectScreen: React.FC = () => {
                 onPress={() => changeTheme(isDark ? 'light' : 'dark')}
                 activeOpacity={0.8}
                 accessibilityRole="button"
-                accessibilityLabel={`Toggle theme, currently ${
-                  isDark ? 'dark' : 'light'
-                }`}
+                accessibilityLabel={`Toggle theme, currently ${isDark ? 'dark' : 'light'
+                  }`}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
                 <Text style={styles.quickThemeBtnIcon}>
                   {isDark ? '🌙' : '☀️'}
                 </Text>
               </TouchableOpacity>
-
-              {/* Segmented Control (Grid vs Carousel) */}
-              <View
-                style={[
-                  styles.segmentedWrapper,
-                  {
-                    backgroundColor: isDark
-                      ? 'rgba(255, 255, 255, 0.08)'
-                      : 'rgba(15, 23, 42, 0.06)',
-                    borderColor: colors.borderSubtle,
-                  },
-                ]}
-              >
-                <TouchableOpacity
-                  style={[
-                    styles.segmentedBtn,
-                    viewMode === 'grid' && [
-                      styles.segmentedBtnActive,
-                      { backgroundColor: isDark ? colors.card : '#FFFFFF' },
-                    ],
-                  ]}
-                  onPress={() => handleSelectViewMode('grid')}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Switch to Grid view"
-                  accessibilityState={{ selected: viewMode === 'grid' }}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Text
-                    style={[
-                      styles.segmentedBtnText,
-                      {
-                        color:
-                          viewMode === 'grid' ? colors.text : colors.textMuted,
-                        fontWeight: viewMode === 'grid' ? '800' : '600',
-                      },
-                    ]}
-                  >
-                    ⊞ Grid
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.segmentedBtn,
-                    viewMode === 'carousel' && [
-                      styles.segmentedBtnActive,
-                      { backgroundColor: isDark ? colors.card : '#FFFFFF' },
-                    ],
-                  ]}
-                  onPress={() => handleSelectViewMode('carousel')}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Switch to Carousel view"
-                  accessibilityState={{ selected: viewMode === 'carousel' }}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Text
-                    style={[
-                      styles.segmentedBtnText,
-                      {
-                        color:
-                          viewMode === 'carousel'
-                            ? colors.text
-                            : colors.textMuted,
-                        fontWeight: viewMode === 'carousel' ? '800' : '600',
-                      },
-                    ]}
-                  >
-                    ⊟ Slide
-                  </Text>
-                </TouchableOpacity>
-              </View>
             </View>
           </View>
 
@@ -635,376 +675,310 @@ export const WorkspaceSelectScreen: React.FC = () => {
           </Text>
         </View>
 
-        {/* Main Content Area: 2x2 Bento Grid vs. Carousel */}
-        {viewMode === 'grid' ? (
-          <View style={[styles.gridContainer, { gap: gridGap }]}>
-            {WORKSPACES.map(ws => {
-              const isSelected = selectedMode === ws.id;
-              return (
-                <TouchableOpacity
-                  key={ws.id}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    if (isSelected) {
-                      handleLaunch(ws.id);
-                    } else {
-                      handleSelectMode(ws.id);
-                    }
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${ws.name}, ${ws.category}. ${ws.tagline}`}
-                  accessibilityState={{ selected: isSelected }}
-                  accessibilityHint="Tap to select or launch this workspace"
-                  style={[
-                    styles.gridCard,
-                    {
-                      width: gridCardWidth,
-                      backgroundColor: isDark
-                        ? isSelected
-                          ? ws.darkBg
-                          : colors.card
-                        : isSelected
+        {/* Main Content Area: Responsive Bento Grid */}
+        <View style={[styles.gridContainer, { gap: gridGap }]}>
+          {WORKSPACES.map(ws => {
+            const isSelected = selectedMode === ws.id;
+            const isPlannerAlarming = ws.id === 'planner' && isAlarmRinging;
+            return (
+              <TouchableOpacity
+                key={ws.id}
+                activeOpacity={0.85}
+                onPress={() => {
+                  if (isSelected) {
+                    handleLaunch(ws.id);
+                  } else {
+                    handleSelectMode(ws.id);
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`${ws.name}, ${ws.category}. ${ws.tagline}`}
+                accessibilityState={{ selected: isSelected }}
+                accessibilityHint="Tap to select or launch this workspace."
+                style={[
+                  styles.gridCard,
+                  {
+                    width: gridCardWidth,
+                    backgroundColor: isDark
+                      ? isSelected
+                        ? ws.darkBg
+                        : colors.card
+                      : isSelected
                         ? ws.lightBg
                         : colors.surface,
-                      borderColor: isSelected ? ws.color : colors.border,
-                      borderWidth: isSelected ? 2.5 : 1,
-                      shadowColor: isSelected ? ws.color : '#000000',
-                      shadowOpacity: isSelected ? 0.35 : 0.06,
-                      elevation: isSelected ? 6 : 2,
-                    },
-                  ]}
-                >
-                  {/* Card Top: Category & Selection Badge */}
-                  <View style={styles.gridCardHeader}>
-                    <View
-                      style={[
-                        styles.categoryBadge,
-                        {
-                          backgroundColor: isDark
-                            ? 'rgba(255, 255, 255, 0.08)'
-                            : `${ws.color}18`,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[styles.categoryBadgeText, { color: ws.color }]}
-                        numberOfLines={1}
-                      >
-                        {ws.category}
-                      </Text>
-                    </View>
-
-                    <View
-                      style={[
-                        styles.checkCircle,
-                        {
-                          backgroundColor: isSelected
-                            ? ws.color
-                            : isDark
-                            ? 'rgba(255, 255, 255, 0.12)'
-                            : 'rgba(0, 0, 0, 0.08)',
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.checkIcon,
-                          { color: isSelected ? '#FFFFFF' : 'transparent' },
-                        ]}
-                      >
-                        ✓
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Card Middle: Icon & Balanced Height Multi-line Title */}
-                  <View style={styles.gridCardMiddle}>
-                    <View
-                      style={[
-                        styles.gridIconCircle,
-                        {
-                          backgroundColor: isDark
-                            ? `${ws.color}25`
-                            : `${ws.color}18`,
-                          borderColor: ws.colorLight,
-                        },
-                      ]}
-                    >
-                      <Text style={styles.gridIconEmoji}>{ws.icon}</Text>
-                    </View>
-
-                    <View style={styles.titleContainer}>
-                      <Text
-                        style={[styles.gridCardTitle, { color: colors.text }]}
-                        numberOfLines={2}
-                      >
-                        {ws.name}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Card Bottom: Live Badge & Explicit Open Button */}
-                  <View style={styles.gridCardBottom}>
-                    <View
-                      style={[
-                        styles.liveTelemetryBadge,
-                        {
-                          backgroundColor: isDark
-                            ? 'rgba(255, 255, 255, 0.06)'
-                            : `${ws.color}12`,
-                          borderColor: isSelected
-                            ? `${ws.color}60`
-                            : colors.borderSubtle,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.liveTelemetryText,
-                          {
-                            color: isSelected ? ws.color : colors.textSecondary,
-                          },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {getLiveTelemetryBadge(ws.id)}
-                      </Text>
-                    </View>
-
-                    <View style={styles.gridActionRow}>
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        onPress={() => handleLaunch(ws.id)}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        style={[
-                          styles.gridActionPill,
-                          {
-                            backgroundColor: isSelected
-                              ? ws.color
-                              : isDark
-                              ? 'rgba(255, 255, 255, 0.08)'
-                              : 'rgba(15, 23, 42, 0.05)',
-                            borderColor: isSelected
-                              ? ws.color
-                              : colors.borderSubtle,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.gridActionHint,
-                            {
-                              color: isSelected
-                                ? '#FFFFFF'
-                                : colors.textSecondary,
-                            },
-                          ]}
-                        >
-                          {isSelected ? 'Launch ➔' : 'Select'}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : (
-          /* Carousel View Mode */
-          <View style={styles.carouselContainer}>
-            <ScrollView
-              ref={carouselScrollRef}
-              horizontal
-              directionalLockEnabled={true}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={[
-                styles.carouselScroll,
-                {
-                  paddingHorizontal: Math.max(
-                    (windowWidth - carouselCardWidth) / 2,
-                    16,
-                  ),
-                },
-              ]}
-              decelerationRate="fast"
-              snapToOffsets={WORKSPACES.map((_, i) => i * carouselSnapStep)}
-              onMomentumScrollEnd={handleCarouselScroll}
-              onScrollEndDrag={handleCarouselScroll}
-            >
-              {WORKSPACES.map((ws, idx) => {
-                const isSelected = selectedMode === ws.id;
-                return (
-                  <TouchableOpacity
-                    key={ws.id}
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      if (isSelected) {
-                        handleLaunch(ws.id);
-                      } else {
-                        handleSelectMode(ws.id, idx);
-                      }
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${ws.name}, ${ws.category}. ${ws.tagline}`}
-                    accessibilityState={{ selected: isSelected }}
-                    accessibilityHint="Tap to select or launch this workspace"
+                    borderColor: isSelected ? ws.color : colors.border,
+                    borderWidth: isSelected ? 2.5 : 1,
+                    shadowColor: isSelected ? ws.color : '#000000',
+                    shadowOpacity: isSelected ? 0.35 : 0.06,
+                    elevation: isSelected ? 6 : 2,
+                  },
+                ]}
+              >
+                {/* Pulsing glowing outline when alarm is ringing */}
+                {isPlannerAlarming && (
+                  <Animated.View
+                    pointerEvents="none"
                     style={[
-                      styles.carouselCard,
+                      styles.alarmPulseBorder,
                       {
-                        width: carouselCardWidth,
+                        opacity: alarmPulseAnim,
+                        transform: [
+                          {
+                            scale: alarmPulseAnim.interpolate({
+                              inputRange: [0.1, 1],
+                              outputRange: [1.0, 1.025],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  />
+                )}
+
+                {/* Card Top: Category & Selection Badge */}
+                <View style={styles.gridCardHeader}>
+                  <View
+                    style={[
+                      styles.categoryBadge,
+                      {
                         backgroundColor: isDark
-                          ? isSelected
-                            ? ws.darkBg
-                            : colors.card
-                          : isSelected
-                          ? ws.lightBg
-                          : colors.surface,
-                        borderColor: isSelected ? ws.color : colors.border,
-                        borderWidth: isSelected ? 2.5 : 1,
-                        shadowColor: isSelected ? ws.color : '#000000',
-                        shadowOpacity: isSelected ? 0.35 : 0.08,
-                        elevation: isSelected ? 8 : 2,
+                          ? 'rgba(255, 255, 255, 0.08)'
+                          : `${ws.color}18`,
                       },
                     ]}
                   >
-                    {/* Top Badge */}
-                    <View
+                    <Text
+                      style={[styles.categoryBadgeText, { color: ws.color }]}
+                      numberOfLines={1}
+                    >
+                      {ws.category}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.checkCircle,
+                      {
+                        backgroundColor: isSelected
+                          ? ws.color
+                          : isDark
+                            ? 'rgba(255, 255, 255, 0.12)'
+                            : 'rgba(0, 0, 0, 0.08)',
+                      },
+                    ]}
+                  >
+                    <Text
                       style={[
-                        styles.cardTopBadge,
-                        {
-                          backgroundColor: isDark
-                            ? 'rgba(255, 255, 255, 0.08)'
-                            : `${ws.color}15`,
-                        },
+                        styles.checkIcon,
+                        { color: isSelected ? '#FFFFFF' : 'transparent' },
                       ]}
                     >
-                      <Text style={[styles.cardBadgeText, { color: ws.color }]}>
-                        {ws.category}
-                      </Text>
-                    </View>
+                      ✓
+                    </Text>
+                  </View>
+                </View>
 
-                    {/* Icon Circle */}
-                    <View
-                      style={[
-                        styles.iconCircle,
-                        {
-                          backgroundColor: isDark
-                            ? `${ws.color}25`
-                            : `${ws.color}18`,
-                          borderColor: ws.colorLight,
-                        },
-                      ]}
+                {/* Card Middle: Icon & Title */}
+                <View style={styles.gridCardMiddle}>
+                  <View
+                    style={[
+                      styles.gridIconCircle,
+                      {
+                        backgroundColor: isDark
+                          ? `${ws.color}25`
+                          : `${ws.color}18`,
+                        borderColor: ws.colorLight,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.gridIconEmoji}>{ws.icon}</Text>
+                  </View>
+
+                  <View style={styles.titleContainer}>
+                    <Text
+                      style={[styles.gridCardTitle, { color: colors.text }]}
+                      numberOfLines={1}
                     >
-                      <Text style={styles.iconEmoji}>{ws.icon}</Text>
-                    </View>
-
-                    {/* Title & Tagline */}
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>
                       {ws.name}
                     </Text>
                     <Text
-                      style={[
-                        styles.cardTagline,
-                        { color: colors.textSecondary },
-                      ]}
+                      style={[styles.gridCardTagline, { color: colors.textSecondary }]}
+                      numberOfLines={1}
                     >
                       {ws.tagline}
                     </Text>
+                  </View>
+                </View>
 
-                    {/* Live Status Pill */}
-                    <View
-                      style={[
-                        styles.carouselLivePill,
-                        {
-                          backgroundColor: isDark
+                {/* Card Bottom: Live Badge & Explicit Open Button */}
+                <View style={styles.gridCardBottom}>
+                  <View
+                    style={[
+                      styles.liveTelemetryBadge,
+                      {
+                        backgroundColor: isPlannerAlarming
+                          ? isDark
+                            ? 'rgba(139, 92, 246, 0.28)'
+                            : '#EDE9FE'
+                          : isDark
                             ? 'rgba(255, 255, 255, 0.06)'
-                            : `${ws.color}15`,
-                          borderColor: `${ws.color}50`,
+                            : `${ws.color}12`,
+                        borderColor: isPlannerAlarming
+                          ? '#8B5CF6'
+                          : isSelected
+                            ? `${ws.color}60`
+                            : colors.borderSubtle,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.liveTelemetryText,
+                        {
+                          color: isPlannerAlarming
+                            ? '#8B5CF6'
+                            : isSelected
+                              ? ws.color
+                              : colors.textSecondary,
+                          fontWeight: isPlannerAlarming ? '800' : '700',
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {getLiveTelemetryBadge(ws.id)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.gridActionRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        if (isSelected || isPlannerAlarming) {
+                          handleLaunch(ws.id);
+                        } else {
+                          handleSelectMode(ws.id);
+                        }
+                      }}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      style={[
+                        styles.gridActionPill,
+                        {
+                          backgroundColor: isPlannerAlarming
+                            ? '#8B5CF6'
+                            : isSelected
+                              ? ws.color
+                              : isDark
+                                ? 'rgba(255, 255, 255, 0.08)'
+                                : 'rgba(15, 23, 42, 0.05)',
+                          borderColor: isPlannerAlarming
+                            ? '#8B5CF6'
+                            : isSelected
+                              ? ws.color
+                              : colors.borderSubtle,
                         },
                       ]}
                     >
                       <Text
-                        style={[styles.carouselLiveText, { color: ws.color }]}
-                      >
-                        {getLiveTelemetryBadge(ws.id)}
-                      </Text>
-                    </View>
-
-                    {/* Feature Chips */}
-                    <View style={styles.featureChipsWrapper}>
-                      {ws.features.map((feat, fIdx) => (
-                        <View
-                          key={fIdx}
-                          style={[
-                            styles.chip,
-                            {
-                              backgroundColor: isDark
-                                ? 'rgba(255, 255, 255, 0.06)'
-                                : 'rgba(15, 23, 42, 0.04)',
-                              borderColor: colors.borderSubtle,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.chipText,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {feat}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    {/* Hint */}
-                    <Text
-                      style={[
-                        styles.cardTapHint,
-                        { color: isSelected ? ws.color : colors.textMuted },
-                      ]}
-                    >
-                      {isSelected ? '✓ Tap again to launch ➔' : 'Tap to select'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            {/* Dots Indicator */}
-            <View style={styles.dotsRow}>
-              {WORKSPACES.map((ws, idx) => (
-                <TouchableOpacity
-                  key={ws.id}
-                  onPress={() => handleSelectMode(ws.id, idx)}
-                  hitSlop={{ top: 16, bottom: 16, left: 10, right: 10 }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Page ${idx + 1} of ${
-                    WORKSPACES.length
-                  }: ${ws.name}`}
-                  accessibilityState={{ selected: selectedMode === ws.id }}
-                  style={styles.dotTouchWrapper}
-                >
-                  <View
-                    style={[
-                      styles.dot,
-                      selectedMode === ws.id
-                        ? [styles.dotActive, { backgroundColor: ws.color }]
-                        : {
-                            backgroundColor: isDark
-                              ? 'rgba(255, 255, 255, 0.25)'
-                              : 'rgba(0, 0, 0, 0.2)',
+                        style={[
+                          styles.gridActionHint,
+                          {
+                            color: isPlannerAlarming || isSelected
+                              ? '#FFFFFF'
+                              : colors.textSecondary,
                           },
-                    ]}
-                  />
-                </TouchableOpacity>
+                        ]}
+                      >
+                        {isPlannerAlarming
+                          ? '🔔 Open'
+                          : isSelected
+                            ? 'Launch ➔'
+                            : 'Select'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Bottom Section: Suite Features, Default Workspace Toggle & Primary Launch Button */}
+        <View style={styles.bottomSection}>
+          {/* Active Suite Features Preview */}
+          <View style={styles.featuresPreview}>
+            <Text style={[styles.featuresPreviewTitle, { color: colors.textMuted }]}>
+              {activeWorkspace.name} Highlights
+            </Text>
+            <View style={styles.featuresRow}>
+              {activeWorkspace.features.map((feat, idx) => (
+                <View
+                  key={idx}
+                  style={[
+                    styles.featurePill,
+                    {
+                      backgroundColor: isDark
+                        ? 'rgba(255, 255, 255, 0.05)'
+                        : 'rgba(15, 23, 42, 0.04)',
+                      borderColor: colors.borderSubtle,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.featureDot, { color: activeWorkspace.color }]}>•</Text>
+                  <Text
+                    style={[styles.featureText, { color: colors.textSecondary }]}
+                    numberOfLines={1}
+                  >
+                    {feat}
+                  </Text>
+                </View>
               ))}
             </View>
           </View>
-        )}
 
-        {/* Bottom Launch Button Section */}
-        <View style={styles.bottomSection}>
+          <TouchableOpacity
+            style={[
+              styles.defaultWorkspaceToggle,
+              {
+                backgroundColor: isDark
+                  ? 'rgba(255, 255, 255, 0.05)'
+                  : 'rgba(15, 23, 42, 0.04)',
+                borderColor: isAutoLaunchDefault
+                  ? activeWorkspace.color
+                  : colors.borderSubtle,
+              },
+            ]}
+            activeOpacity={0.7}
+            onPress={toggleAutoLaunchDefault}
+          >
+            <View
+              style={[
+                styles.defaultCheckbox,
+                {
+                  borderColor: isAutoLaunchDefault
+                    ? activeWorkspace.color
+                    : colors.border,
+                  backgroundColor: isAutoLaunchDefault
+                    ? activeWorkspace.color
+                    : 'transparent',
+                },
+              ]}
+            >
+              {isAutoLaunchDefault && (
+                <Text style={styles.defaultCheckmark}>✓</Text>
+              )}
+            </View>
+            <Text
+              style={[styles.defaultWorkspaceText, { color: colors.textSecondary }]}
+              numberOfLines={1}
+            >
+              Always launch{' '}
+              <Text style={{ color: colors.text, fontWeight: '700' }}>
+                {activeWorkspace.name}
+              </Text>{' '}
+              on app startup
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[
               styles.continueButton,
@@ -1024,183 +998,330 @@ export const WorkspaceSelectScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
         </View>
+      </ScrollView>
 
-        {/* Over-The-Air (OTA) Updates Section */}
-        <View style={styles.otaContainer}>
-          <View
-            style={[
-              styles.otaCard,
-              {
-                backgroundColor: isDark
-                  ? 'rgba(30, 27, 75, 0.45)'
-                  : colors.surface,
-                borderColor: colors.borderSubtle,
-              },
-            ]}
+      {/* Over-The-Air (OTA) Updates Interactive Modal */}
+      <Modal
+        visible={isOtaModalVisible}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+        onRequestClose={() => setIsOtaModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.otaModalBackdrop}
+          activeOpacity={1}
+          onPress={() => setIsOtaModalVisible(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.otaKeyboardAvoid}
           >
-            {/* Header Row */}
-            <View style={styles.otaHeaderRow}>
-              <View style={styles.otaHeaderLeft}>
+            <TouchableOpacity
+              style={[
+                styles.otaModalContent,
+                {
+                  backgroundColor: isDark ? '#111827' : '#FFFFFF',
+                  borderColor: isDark
+                    ? 'rgba(255, 255, 255, 0.12)'
+                    : 'rgba(0, 0, 0, 0.1)',
+                },
+              ]}
+              activeOpacity={1}
+              onPress={e => e.stopPropagation?.()}
+            >
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+              >
+                {/* Modal Header */}
+                <View style={styles.otaModalHeader}>
+                  <View style={styles.otaModalHeaderLeft}>
+                    <View
+                      style={[
+                        styles.otaModalIconBox,
+                        {
+                          backgroundColor: isDark
+                            ? 'rgba(139, 92, 246, 0.2)'
+                            : 'rgba(139, 92, 246, 0.1)',
+                          borderColor: 'rgba(139, 92, 246, 0.35)',
+                        },
+                      ]}
+                    >
+                      <Text style={styles.otaModalIcon}>💎</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.otaModalTitle, { color: colors.text }]}>
+                        OmniHub OTA Update
+                      </Text>
+                      <Text
+                        style={[
+                          styles.otaModalSubtitle,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Wireless hot-patching & live bundle updates
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.otaModalCloseBtn,
+                      {
+                        backgroundColor: isDark
+                          ? 'rgba(255, 255, 255, 0.08)'
+                          : 'rgba(0, 0, 0, 0.05)',
+                        borderColor: colors.borderSubtle,
+                      },
+                    ]}
+                    onPress={() => setIsOtaModalVisible(false)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.otaModalCloseText, { color: colors.text }]}>
+                      ✕
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Status Pills */}
+                <View style={styles.otaModalStatusGrid}>
+                  <View
+                    style={[
+                      styles.otaModalStatusPill,
+                      {
+                        backgroundColor: isDark
+                          ? 'rgba(255, 255, 255, 0.04)'
+                          : 'rgba(0, 0, 0, 0.03)',
+                        borderColor: otaStatus?.hasCustomBundle
+                          ? 'rgba(16, 185, 129, 0.4)'
+                          : colors.borderSubtle,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.otaModalStatusPillLabel,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      Installed Bundle
+                    </Text>
+                    <Text
+                      style={[
+                        styles.otaModalStatusPillValue,
+                        {
+                          color: otaStatus?.hasCustomBundle
+                            ? '#10B981'
+                            : colors.text,
+                        },
+                      ]}
+                    >
+                      {otaStatus?.hasCustomBundle
+                        ? `v${formatVersion(otaStatus.installedVersion)} Live`
+                        : 'Base APK (Embedded)'}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.otaModalStatusPill,
+                      {
+                        backgroundColor: isDark
+                          ? 'rgba(255, 255, 255, 0.04)'
+                          : 'rgba(0, 0, 0, 0.03)',
+                        borderColor: colors.borderSubtle,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.otaModalStatusPillLabel,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      Bundle Size
+                    </Text>
+                    <Text
+                      style={[
+                        styles.otaModalStatusPillValue,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {otaStatus?.hasCustomBundle
+                        ? `📦 ${(otaStatus.bundleSize / 1024).toFixed(0)} KB`
+                        : '📦 Embedded'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Live Message Banner */}
                 <View
                   style={[
-                    styles.otaIconBadge,
+                    styles.otaLiveMessageCard,
                     {
-                      backgroundColor: isDark
-                        ? 'rgba(139, 92, 246, 0.2)'
-                        : 'rgba(139, 92, 246, 0.1)',
-                      borderColor: 'rgba(139, 92, 246, 0.35)',
-                    },
-                  ]}
-                >
-                  <Text style={styles.otaIconText}>⚡</Text>
-                </View>
-                <View style={styles.otaTitleCol}>
-                  <Text style={[styles.otaTitle, { color: colors.text }]}>
-                    Over-The-Air Updates
-                  </Text>
-                  <Text
-                    style={[styles.otaSubtitle, { color: colors.textSecondary }]}
-                  >
-                    Wireless hot-patching & live bundle updates
-                  </Text>
-                </View>
-              </View>
-
-              <View
-                style={[
-                  styles.otaStatusBadge,
-                  {
-                    backgroundColor: otaStatus?.hasCustomBundle
-                      ? 'rgba(16, 185, 129, 0.15)'
-                      : isDark
-                      ? 'rgba(255, 255, 255, 0.08)'
-                      : 'rgba(0, 0, 0, 0.05)',
-                    borderColor: otaStatus?.hasCustomBundle
-                      ? '#10B981'
-                      : colors.borderSubtle,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.otaStatusBadgeText,
-                    {
-                      color: otaStatus?.hasCustomBundle
+                      backgroundColor: otaDownloadSuccess
+                        ? 'rgba(16, 185, 129, 0.12)'
+                        : otaUpdateInfo?.available
+                          ? 'rgba(139, 92, 246, 0.12)'
+                          : isDark
+                            ? 'rgba(255, 255, 255, 0.05)'
+                            : 'rgba(0, 0, 0, 0.04)',
+                      borderColor: otaDownloadSuccess
                         ? '#10B981'
-                        : colors.textMuted,
+                        : otaUpdateInfo?.available
+                          ? '#8B5CF6'
+                          : colors.borderSubtle,
                     },
                   ]}
                 >
-                  {otaStatus?.hasCustomBundle
-                    ? `v${otaStatus.installedVersion} Live`
-                    : 'Base APK'}
-                </Text>
-              </View>
-            </View>
+                  {otaChecking || otaDownloading ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={otaDownloading ? '#38BDF8' : '#8B5CF6'}
+                    />
+                  ) : (
+                    <Text style={styles.otaLiveMessageIcon}>
+                      {otaDownloadSuccess
+                        ? '🎉'
+                        : otaUpdateInfo?.available
+                          ? '🚀'
+                          : otaStatusMessage?.startsWith('⚠️')
+                            ? '⚠️'
+                            : '✨'}
+                    </Text>
+                  )}
+                  <Text
+                    style={[
+                      styles.otaLiveMessageText,
+                      {
+                        color: otaDownloadSuccess
+                          ? '#10B981'
+                          : otaUpdateInfo?.available
+                            ? colors.text
+                            : colors.textSecondary,
+                      },
+                    ]}
+                  >
+                    {otaStatusMessage ||
+                      'Tap below to check hotspot server for latest updates.'}
+                  </Text>
+                </View>
 
-            {/* Quick Actions / Status Row */}
-            <View style={styles.otaActionRow}>
-              <View
-                style={[
-                  styles.otaInfoPill,
-                  {
-                    backgroundColor: isDark
-                      ? 'rgba(255, 255, 255, 0.05)'
-                      : 'rgba(0, 0, 0, 0.04)',
-                    borderColor: colors.borderSubtle,
-                  },
-                ]}
-              >
-                <Text
-                  style={[styles.otaInfoPillText, { color: colors.textSecondary }]}
-                >
-                  {otaStatus?.hasCustomBundle
-                    ? `📦 ${(otaStatus.bundleSize / 1024).toFixed(0)} KB installed`
-                    : '📦 Embedded bundle'}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.otaCheckBtn,
-                  {
-                    backgroundColor: activeWorkspace.color,
-                    opacity: otaChecking ? 0.7 : 1,
-                  },
-                ]}
-                onPress={handleCheckOtaUpdate}
-                disabled={otaChecking}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel="Check for OTA updates"
-              >
-                <Text style={styles.otaCheckBtnText}>
-                  {otaChecking ? 'Checking...' : 'Check Updates ⚡'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Server Configuration */}
-            <View style={styles.otaServerSection}>
-              <Text
-                style={[styles.otaServerLabel, { color: colors.textSecondary }]}
-              >
-                HOTSPOT SERVER (IP:PORT)
-              </Text>
-              <View style={styles.otaInputRow}>
-                <TextInput
-                  style={[
-                    styles.otaServerInput,
-                    {
-                      backgroundColor: isDark
-                        ? 'rgba(255, 255, 255, 0.06)'
-                        : 'rgba(0, 0, 0, 0.03)',
-                      borderColor: colors.borderSubtle,
-                      color: colors.text,
-                    },
-                  ]}
-                  value={otaServerHost}
-                  onChangeText={setOtaServerHost}
-                  placeholder="10.16.64.73:8888"
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
+                {/* Primary Action Button */}
                 <TouchableOpacity
                   style={[
-                    styles.otaSaveBtn,
+                    styles.otaModalPrimaryBtn,
                     {
-                      backgroundColor: isDark
-                        ? 'rgba(255, 255, 255, 0.1)'
-                        : 'rgba(15, 23, 42, 0.08)',
-                      borderColor: colors.borderSubtle,
+                      backgroundColor: otaDownloadSuccess
+                        ? '#10B981'
+                        : otaUpdateInfo?.available
+                          ? '#8B5CF6'
+                          : activeWorkspace.color,
+                      opacity: otaChecking || otaDownloading ? 0.7 : 1,
                     },
                   ]}
-                  onPress={handleSaveServerHost}
-                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (otaDownloadSuccess) {
+                      otaService.restartApp();
+                    } else if (otaUpdateInfo?.available) {
+                      handleApplyUpdate();
+                    } else {
+                      handleCheckOtaUpdate(true);
+                    }
+                  }}
+                  disabled={otaChecking || otaDownloading}
+                  activeOpacity={0.8}
                 >
-                  <Text style={[styles.otaSaveBtnText, { color: colors.text }]}>
-                    Save
+                  {otaChecking ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : otaDownloading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : null}
+                  <Text style={styles.otaModalPrimaryBtnText}>
+                    {otaDownloadSuccess
+                      ? '🚀 Restart Application Now'
+                      : otaDownloading
+                        ? 'Installing Bundle...'
+                        : otaChecking
+                          ? 'Checking Server...'
+                          : otaUpdateInfo?.available
+                            ? `⚡ Download & Apply Update v${formatVersion(
+                              otaUpdateInfo.remoteVersion,
+                            )}`
+                            : '⚡ Check & Update Application'}
                   </Text>
                 </TouchableOpacity>
-              </View>
-            </View>
 
-            {/* Revert Option if Custom Bundle is Installed */}
-            {otaStatus?.hasCustomBundle && (
-              <TouchableOpacity
-                style={styles.otaRevertBtn}
-                onPress={handleRevertOta}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.otaRevertBtnText, { color: '#EF4444' }]}>
-                  ↺ Revert to Original Base APK
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      </ScrollView>
+                {/* Server Configuration */}
+                <View style={styles.otaServerSection}>
+                  <Text
+                    style={[
+                      styles.otaServerLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    HOTSPOT SERVER (IP:PORT OR HOST)
+                  </Text>
+                  <View style={styles.otaInputRow}>
+                    <TextInput
+                      style={[
+                        styles.otaServerInput,
+                        {
+                          backgroundColor: isDark
+                            ? 'rgba(255, 255, 255, 0.06)'
+                            : 'rgba(0, 0, 0, 0.03)',
+                          borderColor: colors.borderSubtle,
+                          color: colors.text,
+                        },
+                      ]}
+                      value={otaServerHost}
+                      onChangeText={setOtaServerHost}
+                      placeholder="10.105.247.73:8888"
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="url"
+                    />
+                    <TouchableOpacity
+                      style={[
+                        styles.otaSaveBtn,
+                        {
+                          backgroundColor: isDark
+                            ? 'rgba(255, 255, 255, 0.1)'
+                            : 'rgba(15, 23, 42, 0.08)',
+                          borderColor: colors.borderSubtle,
+                        },
+                      ]}
+                      onPress={handleSaveServerHost}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[styles.otaSaveBtnText, { color: colors.text }]}
+                      >
+                        Save
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Revert to Base APK if Custom Bundle Active */}
+                {otaStatus?.hasCustomBundle && (
+                  <TouchableOpacity
+                    style={[styles.otaRevertBtn, { marginTop: 12 }]}
+                    onPress={handleRevertOta}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.otaRevertBtnText, { color: '#EF4444' }]}>
+                      ↺ Revert to Original Base APK
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -1231,18 +1352,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  backBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 16,
-    borderWidth: 1,
-    minHeight: 34,
-    justifyContent: 'center',
-  },
-  backBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
   },
   brandPill: {
     flexDirection: 'row',
@@ -1277,31 +1386,6 @@ const styles = StyleSheet.create({
   quickThemeBtnIcon: {
     fontSize: 14,
   },
-  segmentedWrapper: {
-    flexDirection: 'row',
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 3,
-    gap: 2,
-  },
-  segmentedBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
-    minHeight: 34,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  segmentedBtnActive: {
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  segmentedBtnText: {
-    fontSize: 12,
-    letterSpacing: 0.1,
-  },
   mainTitle: {
     fontSize: 22,
     fontWeight: '800',
@@ -1317,7 +1401,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
 
-  // 2x2 Bento Grid Styles (Guaranteed Equal Width Alignment without flex-wrap overflow)
+  // Responsive Bento Grid Styles
   gridContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1327,10 +1411,28 @@ const styles = StyleSheet.create({
   gridCard: {
     borderRadius: 20,
     padding: 12,
-    minHeight: 200,
+    minHeight: 185,
     justifyContent: 'space-between',
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 10,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  alarmPulseBorder: {
+    position: 'absolute',
+    top: -3,
+    left: -3,
+    right: -3,
+    bottom: -3,
+    borderRadius: 23,
+    borderWidth: 3.5,
+    borderColor: '#8B5CF6',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.95,
+    shadowRadius: 16,
+    elevation: 12,
+    zIndex: 10,
   },
   gridCardHeader: {
     flexDirection: 'row',
@@ -1376,7 +1478,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   titleContainer: {
-    minHeight: 38,
+    minHeight: 36,
     justifyContent: 'center',
   },
   gridCardTitle: {
@@ -1384,6 +1486,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -0.2,
     lineHeight: 18,
+  },
+  gridCardTagline: {
+    fontSize: 10.5,
+    marginTop: 2,
+    lineHeight: 14,
   },
   gridCardBottom: {
     marginTop: 4,
@@ -1417,117 +1524,75 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  // Carousel Styles
-  carouselContainer: {
-    marginVertical: 8,
-  },
-  carouselScroll: {
-    gap: 14,
-    alignItems: 'center',
-  },
-  carouselCard: {
-    borderRadius: 24,
-    paddingVertical: 18,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    minHeight: 330,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 14,
-  },
-  cardTopBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 3.5,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  cardBadgeText: {
-    fontSize: 10.5,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-  iconCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    marginBottom: 10,
-  },
-  iconEmoji: {
-    fontSize: 26,
-  },
-  cardTitle: {
-    fontSize: 16.5,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 3,
-  },
-  cardTagline: {
-    fontSize: 12,
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  carouselLivePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4.5,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 12,
-  },
-  carouselLiveText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  featureChipsWrapper: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 6,
-    marginBottom: 12,
-  },
-  chip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  chipText: {
-    fontSize: 10.5,
-    fontWeight: '600',
-  },
-  cardTapHint: {
-    fontSize: 11.5,
-    fontWeight: '700',
-    marginTop: 'auto',
-  },
-  dotsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 10,
-  },
-  dotTouchWrapper: {
-    padding: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: {
-    width: 22,
-    borderRadius: 4,
-  },
-
   // Bottom Section Styles
   bottomSection: {
     alignItems: 'center',
     width: '100%',
-    marginTop: 12,
+    marginTop: 10,
+  },
+  featuresPreview: {
+    width: '100%',
+    marginBottom: 10,
+    marginTop: 2,
+  },
+  featuresPreviewTitle: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  featuresRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  featurePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
+  },
+  featureDot: {
+    fontSize: 14,
+    lineHeight: 14,
+    fontWeight: '900',
+  },
+  featureText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  defaultWorkspaceToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 10,
+    width: '100%',
+    gap: 8,
+  },
+  defaultCheckbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  defaultCheckmark: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '900',
+    lineHeight: 14,
+  },
+  defaultWorkspaceText: {
+    fontSize: 11.5,
+    flex: 1,
   },
   continueButton: {
     width: '100%',
@@ -1548,98 +1613,170 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // OTA Updates Section Styles
-  otaContainer: {
-    width: '100%',
-    marginTop: 18,
-    marginBottom: 8,
-  },
-  otaCard: {
-    borderRadius: 18,
+  brandLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginLeft: 6,
     borderWidth: 1,
-    padding: 14,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 2,
+    borderColor: 'rgba(16, 185, 129, 0.35)',
   },
-  otaHeaderRow: {
+  brandLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    marginRight: 4,
+  },
+  brandLiveText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#10B981',
+    letterSpacing: 0.2,
+  },
+  brandOtaBadge: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 6,
+    marginLeft: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.35)',
+  },
+  brandOtaText: {
+    fontSize: 8.5,
+    fontWeight: '800',
+    color: '#8B5CF6',
+    letterSpacing: 0.2,
+  },
+
+  // OTA Modal Styles
+  otaModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  otaKeyboardAvoid: {
+    width: '100%',
+    maxWidth: 440,
+  },
+  otaModalContent: {
+    width: '100%',
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 10,
+    maxHeight: '90%',
+  },
+  otaModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  otaHeaderLeft: {
+  otaModalHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     flex: 1,
-    marginRight: 8,
   },
-  otaIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
+  otaModalIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    borderWidth: 1,
   },
-  otaIconText: {
+  otaModalIcon: {
+    fontSize: 18,
+  },
+  otaModalTitle: {
     fontSize: 16,
-  },
-  otaTitleCol: {
-    flex: 1,
-  },
-  otaTitle: {
-    fontSize: 14,
     fontWeight: '800',
     letterSpacing: -0.2,
   },
-  otaSubtitle: {
+  otaModalSubtitle: {
     fontSize: 11,
     marginTop: 1,
   },
-  otaStatusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
+  otaModalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
   },
-  otaStatusBadgeText: {
-    fontSize: 10.5,
+  otaModalCloseText: {
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 0.3,
   },
-  otaActionRow: {
+  otaModalStatusGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  otaModalStatusPill: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otaModalStatusPillLabel: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    marginBottom: 2,
+    textTransform: 'uppercase',
+  },
+  otaModalStatusPillValue: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  otaLiveMessageCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: 10,
-    marginBottom: 12,
   },
-  otaInfoPill: {
+  otaLiveMessageIcon: {
+    fontSize: 18,
+  },
+  otaLiveMessageText: {
+    fontSize: 12,
     flex: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    justifyContent: 'center',
-  },
-  otaInfoPillText: {
-    fontSize: 11.5,
+    lineHeight: 16,
     fontWeight: '600',
   },
-  otaCheckBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
+  otaModalPrimaryBtn: {
+    width: '100%',
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 36,
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
   },
-  otaCheckBtnText: {
+  otaModalPrimaryBtnText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.2,
   },
@@ -1683,7 +1820,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 8,
-    marginTop: 8,
   },
   otaRevertBtnText: {
     fontSize: 11.5,

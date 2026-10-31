@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
   Alert,
   RefreshControl,
   SectionList,
-  Platform,
   BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,17 +17,18 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTasks } from '../hooks/useTasks';
 import { useAppTheme } from '../hooks/useTheme';
 import { radius, spacing } from '../theme';
-import { Task, TaskPriority } from '../types';
-import { format, parseISO, addDays, isToday, isTomorrow } from 'date-fns';
+import { Task, CalendarEvent } from '../types';
+import { format, parseISO, addDays, isToday, isTomorrow, isValid } from 'date-fns';
 import { formatTimeTo12H } from '../utils/time';
 import { parseBulletNotes } from '../utils/bulletNotes';
 import { FocusTimerModal } from '../components/FocusTimerModal';
+import { CalendarEventModal } from '../components/CalendarEventModal';
+import { useFocusTimer } from '../context/FocusTimerContext';
+import { taskBackendSyncService } from '../services/tasks/TaskBackendSyncService';
 
 interface TasksScreenProps {
   navigation: any;
 }
-
-type FilterTab = 'all' | 'today' | 'upcoming' | 'overdue' | 'completed' | 'high' | 'q1' | 'q2' | 'q3' | 'q4';
 
 export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
@@ -36,22 +36,63 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
   const {
     tasks,
     categories,
+    calendarEvents,
     loading,
     refresh,
     completeTask,
     uncompleteTask,
     deleteTask,
+    clearCompletedTasks,
     toggleSubtask,
+    deleteCalendarEvent,
+    searchTasks,
   } = useTasks();
 
+  const focusTimer = useFocusTimer();
+
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filterTab, setFilterTab] = useState<FilterTab>('all');
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  // Atomic Category Filter: 'all' | 'uncategorized' | <categoryId>
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [focusTimerVisible, setFocusTimerVisible] = useState<boolean>(false);
   const [focusTaskId, setFocusTaskId] = useState<string | undefined>(undefined);
   const [todayIso, setTodayIso] = useState<string>(() => format(new Date(), 'yyyy-MM-dd'));
+  const [calendarModalVisible, setCalendarModalVisible] = useState<boolean>(false);
+  const [eventToEdit, setEventToEdit] = useState<CalendarEvent | null>(null);
+  const [calendarSectionCollapsed, setCalendarSectionCollapsed] = useState<boolean>(false);
+  const [isBackendSynced, setIsBackendSynced] = useState<boolean>(() =>
+    taskBackendSyncService.getIsConnected()
+  );
 
-  // Refresh on focus and synchronize today's date for rollover
+  // Subscribe to live NestJS backend synchronization status
+  useEffect(() => {
+    const unsub = taskBackendSyncService.subscribeStatus((connected) => {
+      setIsBackendSynced(connected);
+    });
+    // Trigger initial sync on mount
+    taskBackendSyncService.syncWithBackend().catch(() => {});
+    return unsub;
+  }, []);
+
+  // Automatic midnight rollover timer: updates today's date automatically if app stays open
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const current = format(new Date(), 'yyyy-MM-dd');
+      if (current !== todayIso) {
+        setTodayIso(current);
+        refresh();
+      }
+    }, 30000); // Check every 30 seconds
+    return () => clearInterval(timer);
+  }, [todayIso, refresh]);
+
+  // Synchronize focus timer modal visibility from global context (e.g. expanded from floating widget)
+  useEffect(() => {
+    if (focusTimer.isModalVisible && !focusTimerVisible) {
+      setFocusTimerVisible(true);
+    }
+  }, [focusTimer.isModalVisible, focusTimerVisible]);
+
+  // Refresh on focus and synchronize today's date
   useFocusEffect(
     useCallback(() => {
       const currentToday = format(new Date(), 'yyyy-MM-dd');
@@ -60,16 +101,26 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
     }, [refresh])
   );
 
-  // Filter tasks based on Search, Tab, and Category
+  // Instantaneous in-memory search across title, description, notes, category
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+  }, []);
+
+  // Filter tasks based on Search and Category (Unified view: NO separate filter tabs)
   const filteredTasks = useMemo(() => {
     let result = tasks;
 
-    // Category filter
-    if (selectedCategoryId) {
-      result = result.filter((t) => t.categoryId === selectedCategoryId);
+    // Atomic Category Filter
+    if (categoryFilter === 'uncategorized') {
+      result = result.filter((t) => !t.categoryId);
+    } else if (categoryFilter !== 'all') {
+      const exists = categories.some((c) => c.id === categoryFilter);
+      if (exists) {
+        result = result.filter((t) => t.categoryId === categoryFilter);
+      }
     }
 
-    // Search query
+    // Instant search query filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(
@@ -81,62 +132,29 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
       );
     }
 
-    // Tab filter
-    switch (filterTab) {
-      case 'today':
-        return result.filter((t) => t.date === todayIso && t.status !== 'cancelled');
-      case 'upcoming':
-        return result.filter(
-          (t) => t.date && t.date > todayIso && t.status !== 'completed' && t.status !== 'cancelled'
-        );
-      case 'overdue':
-        return result.filter(
-          (t) => t.date && t.date < todayIso && t.status !== 'completed' && t.status !== 'cancelled'
-        );
-      case 'completed':
-        return result.filter((t) => t.status === 'completed');
-      case 'high':
-        return result.filter((t) => t.priority === 'high' && t.status !== 'cancelled');
-      case 'q1':
-        return result.filter((t) => t.recurrenceRule?.eisenhowerQuadrant === 'q1' && t.status !== 'cancelled');
-      case 'q2':
-        return result.filter((t) => t.recurrenceRule?.eisenhowerQuadrant === 'q2' && t.status !== 'cancelled');
-      case 'q3':
-        return result.filter((t) => t.recurrenceRule?.eisenhowerQuadrant === 'q3' && t.status !== 'cancelled');
-      case 'q4':
-        return result.filter((t) => t.recurrenceRule?.eisenhowerQuadrant === 'q4' && t.status !== 'cancelled');
-      case 'all':
-      default:
-        return result.filter((t) => t.status !== 'cancelled');
-    }
-  }, [tasks, selectedCategoryId, searchQuery, filterTab, todayIso]);
+    return result.filter((t) => t.status !== 'cancelled');
+  }, [tasks, categoryFilter, categories, searchQuery]);
 
-  // Group filtered tasks for structured display
+  // Unified single continuous grouped stream: Overdue, Today, Upcoming, Backlog, Completed
   const groupedTasks = useMemo(() => {
-    if (filterTab === 'today' || filterTab === 'completed' || filterTab === 'overdue') {
-      return [{ title: '', icon: '', data: filteredTasks }];
-    }
-
     const overdue: Task[] = [];
     const today: Task[] = [];
-    const tomorrow: Task[] = [];
     const upcoming: Task[] = [];
     const unscheduled: Task[] = [];
     const completed: Task[] = [];
 
-    const tomorrowIso = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+    const now = new Date();
+    const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     filteredTasks.forEach((t) => {
       if (t.status === 'completed') {
         completed.push(t);
-      } else if (!t.date) {
+      } else if (!t.date || t.date === '' || t.date === 'backlog') {
         unscheduled.push(t);
-      } else if (t.date < todayIso) {
+      } else if (t.date < todayIso || (t.date === todayIso && t.startTime && t.startTime < currentTimeStr)) {
         overdue.push(t);
       } else if (t.date === todayIso) {
         today.push(t);
-      } else if (t.date === tomorrowIso) {
-        tomorrow.push(t);
       } else {
         upcoming.push(t);
       }
@@ -145,36 +163,37 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
     const groups: { title: string; icon: string; data: Task[] }[] = [];
     if (overdue.length > 0) groups.push({ title: 'Overdue', icon: '⚠️', data: overdue });
     if (today.length > 0) groups.push({ title: 'Today', icon: '📅', data: today });
-    if (tomorrow.length > 0) groups.push({ title: 'Tomorrow', icon: '☀️', data: tomorrow });
     if (upcoming.length > 0) groups.push({ title: 'Upcoming', icon: '🗓️', data: upcoming });
-    if (unscheduled.length > 0) groups.push({ title: 'No Date / Backlog', icon: '📥', data: unscheduled });
+    if (unscheduled.length > 0) groups.push({ title: 'Backlog (No Date)', icon: '📥', data: unscheduled });
     if (completed.length > 0) groups.push({ title: 'Completed', icon: '✓', data: completed });
 
     return groups.length > 0 ? groups : [{ title: '', icon: '', data: [] }];
-  }, [filteredTasks, filterTab, todayIso]);
+  }, [filteredTasks, todayIso]);
 
   // Progress metrics
   const totalCount = filteredTasks.length;
   const completedCount = filteredTasks.filter((t) => t.status === 'completed').length;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-  const handleToggleTask = useCallback(async (task: Task) => {
-    try {
-      if (task.status === 'completed') {
-        await uncompleteTask(task.id);
-      } else {
-        await completeTask(task.id);
+  // Optimistic Toggle Task
+  const handleToggleTask = useCallback(
+    async (task: Task) => {
+      try {
+        if (task.status === 'completed') {
+          await uncompleteTask(task.id);
+        } else {
+          await completeTask(task.id);
+        }
+      } catch (err: any) {
+        Alert.alert('Error', err?.message || 'Could not update task.');
       }
-    } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Could not update task.');
-    }
-  }, [completeTask, uncompleteTask]);
+    },
+    [completeTask, uncompleteTask]
+  );
 
-  const handleDeleteTask = useCallback((task: Task) => {
-    Alert.alert(
-      'Delete Task',
-      `Delete "${task.title}"?`,
-      [
+  const handleDeleteTask = useCallback(
+    (task: Task) => {
+      Alert.alert('Delete Task', `Delete "${task.title}"?`, [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
@@ -187,11 +206,13 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
             }
           },
         },
-      ]
-    );
-  }, [deleteTask]);
+      ]);
+    },
+    [deleteTask]
+  );
 
-  const handleClearCompleted = () => {
+  // Fast Batch Clear Completed Tasks
+  const handleClearCompleted = useCallback(() => {
     const completedList = tasks.filter((t) => t.status === 'completed');
     if (completedList.length === 0) return;
 
@@ -205,10 +226,7 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              for (const t of completedList) {
-                await deleteTask(t.id);
-              }
-              await refresh();
+              await clearCompletedTasks();
             } catch (err: any) {
               Alert.alert('Error', err?.message || 'Failed to clear completed tasks.');
             }
@@ -216,30 +234,78 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
         },
       ]
     );
-  };
+  }, [clearCompletedTasks, tasks]);
 
-  const handleOpenFocus = useCallback((taskId?: string) => {
-    setFocusTaskId(taskId);
-    setFocusTimerVisible(true);
-  }, []);
+  const handleOpenFocus = useCallback(
+    (taskId?: string) => {
+      const task = tasks.find((t) => t.id === taskId);
+      focusTimer.openModal(taskId, task?.title);
+      setFocusTaskId(taskId);
+      setFocusTimerVisible(true);
+    },
+    [focusTimer, tasks]
+  );
 
-  const getPriorityBadge = (p: TaskPriority) => {
-    switch (p) {
-      case 'high':
-        return { label: 'HIGH', color: '#EF4444', bg: '#EF444415' };
-      case 'low':
-        return { label: 'LOW', color: '#10B981', bg: '#10B98115' };
-      case 'medium':
-      default:
-        return { label: 'MED', color: '#F59E0B', bg: '#F59E0B15' };
+  // Safe Android Hardware Back Handler (dismisses modals first)
+  const handleGoBack = useCallback(() => {
+    if (calendarModalVisible) {
+      setCalendarModalVisible(false);
+      return;
     }
-  };
+    if (focusTimerVisible) {
+      setFocusTimerVisible(false);
+      return;
+    }
+    if (navigation?.canGoBack && navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('MainTabs');
+    }
+  }, [calendarModalVisible, focusTimerVisible, navigation]);
 
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (calendarModalVisible) {
+          setCalendarModalVisible(false);
+          return true;
+        }
+        if (focusTimerVisible) {
+          setFocusTimerVisible(false);
+          return true;
+        }
+        handleGoBack();
+        return true;
+      };
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => sub.remove();
+    }, [calendarModalVisible, focusTimerVisible, handleGoBack])
+  );
+
+  // Render individual task item
   const renderTaskItem = useCallback(
     ({ item: task }: { item: Task }) => {
       const isDone = task.status === 'completed';
-      const prio = getPriorityBadge(task.priority);
-      const isOverdue = Boolean(task.date && task.date < todayIso && !isDone);
+      const now = new Date();
+      const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const isOverdue = Boolean(
+        !isDone &&
+        ((task.date && task.date < todayIso) ||
+          (task.date === todayIso && task.startTime && task.startTime < currentTimeStr))
+      );
+
+      // Parse subtasks / checklist notes with fixed indexing
+      const subtasks = parseBulletNotes(task.notes || task.description);
+      const previewSubtasks = subtasks.slice(0, 3);
+
+      const parsedDate = task.date && isValid(parseISO(task.date)) ? parseISO(task.date) : null;
+      const dateDisplay = parsedDate
+        ? isToday(parsedDate)
+          ? 'Today'
+          : isTomorrow(parsedDate)
+          ? 'Tomorrow'
+          : task.date
+        : task.date || 'Backlog';
 
       return (
         <View
@@ -249,6 +315,8 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
             {
               backgroundColor: colors.surface,
               borderColor: isOverdue ? '#EF444460' : colors.borderSubtle,
+              borderLeftWidth: 4,
+              borderLeftColor: task.accentColor || (isOverdue ? '#EF4444' : colors.primary),
             },
           ]}
         >
@@ -268,109 +336,157 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
             {isDone && <Text style={styles.checkIcon}>✓</Text>}
           </TouchableOpacity>
 
-          {/* Task Info Column - Tap to Edit */}
-          <TouchableOpacity
-            style={styles.taskInfo}
-            onPress={() => navigation.navigate('CreateEditTask', { taskId: task.id })}
-            activeOpacity={0.75}
-          >
-            <View style={styles.taskTitleRow}>
-              <Text
-                style={[
-                  styles.taskTitle,
-                  { color: colors.text },
-                  isDone && styles.taskTitleDone,
-                ]}
-                numberOfLines={2}
-              >
-                {task.title}
-              </Text>
-              <View style={[styles.prioBadge, { backgroundColor: prio.bg }]}>
-                <Text style={[styles.prioText, { color: prio.color }]}>{prio.label}</Text>
-              </View>
-            </View>
-
-            {/* Sub-row: Category, Date, Time */}
-            <View style={styles.taskMetaRow}>
-              {task.date && (
+          {/* Task Info Column: View wrapper so subtask checkboxes are NOT nested in navigation touchable */}
+          <View style={styles.taskInfo}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('CreateEditTask', { taskId: task.id })}
+              activeOpacity={0.75}
+            >
+              <View style={styles.taskTitleRow}>
                 <Text
                   style={[
-                    styles.metaDate,
-                    { color: isOverdue ? '#EF4444' : colors.textSecondary },
+                    styles.taskTitle,
+                    { color: colors.text },
+                    isDone && styles.taskTitleDone,
                   ]}
+                  numberOfLines={2}
                 >
-                  📅 {isToday(parseISO(task.date)) ? 'Today' : isTomorrow(parseISO(task.date)) ? 'Tomorrow' : task.date}
+                  {task.title}
                 </Text>
-              )}
-              {task.startTime && (
-                <Text style={[styles.metaTime, { color: colors.textSecondary }]}>
-                  ⏰ {formatTimeTo12H(task.startTime)}
-                </Text>
-              )}
-              {task.categoryName && (
-                <View
-                  style={[
-                    styles.catBadge,
-                    { backgroundColor: (task.categoryColor || colors.primary) + '20' },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.catBadgeText,
-                      { color: task.categoryColor || colors.primary },
-                    ]}
-                  >
-                    {task.categoryIcon || '🏷️'} {task.categoryName}
-                  </Text>
-                </View>
-              )}
-              {Boolean(task.recurrenceRule && task.recurrenceRule.type !== 'none') && (
-                <Text style={[styles.recurrenceBadge, { color: colors.primary }]}>
-                  🔄 {task.recurrenceRule?.type}
-                </Text>
-              )}
-            </View>
 
-            {/* Interactive Subtasks / Checklist Items */}
-            {(() => {
-              const bullets = parseBulletNotes(task.notes || task.description);
-              if (bullets.length === 0) return null;
-              return (
-                <View style={styles.subtasksWrapper}>
-                  {bullets.slice(0, 3).map((b, bIdx) => (
-                    <TouchableOpacity
-                      key={b.id || `bullet_${bIdx}`}
-                      style={styles.subtaskRow}
-                      onPress={() => toggleSubtask(task.id, bIdx)}
-                      activeOpacity={0.7}
-                      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                {/* Priority & Quadrant Badges */}
+                <View style={styles.badgeCluster}>
+                  {task.priority && (
+                    <View
+                      style={[
+                        styles.prioBadge,
+                        {
+                          backgroundColor:
+                            task.priority === 'high'
+                              ? 'rgba(239, 68, 68, 0.15)'
+                              : task.priority === 'low'
+                              ? 'rgba(59, 130, 246, 0.15)'
+                              : 'rgba(245, 158, 11, 0.15)',
+                        },
+                      ]}
                     >
-                      <Text style={[styles.subtaskCheck, { color: colors.primary }]}>
-                        {b.completed !== undefined ? (b.completed ? '☑' : '☐') : '•'}
-                      </Text>
                       <Text
                         style={[
-                          styles.subtaskText,
-                          (b.completed || isDone) && styles.subtaskTextDone,
-                          { color: b.completed || isDone ? colors.textMuted : colors.textSecondary },
+                          styles.prioText,
+                          {
+                            color:
+                              task.priority === 'high'
+                                ? '#EF4444'
+                                : task.priority === 'low'
+                                ? '#3B82F6'
+                                : '#F59E0B',
+                          },
                         ]}
-                        numberOfLines={1}
                       >
-                        {b.text}
+                        {task.priority.toUpperCase()}
                       </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {bullets.length > 3 && (
-                    <Text style={[styles.subtaskMore, { color: colors.textMuted }]}>
-                      +{bullets.length - 3} more subtasks...
-                    </Text>
+                    </View>
+                  )}
+
+                  {(task.eisenhowerQuadrant || task.recurrenceRule?.eisenhowerQuadrant) && (
+                    <View
+                      style={[
+                        styles.prioBadge,
+                        { backgroundColor: 'rgba(99, 102, 241, 0.15)' },
+                      ]}
+                    >
+                      <Text style={[styles.prioText, { color: '#6366F1' }]}>
+                        {(task.eisenhowerQuadrant || task.recurrenceRule?.eisenhowerQuadrant)?.toUpperCase()}
+                      </Text>
+                    </View>
                   )}
                 </View>
-              );
-            })()}
-          </TouchableOpacity>
+              </View>
 
-          {/* Actions: Quick Focus + Delete */}
+              {/* Sub-row: Category, Date, Time, Recurrence */}
+              <View style={styles.taskMetaRow}>
+                {Boolean(task.date) && (
+                  <Text
+                    style={[
+                      styles.metaDate,
+                      { color: isOverdue ? '#EF4444' : colors.textSecondary },
+                    ]}
+                  >
+                    📅 {dateDisplay}
+                  </Text>
+                )}
+                {Boolean(task.startTime) && (
+                  <Text style={[styles.metaTime, { color: colors.textSecondary }]}>
+                    ⏰ {formatTimeTo12H(task.startTime)}
+                    {task.endTime ? ` - ${formatTimeTo12H(task.endTime)}` : ''}
+                  </Text>
+                )}
+                {Boolean(task.categoryName) && (
+                  <View
+                    style={[
+                      styles.catBadge,
+                      { backgroundColor: (task.categoryColor || colors.primary) + '20' },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.catBadgeText,
+                        { color: task.categoryColor || colors.primary },
+                      ]}
+                    >
+                      {task.categoryIcon || '🏷️'} {task.categoryName}
+                    </Text>
+                  </View>
+                )}
+                {Boolean(task.recurrenceRule && task.recurrenceRule.type !== 'none') && (
+                  <Text style={[styles.recurrenceBadge, { color: colors.primary }]}>
+                    🔄 {task.recurrenceRule?.type}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+
+            {/* Subtasks / Checklist Items Preview: Standalone touchables with hitSlop */}
+            {previewSubtasks.length > 0 && (
+              <View style={styles.subtasksWrapper}>
+                {previewSubtasks.map((st, idx) => (
+                  <TouchableOpacity
+                    key={st.id || idx}
+                    style={styles.subtaskRow}
+                    onPress={() => toggleSubtask(task.id, idx)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text
+                      style={[
+                        styles.subtaskCheck,
+                        { color: st.completed ? colors.primary : colors.textMuted },
+                      ]}
+                    >
+                      {st.completed ? '☑' : '☐'}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.subtaskText,
+                        { color: st.completed ? colors.textMuted : colors.text },
+                        st.completed && styles.subtaskTextDone,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {st.text}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {subtasks.length > 3 && (
+                  <Text style={[styles.subtaskMore, { color: colors.textSecondary }]}>
+                    +{subtasks.length - 3} more subtasks
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+
+          {/* Quick Actions: Focus Timer & Delete */}
           <View style={styles.cardActionsCol}>
             <TouchableOpacity
               onPress={() => handleOpenFocus(task.id)}
@@ -436,135 +552,97 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
     );
   }, [colors, filteredTasks.length, navigation, searchQuery]);
 
-  const handleGoBack = useCallback(() => {
-    if (navigation?.canGoBack && navigation.canGoBack()) {
-      navigation.goBack();
-    } else {
-      navigation.navigate('WorkspaceSelect');
-    }
-  }, [navigation]);
+  // ListHeaderComponent: Unified header without separate filter tabs
+  const renderListHeader = useCallback(() => {
+    return (
+      <View style={styles.listHeaderContainer}>
+        {/* Header Bar */}
+        <View style={styles.header}>
+          <View style={styles.headerTextCol}>
+            <View style={styles.titleWithStatusRow}>
+              {navigation?.canGoBack && navigation.canGoBack() && (
+                <TouchableOpacity
+                  onPress={handleGoBack}
+                  style={[styles.headerBackBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                >
+                  <Text style={[styles.headerBackBtnText, { color: colors.text }]}>‹ Back</Text>
+                </TouchableOpacity>
+              )}
+              <Text style={[styles.headerTitle, { color: colors.text }]}>Tasks</Text>
+              <View
+                style={[
+                  styles.syncBadge,
+                  {
+                    backgroundColor: isBackendSynced
+                      ? 'rgba(16, 185, 129, 0.15)'
+                      : 'rgba(239, 68, 68, 0.15)',
+                    borderColor: isBackendSynced ? '#10B981' : '#EF4444',
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.syncBadgeText,
+                    { color: isBackendSynced ? '#10B981' : '#EF4444' },
+                  ]}
+                >
+                  {isBackendSynced ? '🟢 Synced' : '⚪ Offline'}
+                </Text>
+              </View>
+            </View>
+            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
+              {totalCount} {totalCount === 1 ? 'task' : 'tasks'} • {totalCount - completedCount} pending
+            </Text>
+          </View>
 
-  useFocusEffect(
-    useCallback(() => {
-      const onBackPress = () => {
-        handleGoBack();
-        return true;
-      };
-      const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-      return () => sub.remove();
-    }, [handleGoBack])
-  );
-
-  return (
-    <View
-      style={[
-        styles.screen,
-        {
-          backgroundColor: colors.background,
-          paddingTop: Math.max(insets.top, 20),
-        },
-      ]}
-    >
-      <StatusBar barStyle={colors.statusBar} />
-
-      {/* Header Bar */}
-      <View style={styles.header}>
-        <View style={styles.headerTextCol}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>All Tasks & Plan</Text>
-          <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-            {totalCount} {totalCount === 1 ? 'task' : 'tasks'} • {totalCount - completedCount} pending
-          </Text>
-        </View>
-
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={[styles.headerBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-            onPress={() => handleOpenFocus()}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel="Open Focus Timer"
-          >
-            <Text style={styles.headerBtnIcon}>⏱️</Text>
-            <Text style={[styles.headerBtnText, { color: colors.primary }]}>Focus</Text>
-          </TouchableOpacity>
-
-          {completedCount > 0 && (
+          <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
-              onPress={handleClearCompleted}
+              onPress={() => handleOpenFocus()}
               activeOpacity={0.75}
               accessibilityRole="button"
-              accessibilityLabel="Clear Completed Tasks"
+              accessibilityLabel="Open Focus Timer"
             >
-              <Text style={[styles.headerBtnText, { color: '#EF4444' }]}>🧹 Clear</Text>
+              <Text style={styles.headerBtnIcon}>⏱️</Text>
+              <Text style={[styles.headerBtnText, { color: colors.primary }]}>Focus</Text>
+            </TouchableOpacity>
+
+            {completedCount > 0 && (
+              <TouchableOpacity
+                style={[styles.headerBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
+                onPress={handleClearCompleted}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Clear Completed Tasks"
+              >
+                <Text style={[styles.headerBtnText, { color: '#EF4444' }]}>🧹 Clear</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Search Bar */}
+        <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={[styles.searchInput, { color: colors.text }]}
+            placeholder="Search tasks, notes, categories..."
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={handleSearchChange}
+            clearButtonMode="while-editing"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => handleSearchChange('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={[styles.searchClear, { color: colors.textMuted }]}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
-      </View>
 
-      {/* Search Bar */}
-      <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
-        <Text style={styles.searchIcon}>🔍</Text>
-        <TextInput
-          style={[styles.searchInput, { color: colors.text }]}
-          placeholder="Search all tasks, notes, categories..."
-          placeholderTextColor={colors.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          clearButtonMode="while-editing"
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={[styles.searchClear, { color: colors.textMuted }]}>✕</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Filter Tabs */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterScroll}
-        contentContainerStyle={styles.filterScrollContent}
-      >
-        {(
-          [
-            { key: 'all', label: 'All Tasks' },
-            { key: 'today', label: 'Today' },
-            { key: 'upcoming', label: 'Upcoming' },
-            { key: 'overdue', label: 'Overdue' },
-            { key: 'high', label: 'High Priority' },
-            { key: 'completed', label: 'Completed' },
-            { key: 'q1', label: '⚡ Q1: Urgent & Imp' },
-            { key: 'q2', label: '📅 Q2: Not Urgent & Imp' },
-            { key: 'q3', label: '👥 Q3: Urgent & Not Imp' },
-            { key: 'q4', label: '🗑️ Q4: Neither' },
-          ] as { key: FilterTab; label: string }[]
-        ).map((tab) => {
-          const isActive = filterTab === tab.key;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              onPress={() => setFilterTab(tab.key)}
-              style={[
-                styles.tabPill,
-                {
-                  backgroundColor: isActive ? colors.primary : colors.surfaceElevated,
-                  borderColor: isActive ? colors.primary : colors.borderSubtle,
-                },
-              ]}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabPillText, { color: isActive ? '#FFFFFF' : colors.textSecondary }]}>
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* Categories Horizontal Filter Chips */}
-      {categories.length > 0 && (
+        {/* Categories Horizontal Filter Chips (Unified: All, Uncategorized, Categories) */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -572,26 +650,52 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
           contentContainerStyle={styles.categoryScrollContent}
         >
           <TouchableOpacity
-            onPress={() => setSelectedCategoryId(null)}
+            onPress={() => setCategoryFilter('all')}
             style={[
               styles.catChip,
               {
-                backgroundColor: !selectedCategoryId ? colors.primary + '20' : colors.surfaceElevated,
-                borderColor: !selectedCategoryId ? colors.primary : colors.borderSubtle,
+                backgroundColor: categoryFilter === 'all' ? colors.primary + '20' : colors.surfaceElevated,
+                borderColor: categoryFilter === 'all' ? colors.primary : colors.borderSubtle,
               },
             ]}
           >
-            <Text style={[styles.catChipText, { color: !selectedCategoryId ? colors.primary : colors.textSecondary }]}>
+            <Text
+              style={[
+                styles.catChipText,
+                { color: categoryFilter === 'all' ? colors.primary : colors.textSecondary },
+              ]}
+            >
               All Categories
             </Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            onPress={() => setCategoryFilter((prev) => (prev === 'uncategorized' ? 'all' : 'uncategorized'))}
+            style={[
+              styles.catChip,
+              {
+                backgroundColor: categoryFilter === 'uncategorized' ? colors.primary + '25' : colors.surfaceElevated,
+                borderColor: categoryFilter === 'uncategorized' ? colors.primary : colors.borderSubtle,
+              },
+            ]}
+          >
+            <Text style={styles.catChipIcon}>🏷️</Text>
+            <Text
+              style={[
+                styles.catChipText,
+                { color: categoryFilter === 'uncategorized' ? colors.primary : colors.text },
+              ]}
+            >
+              Uncategorized
+            </Text>
+          </TouchableOpacity>
+
           {categories.map((cat) => {
-            const isSelected = selectedCategoryId === cat.id;
+            const isSelected = categoryFilter === cat.id;
             return (
               <TouchableOpacity
                 key={cat.id}
-                onPress={() => setSelectedCategoryId(isSelected ? null : cat.id)}
+                onPress={() => setCategoryFilter(isSelected ? 'all' : cat.id)}
                 style={[
                   styles.catChip,
                   {
@@ -613,39 +717,170 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
             );
           })}
         </ScrollView>
-      )}
 
-      {/* Progress Bar Card */}
-      {totalCount > 0 && (
-        <View style={[styles.progressCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
-          <View style={styles.progressRow}>
-            <Text style={[styles.progressTitle, { color: colors.textSecondary }]}>
-              Completion Status
-            </Text>
-            <Text style={[styles.progressScore, { color: colors.primary }]}>
-              {progressPercent}% ({completedCount}/{totalCount})
-            </Text>
+        {/* Progress Bar Card */}
+        {totalCount > 0 && (
+          <View style={[styles.progressCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+            <View style={styles.progressRow}>
+              <Text style={[styles.progressTitle, { color: colors.textSecondary }]}>
+                Completion Status
+              </Text>
+              <Text style={[styles.progressScore, { color: colors.primary }]}>
+                {progressPercent}% ({completedCount}/{totalCount})
+              </Text>
+            </View>
+            <View style={[styles.progressTrack, { backgroundColor: colors.surfaceElevated }]}>
+              <View
+                style={[
+                  styles.progressBar,
+                  {
+                    backgroundColor: colors.primary,
+                    width: `${progressPercent}%`,
+                  },
+                ]}
+              />
+            </View>
           </View>
-          <View style={[styles.progressTrack, { backgroundColor: colors.surfaceElevated }]}>
-            <View
-              style={[
-                styles.progressBar,
-                {
-                  backgroundColor: colors.primary,
-                  width: `${progressPercent}%`,
-                },
-              ]}
-            />
-          </View>
-        </View>
-      )}
+        )}
 
-      {/* Grouped Tasks Virtualized SectionList */}
+        {/* Integrated Calendar Events Section */}
+        {calendarEvents.length > 0 && (
+          <View
+            style={[
+              styles.calendarSectionContainer,
+              { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
+            ]}
+          >
+            <View style={styles.calendarHeaderRow}>
+              <TouchableOpacity
+                style={styles.calendarTitleRow}
+                onPress={() => setCalendarSectionCollapsed((prev) => !prev)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.calendarSectionIcon}>🗓️</Text>
+                <Text style={[styles.calendarSectionTitle, { color: colors.text }]}>
+                  Calendar Events ({calendarEvents.length})
+                </Text>
+                <Text style={[styles.calendarCollapseIcon, { color: colors.textMuted }]}>
+                  {calendarSectionCollapsed ? '▼' : '▲'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.addEventBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}
+                onPress={() => {
+                  setEventToEdit(null);
+                  setCalendarModalVisible(true);
+                }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Text style={[styles.addEventBtnText, { color: colors.primary }]}>+ Event</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!calendarSectionCollapsed && (
+              <View style={styles.calendarEventsList}>
+                {calendarEvents.map((ev) => (
+                  <View
+                    key={ev.id}
+                    style={[
+                      styles.eventCard,
+                      { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={styles.eventCardContent}
+                      onPress={() => {
+                        setEventToEdit(ev);
+                        setCalendarModalVisible(true);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.eventTimePill}>
+                        <Text style={[styles.eventTimeText, { color: colors.primary }]}>
+                          ⏰ {formatTimeTo12H(ev.time)}
+                        </Text>
+                        {ev.date !== todayIso && (
+                          <Text style={[styles.eventDateText, { color: colors.textMuted }]}>
+                            {ev.date}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[styles.eventTitle, { color: colors.text }]} numberOfLines={1}>
+                        {ev.title}
+                      </Text>
+                      {ev.description ? (
+                        <Text style={[styles.eventDesc, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {ev.description}
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Alert.alert('Delete Event', `Delete "${ev.title}"?`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Delete',
+                            style: 'destructive',
+                            onPress: async () => {
+                              await deleteCalendarEvent(ev.id);
+                            },
+                          },
+                        ]);
+                      }}
+                      style={styles.eventDeleteBtn}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      accessibilityLabel="Delete event"
+                    >
+                      <Text style={[styles.eventDeleteIcon, { color: colors.textMuted }]}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }, [
+    calendarEvents,
+    calendarModalVisible,
+    calendarSectionCollapsed,
+    categories,
+    categoryFilter,
+    colors,
+    completedCount,
+    deleteCalendarEvent,
+    handleClearCompleted,
+    handleOpenFocus,
+    handleSearchChange,
+    isBackendSynced,
+    progressPercent,
+    searchQuery,
+    todayIso,
+    totalCount,
+  ]);
+
+  return (
+    <View
+      style={[
+        styles.screen,
+        {
+          backgroundColor: colors.background,
+          paddingTop: Math.max(insets.top, 20),
+        },
+      ]}
+    >
+      <StatusBar barStyle={colors.statusBar} />
+
+      {/* Unified Virtualized SectionList with Header in ListHeaderComponent (NO separate tabs) */}
       <SectionList
         sections={filteredTasks.length === 0 ? [] : groupedTasks}
         keyExtractor={(item) => item.id}
         renderItem={renderTaskItem}
         renderSectionHeader={renderSectionHeader}
+        ListHeaderComponent={renderListHeader}
         ListEmptyComponent={renderEmptyComponent}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
@@ -680,6 +915,17 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
           initialTaskId={focusTaskId}
         />
       )}
+
+      {/* Calendar Event Modal */}
+      {calendarModalVisible && (
+        <CalendarEventModal
+          visible={calendarModalVisible}
+          onClose={() => setCalendarModalVisible(false)}
+          onSaved={refresh}
+          eventToEdit={eventToEdit}
+          initialDate={todayIso}
+        />
+      )}
     </View>
   );
 };
@@ -687,6 +933,9 @@ export const TasksScreen: React.FC<TasksScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+  },
+  listHeaderContainer: {
+    paddingBottom: 4,
   },
   header: {
     flexDirection: 'row',
@@ -696,28 +945,40 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 10,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  backBtnText: {
-    fontSize: 22,
-    fontWeight: '400',
-    lineHeight: 24,
-    marginLeft: -2,
-  },
   headerTextCol: {
     flex: 1,
+  },
+  titleWithStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
   },
   headerTitle: {
     fontSize: 22,
     fontWeight: '800',
     letterSpacing: -0.4,
+  },
+  headerBackBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    marginRight: 6,
+  },
+  headerBackBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  syncBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
+  syncBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
   },
   headerSubtitle: {
     fontSize: 12,
@@ -768,27 +1029,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: 4,
   },
-  filterScroll: {
-    maxHeight: 36,
-    marginBottom: 8,
-  },
-  filterScrollContent: {
-    paddingHorizontal: spacing.lg,
-    gap: 8,
-  },
-  tabPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: radius.full,
-    borderWidth: 1,
-  },
-  tabPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
   categoryScroll: {
-    maxHeight: 32,
-    marginBottom: 8,
+    maxHeight: 34,
+    marginBottom: 10,
   },
   categoryScrollContent: {
     paddingHorizontal: spacing.lg,
@@ -798,7 +1041,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: radius.full,
     borderWidth: 1,
     gap: 4,
@@ -815,7 +1058,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: radius.md,
     borderWidth: 1,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   progressRow: {
     flexDirection: 'row',
@@ -844,12 +1087,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: 4,
   },
-  groupContainer: {
-    marginBottom: 14,
-  },
   groupHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 10,
     marginBottom: 8,
     gap: 6,
   },
@@ -910,6 +1151,11 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     opacity: 0.5,
   },
+  badgeCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   prioBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -949,11 +1195,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   subtasksWrapper: {
-    marginTop: 6,
+    marginTop: 8,
     paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(0,0,0,0.06)',
-    gap: 3,
+    borderTopColor: 'rgba(0,0,0,0.08)',
+    gap: 4,
   },
   subtaskRow: {
     flexDirection: 'row',
@@ -1043,5 +1289,88 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     lineHeight: 32,
     marginTop: -2,
+  },
+  calendarSectionContainer: {
+    marginHorizontal: 0,
+    marginTop: 8,
+    marginBottom: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: 12,
+  },
+  calendarHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  calendarTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  calendarSectionIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  calendarSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  calendarCollapseIcon: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  addEventBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  addEventBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  calendarEventsList: {
+    marginTop: 10,
+    gap: 8,
+  },
+  eventCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  eventCardContent: {
+    flex: 1,
+  },
+  eventTimePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
+  },
+  eventTimeText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  eventDateText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  eventTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  eventDesc: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  eventDeleteBtn: {
+    padding: 6,
+  },
+  eventDeleteIcon: {
+    fontSize: 13,
   },
 });

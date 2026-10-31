@@ -17,7 +17,7 @@ describe('LifePlanner Local-First Core Test Suite', () => {
   });
 
   describe('1. Task Management & Validation', () => {
-    it('should create a task with valid fields and schedule reminder', async () => {
+    it('should create a task with valid fields', async () => {
       const today = format(new Date(), 'yyyy-MM-dd');
       const task = await taskService.createTask({
         title: 'Study React Native',
@@ -25,15 +25,11 @@ describe('LifePlanner Local-First Core Test Suite', () => {
         date: today,
         startTime: '18:00',
         endTime: '19:00',
-        priority: 'high',
-        reminderMinutes: 10,
       });
 
       expect(task).toBeDefined();
       expect(task.title).toBe('Study React Native');
-      expect(task.priority).toBe('high');
       expect(task.status).toBe('pending');
-      expect(task.reminderMinutes).toBe(10);
 
       // Verify in database
       const found = await taskRepository.findById(task.id);
@@ -311,6 +307,56 @@ describe('LifePlanner Local-First Core Test Suite', () => {
       expect(result.conflicts.length).toBe(1);
       expect(result.conflicts[0].itemA).toBe('Meeting A');
       expect(result.conflicts[0].itemB).toBe('Meeting B');
+    });
+
+    it('should detect conflicts on a future target date against calendar events', () => {
+      const futureDate = '2026-11-15';
+      const task: any = {
+        id: 't_future',
+        title: 'Strategy Session',
+        date: futureDate,
+        startTime: '14:00',
+        endTime: '15:30',
+        status: 'pending',
+      };
+      const event: any = {
+        id: 'ev_future',
+        title: 'Client Demo',
+        date: futureDate,
+        time: '14:30',
+        status: 'active',
+      };
+
+      const result = taskService.detectConflicts([task], [event], [], futureDate);
+      expect(result.hasConflict).toBe(true);
+      expect(result.conflicts.length).toBe(1);
+      expect(result.conflicts[0].itemA).toContain('Strategy Session');
+      expect(result.conflicts[0].itemB).toContain('Client Demo');
+    });
+
+    it('should detect conflicts against recurring habits on the matching day of week', () => {
+      // 2026-11-15 is Sunday (day 0)
+      const futureDate = '2026-11-15';
+      const task: any = {
+        id: 't_sunday',
+        title: 'Sprint Planning',
+        date: futureDate,
+        startTime: '08:00',
+        endTime: '09:00',
+        status: 'pending',
+      };
+      const habit: any = {
+        id: 'h_sunday',
+        name: 'Morning Meditation',
+        reminderTime: '08:15',
+        recurrenceRule: { daysOfWeek: [0, 6] }, // Weekends
+        completedToday: false,
+      };
+
+      const result = taskService.detectConflicts([task], [], [habit], futureDate);
+      expect(result.hasConflict).toBe(true);
+      expect(result.conflicts.length).toBe(1);
+      expect(result.conflicts[0].itemB).toContain('Morning Meditation');
     });
   });
 

@@ -15,12 +15,20 @@ export class RoomsService {
 
     @InjectRepository(User)
     private userRepo: Repository<User>,
-  ) {}
+  ) { }
 
   async checkBanned(roomId: number, nickname: string): Promise<boolean> {
-    const user = await this.userRepo.findOne({
-      where: { roomId, nickname },
-    });
+    const cleanNick = (nickname || '').trim().toLowerCase();
+    const user = await this.userRepo
+      .createQueryBuilder('user')
+      .where(
+        'user.roomId = :roomId AND LOWER(TRIM(user.nickname)) = :cleanNick',
+        {
+          roomId,
+          cleanNick,
+        },
+      )
+      .getOne();
     return Boolean(user?.isBanned);
   }
 
@@ -55,22 +63,30 @@ export class RoomsService {
   }
 
   async findOrCreate(passcode: string): Promise<Room> {
-    let room = await this.roomRepo.findOne({
-      where: { passcode },
-    });
+    const cleanPass = (passcode || '').trim();
+    let room = await this.roomRepo
+      .createQueryBuilder('room')
+      .where('LOWER(TRIM(room.passcode)) = LOWER(TRIM(:passcode))', {
+        passcode: cleanPass,
+      })
+      .getOne();
 
     if (!room) {
       try {
         room = this.roomRepo.create({
-          passcode,
+          passcode: cleanPass,
+          roomName: `Room-${cleanPass}`,
         });
 
         await this.roomRepo.save(room);
       } catch (err: any) {
         if (err.code === '23505') {
-          room = await this.roomRepo.findOne({
-            where: { passcode },
-          });
+          room = await this.roomRepo
+            .createQueryBuilder('room')
+            .where('LOWER(TRIM(room.passcode)) = LOWER(TRIM(:passcode))', {
+              passcode: cleanPass,
+            })
+            .getOne();
         } else {
           throw err;
         }

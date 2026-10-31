@@ -1,8 +1,8 @@
 {
-  "version": 1793336479254,
-  "buildTime": "10:31:19 am",
-  "sizeBytes": 2623688,
-  "sizeMb": "2.50",
+  "version": 1793415708617,
+  "buildTime": "08:31:48 am",
+  "sizeBytes": 2656028,
+  "sizeMb": "2.53",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "fix: harden color utilities, WCAG luminance, and clipboard management"
+  "notes": "Update OmniHub bundle with latest features and fixes"
 }

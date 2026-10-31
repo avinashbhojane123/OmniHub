@@ -101,7 +101,7 @@ export const CreateNewModal: React.FC<CreateNewModalProps> = ({
                 <View style={styles.optionInfo}>
                   <Text style={[styles.optionTitle, { color: colors.text }]}>Scheduled Task</Text>
                   <Text style={[styles.optionDesc, { color: colors.textSecondary }]}>
-                    Add due dates, priorities, sub-bullets, and reminders
+                    Add due dates, categories, and notes
                   </Text>
                 </View>
                 <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>

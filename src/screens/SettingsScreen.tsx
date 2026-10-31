@@ -192,13 +192,47 @@ export const SettingsScreen: React.FC = () => {
       await googleSheetsSyncService.setWebhookUrl(googleSheetWebhookUrl);
       await googleSheetsSyncService.setSyncSecret(googleSheetSyncSecret);
       const res = await googleSheetsSyncService.testConnection(googleSheetWebhookUrl, googleSheetSyncSecret);
-      Alert.alert(res.success ? 'Connected!' : 'Connection Failed', res.message);
+
+      const localCount = dbCounts.tasks + dbCounts.habits + dbCounts.notes;
+      if (res.success && res.counts && res.counts.total > 0 && localCount === 0) {
+        Alert.alert(
+          '🎉 Cloud Data Found!',
+          `${res.message}\n\nYour app is currently fresh and empty. Would you like to restore all your cloud data now?`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: '📥 Restore Now',
+              style: 'default',
+              onPress: () => handlePullFromGoogleSheet('replace'),
+            },
+          ]
+        );
+      } else {
+        Alert.alert(res.success ? 'Connected!' : 'Connection Failed', res.message);
+      }
     } finally {
       setGoogleSheetSyncing(false);
     }
   };
 
   const handlePushToGoogleSheet = async () => {
+    const localCount = dbCounts.tasks + dbCounts.habits + dbCounts.notes;
+    if (localCount === 0) {
+      Alert.alert(
+        '⚠️ Blank Device Protection',
+        'Your local app currently has 0 tasks or habits. Pushing now could wipe existing cloud data. Would you like to Pull & Restore from your Google Sheet instead?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: '📥 Pull from Google Sheet',
+            style: 'default',
+            onPress: () => handlePullFromGoogleSheet('replace'),
+          },
+        ]
+      );
+      return;
+    }
+
     setGoogleSheetSyncing(true);
     try {
       await googleSheetsSyncService.setWebhookUrl(googleSheetWebhookUrl);
@@ -208,7 +242,7 @@ export const SettingsScreen: React.FC = () => {
         setGoogleSheetLastSync(res.details?.timestamp || new Date().toISOString());
         Alert.alert('✅ Google Sheet Updated', res.message);
       } else {
-        Alert.alert('Sync Failed', res.message);
+        Alert.alert('Sync Notice', res.message);
       }
     } finally {
       setGoogleSheetSyncing(false);
@@ -253,7 +287,7 @@ export const SettingsScreen: React.FC = () => {
     if (navigation?.canGoBack && navigation.canGoBack()) {
       navigation.goBack();
     } else {
-      navigation.navigate('WorkspaceSelect');
+      navigation.navigate('Today');
     }
   }, [navigation]);
 
@@ -742,18 +776,104 @@ export const SettingsScreen: React.FC = () => {
                 ]}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={[styles.storageStatsTitle, { color: '#10B981', marginBottom: 0 }]}>
+                  <Text
+                    style={[
+                      styles.storageStatsTitle,
+                      {
+                        color: googleSheetLastSync
+                          ? '#10B981'
+                          : googleSheetsSyncService.isPlaceholderUrl(googleSheetWebhookUrl)
+                          ? '#F59E0B'
+                          : '#10B981',
+                        marginBottom: 0,
+                      },
+                    ]}
+                  >
                     {googleSheetLastSync
                       ? `LAST SYNCED: ${format(new Date(googleSheetLastSync), 'PPpp')}`
-                      : 'STATUS: READY TO SYNC'}
+                      : googleSheetsSyncService.isPlaceholderUrl(googleSheetWebhookUrl)
+                      ? 'STATUS: SETUP REQUIRED'
+                      : 'STATUS: WEBHOOK CONFIGURED'}
                   </Text>
-                  <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
-                    <Text style={{ color: '#10B981', fontSize: 11, fontWeight: '700' }}>✓ Drive Connected</Text>
+                  <View
+                    style={{
+                      backgroundColor: googleSheetLastSync
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : googleSheetsSyncService.isPlaceholderUrl(googleSheetWebhookUrl)
+                        ? 'rgba(245, 158, 11, 0.15)'
+                        : 'rgba(16, 185, 129, 0.15)',
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 12,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: googleSheetLastSync
+                          ? '#10B981'
+                          : googleSheetsSyncService.isPlaceholderUrl(googleSheetWebhookUrl)
+                          ? '#F59E0B'
+                          : '#10B981',
+                        fontSize: 11,
+                        fontWeight: '700',
+                      }}
+                    >
+                      {googleSheetLastSync
+                        ? '✓ Drive Synced'
+                        : googleSheetsSyncService.isPlaceholderUrl(googleSheetWebhookUrl)
+                        ? '⚠️ Not Connected'
+                        : '⚡ Ready'}
+                    </Text>
                   </View>
                 </View>
                 <Text style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 18 }}>
-                  Your Google Sheet is connected directly in code. Tapping "Push to Sheet" will sync all your tasks, habits, and notes directly into Google Drive.
+                  {googleSheetLastSync
+                    ? 'Your tasks, habits, and notes are backed up directly in your Google Drive spreadsheet.'
+                    : googleSheetsSyncService.isPlaceholderUrl(googleSheetWebhookUrl)
+                    ? 'To sync data with your Google Drive, deploy the free Google Apps Script in your Google account and paste your Web App URL below.'
+                    : 'Your personal Webhook URL is saved. Tapping "Push to Sheet" will sync all your local data to Google Drive.'}
                 </Text>
+              </View>
+
+              {/* Quick Setup Actions */}
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    try {
+                      const code = googleSheetsSyncService.getGoogleAppsScriptCode();
+                      await Share.share({
+                        title: 'LifePlanner Apps Script Webhook Code',
+                        message: code,
+                      });
+                    } catch (err: any) {
+                      Alert.alert('Share Error', err.message);
+                    }
+                  }}
+                  style={[
+                    styles.companionActionBtn,
+                    { flex: 1, backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle, borderWidth: 1 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share Google Apps Script Code"
+                >
+                  <Text style={[styles.companionBtnText, { color: colors.primaryLight, fontSize: 12, fontWeight: '700' }]}>
+                    📋 Copy Script Code
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => Linking.openURL('https://sheets.new')}
+                  style={[
+                    styles.companionActionBtn,
+                    { flex: 1, backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle, borderWidth: 1 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Google Sheets in browser"
+                >
+                  <Text style={[styles.companionBtnText, { color: '#10B981', fontSize: 12, fontWeight: '700' }]}>
+                    🌐 Open sheets.new
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               {/* Webhook Configuration Inputs */}

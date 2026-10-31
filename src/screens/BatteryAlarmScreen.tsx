@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import notifee from '@notifee/react-native';
+import { format } from 'date-fns';
 import { useAppTheme } from '../hooks/useTheme';
 import {
   batteryService,
@@ -20,6 +21,7 @@ import {
   BatteryAlarmSettings,
 } from '../services/battery/BatteryService';
 import { alarmService, AlarmState } from '../services/alarm/AlarmService';
+import { BatterySessionRecord } from '../database/repositories/BatteryRepository';
 
 export const BatteryAlarmScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -34,6 +36,7 @@ export const BatteryAlarmScreen: React.FC = () => {
     secondsRemaining: 60,
   });
   const [testingAlarm, setTestingAlarm] = useState(false);
+  const [recentSessions, setRecentSessions] = useState<BatterySessionRecord[]>([]);
 
   const handleGoBack = useCallback(() => {
     if (navigation?.canGoBack && navigation.canGoBack()) {
@@ -82,6 +85,10 @@ export const BatteryAlarmScreen: React.FC = () => {
       unsubAlarm();
     };
   }, []);
+
+  useEffect(() => {
+    batteryService.getRecentChargingSessions().then(setRecentSessions).catch(() => {});
+  }, [batteryStatus.isCharging]);
 
   useEffect(() => {
     if (batteryStatus.isCharging) {
@@ -192,22 +199,41 @@ export const BatteryAlarmScreen: React.FC = () => {
 
   const batteryColor = getBatteryColor();
 
-  // Dynamic estimate to full charge or remaining runtime
+  // True hardware-calculated charge estimate or real current discharge estimate
   const getChargeEstimate = () => {
-    if (!batteryStatus.isCharging) {
-      const baseHours = (batteryStatus.level / 100) * (batteryStatus.health === 'Good' ? 14 : 10.5);
-      const hours = Math.floor(baseHours);
-      const mins = Math.round((baseHours - hours) * 60);
-      return `~${hours}h ${mins}m est. battery life (mixed use)`;
+    if (batteryStatus.isCharging) {
+      if (batteryStatus.level >= settings.fullChargeTarget) {
+        return `Target (${settings.fullChargeTarget}%) reached! Unplug now.`;
+      }
+      // 1. Prefer native Android hardware charge time if available
+      if (batteryStatus.chargeTimeRemainingMs && batteryStatus.chargeTimeRemainingMs > 0) {
+        const totalMinutes = Math.round(batteryStatus.chargeTimeRemainingMs / 60000);
+        const hours = Math.floor(totalMinutes / 60);
+        const mins = totalMinutes % 60;
+        return hours > 0
+          ? `~${hours}h ${mins}m to full (hardware calculated)`
+          : `~${mins} min to full (hardware calculated)`;
+      }
+      // 2. Real telemetry-based calculation using measured current (mA)
+      if (batteryStatus.currentNow && batteryStatus.currentNow > 0) {
+        const neededPct = settings.fullChargeTarget - batteryStatus.level;
+        // Typical device battery capacity is ~4500mAh
+        const typicalCap = batteryStatus.capacityMah && batteryStatus.capacityMah > 0 ? batteryStatus.capacityMah : 4500;
+        const neededMah = (neededPct / 100) * typicalCap;
+        const estMinutes = Math.max(1, Math.round((neededMah / batteryStatus.currentNow) * 60));
+        return `~${estMinutes} min until ${settings.fullChargeTarget}% target`;
+      }
+      return `Charging to ${settings.fullChargeTarget}% target`;
     }
-    const needed = settings.fullChargeTarget - batteryStatus.level;
-    if (needed <= 0) {
-      return `Target (${settings.fullChargeTarget}%) reached! Unplug now.`;
+
+    // Discharge runtime estimation using real current draw
+    if (batteryStatus.currentNow && batteryStatus.currentNow > 0 && batteryStatus.capacityMah && batteryStatus.capacityMah > 0) {
+      const remainingHours = batteryStatus.capacityMah / batteryStatus.currentNow;
+      const hours = Math.floor(remainingHours);
+      const mins = Math.round((remainingHours - hours) * 60);
+      return `~${hours}h ${mins}m runtime at current drain`;
     }
-    const baseRate = batteryStatus.chargingType === 'AC' ? 0.85 : 1.25;
-    const phaseMultiplier = batteryStatus.level >= 70 ? 1.35 : 1.0;
-    const estMinutes = Math.max(1, Math.round(needed * baseRate * phaseMultiplier));
-    return `~${estMinutes} min until ${settings.fullChargeTarget}% target`;
+    return `Discharging (${batteryStatus.level}% remaining)`;
   };
 
   // Dynamic health description
@@ -256,10 +282,25 @@ export const BatteryAlarmScreen: React.FC = () => {
       {/* Top Header */}
       <View style={styles.topHeader}>
         <View style={styles.brandRow}>
+          <TouchableOpacity
+            style={[
+              styles.backButton,
+              {
+                backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                borderColor: isDark ? '#334155' : '#E2E8F0',
+              },
+            ]}
+            onPress={handleGoBack}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.backButtonText, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>
+              ←
+            </Text>
+          </TouchableOpacity>
           {/* Active Screen Badge */}
           <View style={[styles.brandPill, { borderColor: batteryColor }]}>
             <Text style={styles.brandIcon}>⚡</Text>
-            <Text style={styles.brandTitle}>Battery Guard</Text>
+            <Text style={styles.brandTitle}>Battery Guard & Alarm</Text>
           </View>
         </View>
       </View>
@@ -515,7 +556,7 @@ export const BatteryAlarmScreen: React.FC = () => {
                     { color: tempRating.color },
                   ]}
                 >
-                  {batteryStatus.temperature.toFixed(1)}°C
+                  {(Number(batteryStatus?.temperature ?? 25)).toFixed(1)}°C
                 </Text>
                 <Text style={[styles.metricSub, { color: tempRating.color }]}>
                   {tempRating.text}
@@ -530,7 +571,7 @@ export const BatteryAlarmScreen: React.FC = () => {
                     { color: isDark ? '#FFFFFF' : '#0F172A' },
                   ]}
                 >
-                  {(batteryStatus.voltage / 1000).toFixed(2)} V
+                  {(Number(batteryStatus?.voltage ?? 0) / 1000).toFixed(2)} V
                 </Text>
                 <Text style={styles.metricSub}>
                   {batteryStatus.currentNow ? `${batteryStatus.currentNow} mA` : batteryStatus.technology || 'Li-poly'}
@@ -538,7 +579,7 @@ export const BatteryAlarmScreen: React.FC = () => {
               </View>
 
               <View style={[styles.metricItem, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
-                <Text style={styles.metricLabel}>💚 Health</Text>
+                <Text style={styles.metricLabel}>💚 Health & Cycles</Text>
                 <Text
                   style={[
                     styles.metricValue,
@@ -552,7 +593,11 @@ export const BatteryAlarmScreen: React.FC = () => {
                 >
                   {batteryStatus.health || 'Good'}
                 </Text>
-                <Text style={styles.metricSub}>{getHealthDescription()}</Text>
+                <Text style={styles.metricSub}>
+                  {batteryStatus.cycleCount && batteryStatus.cycleCount > 0
+                    ? `${batteryStatus.cycleCount} Cycles • ${getHealthDescription()}`
+                    : getHealthDescription()}
+                </Text>
               </View>
 
               <View style={[styles.metricItem, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
@@ -894,7 +939,7 @@ export const BatteryAlarmScreen: React.FC = () => {
                   >
                     THRESHOLD: {settings.tempTarget}°C{' '}
                     <Text style={{ color: tempRating.color, fontWeight: '700' }}>
-                      (Live: {batteryStatus.temperature.toFixed(1)}°C)
+                      (Live: {(Number(batteryStatus?.temperature ?? 25)).toFixed(1)}°C)
                     </Text>
                   </Text>
                   <View style={styles.stepperRow}>
@@ -1160,6 +1205,93 @@ export const BatteryAlarmScreen: React.FC = () => {
                 thumbColor="#FFFFFF"
               />
             </View>
+          </View>
+
+          {/* Section 5: Real Charging History & Analytics */}
+          <View
+            style={[
+              styles.configCard,
+              {
+                backgroundColor: isDark ? '#131B2E' : '#FFFFFF',
+                borderColor: isDark ? '#1E293B' : '#E2E8F0',
+              },
+            ]}
+          >
+            <View style={styles.cardHeader}>
+              <View style={styles.cardHeaderLeft}>
+                <View style={[styles.iconBadge, { backgroundColor: 'rgba(6, 182, 212, 0.15)' }]}>
+                  <Text style={styles.iconBadgeText}>📊</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.cardHeaderTitle,
+                      { color: isDark ? '#FFFFFF' : '#0F172A' },
+                    ]}
+                  >
+                    Charging History & Telemetry
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardHeaderSub,
+                      { color: isDark ? '#94A3B8' : '#64748B' },
+                    ]}
+                  >
+                    Real records from local SQLite & cloud sync
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {recentSessions.length === 0 ? (
+              <View style={{ paddingVertical: 14, alignItems: 'center' }}>
+                <Text style={{ color: isDark ? '#64748B' : '#94A3B8', fontSize: 13 }}>
+                  No charging sessions recorded yet. Connect charger to start logging.
+                </Text>
+              </View>
+            ) : (
+              <View style={{ gap: 8, marginTop: 10 }}>
+                {recentSessions.slice(0, 5).map((sess) => {
+                  let dateStr = 'Recent';
+                  try {
+                    dateStr = format(new Date(sess.startTime), 'MMM d, h:mm a');
+                  } catch {}
+                  return (
+                    <View
+                      key={sess.id}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
+                        borderRadius: 10,
+                        backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={{ color: isDark ? '#FFFFFF' : '#0F172A', fontWeight: '700', fontSize: 13 }}>
+                          +{sess.gained}% gained in {sess.durationMinutes}m ({sess.chargingType})
+                        </Text>
+                        <Text style={{ color: isDark ? '#94A3B8' : '#64748B', fontSize: 11, marginTop: 2 }}>
+                          {dateStr} • {sess.startLevel}% → {sess.endLevel ?? (sess.startLevel + sess.gained)}%
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ color: '#10B981', fontWeight: '800', fontSize: 12 }}>
+                          ~{sess.avgSpeedPerHour}%/h
+                        </Text>
+                        {sess.peakTemperature > 0 && (
+                          <Text style={{ color: isDark ? '#94A3B8' : '#64748B', fontSize: 11, marginTop: 2 }}>
+                            🔥 {(Number(sess?.peakTemperature ?? 0)).toFixed(1)}°C
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
           {/* Testing & System Whitelist Section */}
@@ -1785,3 +1917,5 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 });
+
+export default BatteryAlarmScreen;

@@ -63,11 +63,20 @@ export function computeAgeStats(birthDateStr: string, referenceDate: Date = new 
     const dayOfWeek = format(birthDate, 'EEEE');
     const birthDateFormatted = format(birthDate, 'd MMMM yyyy');
 
-    // Next birthday calculation (normalize to midnight to avoid hour-level false next-year offset)
+    // Next birthday calculation (normalize to midnight and handle leap-year Feb 29 birthdays)
+    const isLeapYear = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+    const isFeb29 = birthDate.getMonth() === 1 && birthDate.getDate() === 29;
+    const getBirthdayForYear = (y: number) => {
+      if (isFeb29 && !isLeapYear(y)) {
+        return new Date(y, 1, 28);
+      }
+      return new Date(y, birthDate.getMonth(), birthDate.getDate());
+    };
+
     const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let nextBday = new Date(now.getFullYear(), birthDate.getMonth(), birthDate.getDate());
+    let nextBday = getBirthdayForYear(now.getFullYear());
     if (nextBday < todayMidnight) {
-      nextBday = new Date(now.getFullYear() + 1, birthDate.getMonth(), birthDate.getDate());
+      nextBday = getBirthdayForYear(now.getFullYear() + 1);
     }
     const nextBirthdayDays = Math.max(0, differenceInDays(nextBday, todayMidnight));
 

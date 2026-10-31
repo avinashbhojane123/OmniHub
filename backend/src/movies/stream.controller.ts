@@ -38,8 +38,8 @@ export class StreamController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: (req, file, cb) => {
-          const streamService = new StreamService();
-          cb(null, streamService.getVideosDirectory());
+          const vDir = join(process.cwd(), 'videos');
+          cb(null, vDir);
         },
         filename: (req, file, cb) => {
           const originalName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');

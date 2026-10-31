@@ -43,11 +43,12 @@ export const BUILTIN_STREAM_CATALOG: StreamableMedia[] = [
     overview:
       'Set in a dystopian future Amsterdam, a group of scientists and soldiers attempt to reset the past by reconnecting with a giant robot AI in this stunning sci-fi VFX feature.',
     posterUrl:
-      'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&q=80',
+      'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Tears_of_Steel_poster.jpg/800px-Tears_of_Steel_poster.jpg',
     backdropUrl:
-      'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&q=80',
+      'https://mango.blender.org/wp-content/uploads/2012/09/frame_01850.png',
     genres: ['Sci-Fi', 'Action', 'VFX'],
     releaseYear: '2024',
+    tmdbId: 113063,
   },
   {
     id: 'stream-big-buck-bunny',
@@ -61,11 +62,12 @@ export const BUILTIN_STREAM_CATALOG: StreamableMedia[] = [
     overview:
       'A large and lovable rabbit deals with bullying forest creatures in this award-winning 3D computer-animated comedy feature.',
     posterUrl:
-      'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=500&q=80',
+      'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Big_buck_bunny_poster_big.jpg/800px-Big_buck_bunny_poster_big.jpg',
     backdropUrl:
-      'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&q=80',
+      'https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Big_Buck_Bunny_first_rendered_frame.png/1280px-Big_Buck_Bunny_first_rendered_frame.png',
     genres: ['Animation', 'Comedy', 'Family'],
     releaseYear: '2023',
+    tmdbId: 10378,
   },
   {
     id: 'stream-sintel',
@@ -79,47 +81,12 @@ export const BUILTIN_STREAM_CATALOG: StreamableMedia[] = [
     overview:
       'A lonely young girl named Sintel rescues a wounded baby dragon and embarks on a dangerous journey across frozen mountains to reclaim him.',
     posterUrl:
-      'https://images.unsplash.com/photo-1514539079130-25950c84af65?w=500&q=80',
+      'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Sintel_poster.jpg/800px-Sintel_poster.jpg',
     backdropUrl:
-      'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200&q=80',
+      'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Sintel_render_alley.png/1280px-Sintel_render_alley.png',
     genres: ['Animation', 'Fantasy', 'Adventure'],
     releaseYear: '2023',
-  },
-  {
-    id: 'series-cyberpunk-chronicles',
-    title: 'Cyberpunk Chronicles: Season 1',
-    type: 'series',
-    sourceType: 'remote',
-    duration: '3 Episodes',
-    quality: '1080p HDR',
-    overview:
-      'An episodic sci-fi series exploring autonomous robotics, clandestine hackers, and futuristic space travel.',
-    posterUrl:
-      'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?w=500&q=80',
-    backdropUrl:
-      'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=1200&q=80',
-    genres: ['Sci-Fi', 'Cyberpunk', 'Series'],
-    releaseYear: '2024',
-    episodes: [
-      {
-        episodeNumber: 1,
-        title: 'Episode 1: The Machine Awakens',
-        duration: '12m 14s',
-        streamId: 'stream-tears-of-steel',
-      },
-      {
-        episodeNumber: 2,
-        title: 'Episode 2: The Forest Protocol',
-        duration: '9m 56s',
-        streamId: 'stream-big-buck-bunny',
-      },
-      {
-        episodeNumber: 3,
-        title: 'Episode 3: The Golden Drake',
-        duration: '14m 48s',
-        streamId: 'stream-sintel',
-      },
-    ],
+    tmdbId: 45745,
   },
 ];
 
@@ -170,12 +137,10 @@ export class StreamService {
               quality: file.toLowerCase().includes('4k') ? '4K Ultra HD' : '1080p HD',
               sizeBytes: stat.size,
               overview: `Local video stream from server storage (${(stat.size / (1024 * 1024)).toFixed(1)} MB). Full seek and scrub support.`,
-              posterUrl:
-                'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80',
-              backdropUrl:
-                'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1200&q=80',
+              posterUrl: '',
+              backdropUrl: '',
               genres: ['Local Media', 'Server Stream'],
-              releaseYear: '2024',
+              releaseYear: new Date().getFullYear().toString(),
             });
           }
         }
@@ -198,11 +163,13 @@ export class StreamService {
   ): Promise<void> {
     // 1. Check if it's a local video file
     if (id.startsWith('local-')) {
-      const filename = decodeURIComponent(id.replace('local-', ''));
-      const filePath = join(this.videosDir, filename);
+      const rawFilename = decodeURIComponent(id.replace('local-', ''));
+      // Prevent directory traversal attacks using basename
+      const safeFilename = basename(rawFilename);
+      const filePath = join(this.videosDir, safeFilename);
 
       if (!existsSync(filePath)) {
-        throw new NotFoundException(`Video file "${filename}" not found on server`);
+        throw new NotFoundException(`Video file "${safeFilename}" not found on server`);
       }
 
       const stat = statSync(filePath);
@@ -225,6 +192,10 @@ export class StreamService {
         const chunkSize = end - start + 1;
         const stream = createReadStream(filePath, { start, end });
 
+        req.on('close', () => {
+          stream.destroy();
+        });
+
         res.writeHead(206, {
           'Content-Range': `bytes ${start}-${end}/${fileSize}`,
           'Accept-Ranges': 'bytes',
@@ -242,7 +213,11 @@ export class StreamService {
           'Access-Control-Allow-Origin': '*',
         });
 
-        createReadStream(filePath).pipe(res);
+        const stream = createReadStream(filePath);
+        req.on('close', () => {
+          stream.destroy();
+        });
+        stream.pipe(res);
       }
       return;
     }
@@ -261,7 +236,17 @@ export class StreamService {
         headers['range'] = req.headers.range as string;
       }
 
-      const remoteRes = await fetch(targetUrl, { headers });
+      const abortController = new AbortController();
+      req.on('close', () => {
+        try {
+          abortController.abort();
+        } catch {}
+      });
+
+      const remoteRes = await fetch(targetUrl, {
+        headers,
+        signal: abortController.signal,
+      });
 
       res.status(remoteRes.status);
       remoteRes.headers.forEach((value, key) => {
@@ -285,11 +270,21 @@ export class StreamService {
 
       // Stream the response buffer chunks to client
       const reader = remoteRes.body.getReader();
+      let isCanceled = false;
+      req.on('close', () => {
+        if (!isCanceled) {
+          isCanceled = true;
+          try {
+            reader.cancel();
+          } catch {}
+        }
+      });
+
       const pump = async () => {
         try {
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done || isCanceled) break;
             if (res.writableEnded) {
               await reader.cancel();
               break;
@@ -304,8 +299,10 @@ export class StreamService {
 
       pump();
     } catch (err: any) {
-      this.logger.error(`Error streaming remote media "${id}": ${err.message}`);
-      res.status(500).json({ error: 'Failed to stream requested media' });
+      if (!res.writableEnded) {
+        this.logger.error(`Error streaming remote media "${id}": ${err.message}`);
+        res.status(500).json({ error: 'Failed to stream requested media' });
+      }
     }
   }
 }

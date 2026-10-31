@@ -108,14 +108,16 @@ export const TVEpisodeGuideModal: React.FC<TVEpisodeGuideModalProps> = React.mem
 
             {/* Show Info Card */}
             <View style={styles.showCard}>
-              <Image
-                source={{
-                  uri:
-                    movie.poster_path ||
-                    'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=500&q=80',
-                }}
-                style={styles.showPoster}
-              />
+              {movie.poster_path ? (
+                <Image
+                  source={{ uri: movie.poster_path }}
+                  style={styles.showPoster}
+                />
+              ) : (
+                <View style={[styles.showPoster, styles.fallbackShowPoster]}>
+                  <Text style={styles.fallbackShowPosterIcon}>📺</Text>
+                </View>
+              )}
               <View style={styles.showMeta}>
                 <Text style={styles.showTitle} numberOfLines={1}>
                   {movie.title}
@@ -202,16 +204,23 @@ export const TVEpisodeGuideModal: React.FC<TVEpisodeGuideModalProps> = React.mem
                   return (
                     <View key={ep.id} style={styles.episodeCard}>
                       <View style={styles.episodeTopRow}>
-                        <Image
-                          source={{
-                            uri:
-                              ep.image?.medium ||
-                              ep.image?.original ||
-                              movie.backdrop_path ||
-                              'https://images.unsplash.com/photo-1518676590629-3dcbd9c5a5c9?w=500&q=80',
-                          }}
-                          style={styles.episodeThumb}
-                        />
+                        {ep.image?.medium || ep.image?.original || movie.backdrop_path ? (
+                          <Image
+                            source={{
+                              uri:
+                                ep.image?.medium ||
+                                ep.image?.original ||
+                                movie.backdrop_path,
+                            }}
+                            style={styles.episodeThumb}
+                          />
+                        ) : (
+                          <View style={[styles.episodeThumb, styles.fallbackEpisodeThumb]}>
+                            <Text style={styles.fallbackEpisodeThumbText}>
+                              S{ep.season}:E{ep.number}
+                            </Text>
+                          </View>
+                        )}
 
                         <View style={styles.episodeMeta}>
                           <View style={styles.episodeNumRow}>
@@ -559,5 +568,23 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 11,
     fontWeight: '600',
+  },
+  fallbackShowPoster: {
+    backgroundColor: '#1E2536',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackShowPosterIcon: {
+    fontSize: 24,
+  },
+  fallbackEpisodeThumb: {
+    backgroundColor: '#1E2536',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackEpisodeThumbText: {
+    color: '#3B82F6',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });

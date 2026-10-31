@@ -26,6 +26,8 @@ export const PollCreateModal: React.FC<PollCreateModalProps> = ({
 }) => {
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState<string[]>(['', '']);
+  const [allowMultiple, setAllowMultiple] = useState(false);
+  const [expiresInHours, setExpiresInHours] = useState<number | null>(null);
 
   if (!visible) return null;
 
@@ -62,6 +64,10 @@ export const PollCreateModal: React.FC<PollCreateModalProps> = ({
       return;
     }
 
+    const expiresAt = expiresInHours
+      ? new Date(Date.now() + expiresInHours * 3600 * 1000).toISOString()
+      : undefined;
+
     const pollData: PollData = {
       question: question.trim(),
       options: cleanOptions.map((text, idx) => ({
@@ -69,11 +75,15 @@ export const PollCreateModal: React.FC<PollCreateModalProps> = ({
         text,
         votes: [],
       })),
+      allowMultiple,
+      expiresAt,
     };
 
     onSubmitPoll(pollData);
     setQuestion('');
     setOptions(['', '']);
+    setAllowMultiple(false);
+    setExpiresInHours(null);
     onClose();
   };
 
@@ -137,6 +147,50 @@ export const PollCreateModal: React.FC<PollCreateModalProps> = ({
                 <Text style={styles.addOptionText}>+ Add Option</Text>
               </TouchableOpacity>
             )}
+
+            {/* Multi-choice toggle */}
+            <TouchableOpacity
+              style={styles.toggleRow}
+              activeOpacity={0.8}
+              onPress={() => setAllowMultiple(!allowMultiple)}
+            >
+              <View style={styles.toggleInfo}>
+                <Text style={styles.toggleTitle}>Allow Multiple Answers</Text>
+                <Text style={styles.toggleSubtitle}>Voters can select more than one option</Text>
+              </View>
+              <View style={[styles.toggleSwitch, allowMultiple && styles.toggleSwitchActive]}>
+                <View style={[styles.toggleThumb, allowMultiple && styles.toggleThumbActive]} />
+              </View>
+            </TouchableOpacity>
+
+            {/* Poll Expiration Duration */}
+            <Text style={[styles.inputLabel, { marginTop: 14 }]}>Poll Duration</Text>
+            <View style={styles.durationRow}>
+              {[
+                { label: 'No Limit', hours: null },
+                { label: '1 Hour', hours: 1 },
+                { label: '12 Hours', hours: 12 },
+                { label: '24 Hours', hours: 24 },
+              ].map((item) => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={[
+                    styles.durationChip,
+                    expiresInHours === item.hours && styles.durationChipActive,
+                  ]}
+                  onPress={() => setExpiresInHours(item.hours)}
+                >
+                  <Text
+                    style={[
+                      styles.durationChipText,
+                      expiresInHours === item.hours && styles.durationChipTextActive,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </ScrollView>
 
           <TouchableOpacity
@@ -256,10 +310,82 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
+    marginTop: 14,
   },
   submitBtnText: {
     color: '#0F172A',
     fontSize: 15,
     fontWeight: '800',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1E293B',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  toggleInfo: {
+    flex: 1,
+    marginRight: 10,
+  },
+  toggleTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F8FAFC',
+  },
+  toggleSubtitle: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  toggleSwitch: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleSwitchActive: {
+    backgroundColor: '#10B981',
+  },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  toggleThumbActive: {
+    alignSelf: 'flex-end',
+  },
+  durationRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  durationChip: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#1E293B',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  durationChipActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderColor: '#38BDF8',
+  },
+  durationChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  durationChipTextActive: {
+    color: '#38BDF8',
   },
 });

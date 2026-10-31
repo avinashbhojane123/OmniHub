@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,11 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { WatchPartyState } from '../../types/chat';
+import { getFromClipboard } from '../../utils/clipboard';
 
 interface WatchPartyModalProps {
   visible: boolean;
@@ -29,12 +31,6 @@ interface WatchPartyModalProps {
 
 const REACTIONS = ['🍿', '🔥', '😂', '❤️', '👏', '🎬'];
 
-const SAMPLE_VIDEOS = [
-  { label: '🐰 Big Buck Bunny (MP4)', url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', title: 'Big Buck Bunny' },
-  { label: '🚀 NASA Earth Live (YT)', url: 'https://www.youtube.com/watch?v=21X5lGlDOfg', title: 'NASA Earth Stream' },
-  { label: '🎵 Lofi Chill (YT)', url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk', title: 'Lofi Chill Beats' },
-];
-
 export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
   visible,
   onClose,
@@ -48,7 +44,32 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
   const [videoTitle, setVideoTitle] = useState('');
   const [commentText, setCommentText] = useState('');
 
-  if (!visible) return null;
+  const [hasWebviewError, setHasWebviewError] = useState(false);
+  const webViewRef = useRef<any>(null);
+  const activeUrl = state?.videoSource?.url || '';
+
+  const isPlaying = Boolean(state?.isPlaying);
+  const currentTime = Math.floor(state?.currentTime || 0);
+  const isControlsDisabled = Boolean(state?.isHostOnly && !isHost);
+
+  useEffect(() => {
+    setHasWebviewError(false);
+  }, [activeUrl]);
+
+  // Synchronize incoming remote state (seek, play, pause) to WebView player
+  useEffect(() => {
+    if (state && webViewRef.current) {
+      try {
+        const syncPayload = JSON.stringify({
+          action: state.isPlaying ? 'play' : 'pause',
+          currentTime: state.currentTime,
+        });
+        webViewRef.current.postMessage(syncPayload);
+      } catch {
+        // non-critical
+      }
+    }
+  }, [state?.currentTime, state?.isPlaying]);
 
   const handleLaunchVideo = () => {
     if (!videoUrl.trim()) return;
@@ -65,15 +86,25 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
     setVideoTitle('');
   };
 
+  const handlePasteClipboard = async () => {
+    try {
+      const text = await getFromClipboard();
+      if (text && text.trim().startsWith('http')) {
+        setVideoUrl(text.trim());
+      } else {
+        Alert.alert('Clipboard Empty', 'No valid web URL found on clipboard.');
+      }
+    } catch {
+      // non-critical
+    }
+  };
+
   const handleCommentSubmit = () => {
     if (!commentText.trim()) return;
     onSendComment(commentText.trim());
     setCommentText('');
   };
 
-  const isPlaying = Boolean(state?.isPlaying);
-  const currentTime = Math.floor(state?.currentTime || 0);
-  const isControlsDisabled = Boolean(state?.isHostOnly && !isHost);
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -83,28 +114,74 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
   const getEmbedSource = (rawUrl: string, startSecs: number, play: boolean) => {
     const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
     if (ytMatch && ytMatch[1]) {
+      const videoId = ytMatch[1];
       return {
-        uri: `https://www.youtube-nocookie.com/embed/${ytMatch[1]}?autoplay=${play ? 1 : 0}&start=${Math.floor(startSecs)}&controls=1&modestbranding=1&rel=0`,
+        html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"><style>*{margin:0;padding:0;box-sizing:border-box;background:#000;overflow:hidden;}html,body,#player{width:100%;height:100%;}</style></head><body><div id="player"></div><script src="https://www.youtube.com/iframe_api"></script><script>
+        var player;
+        function onYouTubeIframeAPIReady(){
+          player=new YT.Player('player',{
+            videoId:'${videoId}',
+            playerVars:{autoplay:${play ? 1 : 0},start:${Math.floor(startSecs)},controls:1,modestbranding:1,rel:0,playsinline:1},
+            events:{
+              onStateChange:function(e){
+                var isP=(e.data===1);
+                var cur=player.getCurrentTime?player.getCurrentTime():0;
+                window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'state',isPlaying:isP,currentTime:cur}));
+              },
+              onError:function(e){
+                var errMsg='YouTube playback error (' + e.data + ').';
+                if(e.data===101||e.data===150){
+                  errMsg='The video creator has blocked embedding on third-party apps.';
+                } else if(e.data===2){
+                  errMsg='Invalid YouTube video ID or link.';
+                } else if(e.data===5){
+                  errMsg='HTML5 player error on this video.';
+                }
+                window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'player_error',message:errMsg}));
+              }
+            }
+          });
+        }
+        function handleMsg(msg){
+          try{
+            var d=typeof msg==='string'?JSON.parse(msg):msg;
+            if(d.action==='seek'&&player&&player.seekTo){player.seekTo(d.currentTime,true);}
+            else if(d.action==='play'&&player&&player.playVideo){player.playVideo();}
+            else if(d.action==='pause'&&player&&player.pauseVideo){player.pauseVideo();}
+          }catch(e){}
+        }
+        window.addEventListener('message',function(ev){handleMsg(ev.data);});
+        document.addEventListener('message',function(ev){handleMsg(ev.data);});
+        </script></body></html>`,
       };
     }
-    if (rawUrl.endsWith('.mp4') || rawUrl.endsWith('.webm') || rawUrl.includes('/video/')) {
+    if (/\.(mp4|webm|mkv|mov|m4v)(\?.*)?$/i.test(rawUrl) || rawUrl.includes('/video/')) {
       return {
-        html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}video{width:100%;height:100%;object-fit:contain;}</style></head><body><video src="${rawUrl}" controls ${play ? 'autoplay' : ''} playsinline></video></body></html>`,
+        html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;}video{width:100%;height:100%;object-fit:contain;}</style></head><body><video id="vplayer" src="${rawUrl}" controls ${play ? 'autoplay' : ''} playsinline></video><script>
+        var v=document.getElementById('vplayer');
+        v.currentTime=${startSecs};
+        v.addEventListener('play',function(){window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'state',isPlaying:true,currentTime:v.currentTime}));});
+        v.addEventListener('pause',function(){window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'state',isPlaying:false,currentTime:v.currentTime}));});
+        v.addEventListener('seeked',function(){window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'state',isPlaying:!v.paused,currentTime:v.currentTime}));});
+        v.addEventListener('error',function(){window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'player_error',message:'Could not load direct video file. Check that the URL is directly accessible and CORS enabled.'}));});
+        function handleMsg(msg){
+          try{
+            var d=typeof msg==='string'?JSON.parse(msg):msg;
+            if(d.action==='seek'){v.currentTime=d.currentTime;}
+            else if(d.action==='play'){v.play();}
+            else if(d.action==='pause'){v.pause();}
+          }catch(e){}
+        }
+        window.addEventListener('message',function(ev){handleMsg(ev.data);});
+        document.addEventListener('message',function(ev){handleMsg(ev.data);});
+        </script></body></html>`,
       };
     }
     return { uri: rawUrl };
   };
 
-  const [hasWebviewError, setHasWebviewError] = useState(false);
-  const webViewRef = React.useRef<any>(null);
-  const activeUrl = state?.videoSource?.url || '';
-
-  React.useEffect(() => {
-    setHasWebviewError(false);
-  }, [activeUrl]);
-
-  // Memoize source to only recreate when the video URL itself changes, preventing 1-second reload loops
-  const embedSource = React.useMemo(() => {
+  // Memoize source to only recreate when the video URL itself changes, preventing reload loops
+  const embedSource = useMemo(() => {
     if (!activeUrl) return { uri: 'about:blank' };
     const initialSecs = Math.floor(state?.currentTime || 0);
     return getEmbedSource(activeUrl, initialSecs, Boolean(state?.isPlaying));
@@ -112,26 +189,16 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
 
   const handleSeek = (newTime: number) => {
     onAction('seek', { currentTime: newTime });
-    webViewRef.current?.injectJavaScript(`
-      try {
-        const v = document.querySelector('video');
-        if (v) { v.currentTime = ${newTime}; }
-      } catch(e) {}
-      true;
-    `);
+    webViewRef.current?.postMessage(JSON.stringify({ action: 'seek', currentTime: newTime }));
   };
 
   const handleTogglePlay = () => {
     const nextPlay = !isPlaying;
     onAction(nextPlay ? 'play' : 'pause');
-    webViewRef.current?.injectJavaScript(`
-      try {
-        const v = document.querySelector('video');
-        if (v) { ${nextPlay ? 'v.play()' : 'v.pause()'}; }
-      } catch(e) {}
-      true;
-    `);
+    webViewRef.current?.postMessage(JSON.stringify({ action: nextPlay ? 'play' : 'pause' }));
   };
+
+  if (!visible) return null;
 
   return (
     <Modal
@@ -177,6 +244,18 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                     mixedContentMode="always"
                     javaScriptEnabled
                     domStorageEnabled
+                    onMessage={(event) => {
+                      try {
+                        const data = JSON.parse(event.nativeEvent.data);
+                        if (data.type === 'state' && isHost) {
+                          if (data.isPlaying !== isPlaying) {
+                            onAction(data.isPlaying ? 'play' : 'pause');
+                          }
+                        } else if (data.type === 'player_error') {
+                          Alert.alert('Playback Notice', data.message || 'Video stream could not be loaded.');
+                        }
+                      } catch {}
+                    }}
                     onError={() => setHasWebviewError(true)}
                     renderLoading={() => (
                       <View style={styles.playerLoadingBox}>
@@ -188,14 +267,14 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                   />
                 </View>
               ) : (
-                <View style={styles.screenMock}>
-                  <Text style={styles.screenMockIcon}>
+                <View style={styles.streamFallbackBox}>
+                  <Text style={styles.streamFallbackIcon}>
                     {isPlaying ? '▶️' : '⏸️'}
                   </Text>
-                  <Text style={styles.screenMockTitle}>
+                  <Text style={styles.streamFallbackTitle}>
                     {state.videoSource?.title || 'Shared Stream'}
                   </Text>
-                  <Text style={styles.screenMockTime}>
+                  <Text style={styles.streamFallbackTime}>
                     {formatTime(currentTime)}
                   </Text>
                 </View>
@@ -295,33 +374,20 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
           ) : (
             /* Launcher Card */
             <View style={styles.launcherCard}>
-              <Text style={styles.inputLabel}>Video Stream URL</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={styles.inputLabel}>Video Stream URL</Text>
+                <TouchableOpacity onPress={handlePasteClipboard} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={{ fontSize: 12, color: '#38BDF8', fontWeight: '700' }}>📋 Paste from Clipboard</Text>
+                </TouchableOpacity>
+              </View>
               <TextInput
                 style={styles.urlInput}
-                placeholder="https://... (YouTube, MP4, HLS)"
+                placeholder="Paste YouTube, MP4, or WebM stream URL..."
                 placeholderTextColor="#64748B"
                 value={videoUrl}
                 onChangeText={setVideoUrl}
                 autoCapitalize="none"
               />
-
-              {/* Sample Preset Stream Chips */}
-              <View style={styles.sampleChipsRow}>
-                {SAMPLE_VIDEOS.map((s) => (
-                  <TouchableOpacity
-                    key={s.label}
-                    style={[styles.sampleChip, videoUrl === s.url && styles.sampleChipActive]}
-                    onPress={() => {
-                      setVideoUrl(s.url);
-                      setVideoTitle(s.title);
-                    }}
-                  >
-                    <Text style={[styles.sampleChipText, videoUrl === s.url && styles.sampleChipTextActive]}>
-                      {s.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
 
               <Text style={styles.inputLabel}>Title (Optional)</Text>
               <TextInput
@@ -396,7 +462,7 @@ const styles = StyleSheet.create({
   playerCard: {
     alignItems: 'center',
   },
-  screenMock: {
+  streamFallbackBox: {
     width: '100%',
     height: 140,
     backgroundColor: '#1E293B',
@@ -407,16 +473,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(56, 189, 248, 0.3)',
     marginBottom: 16,
   },
-  screenMockIcon: {
+  streamFallbackIcon: {
     fontSize: 32,
     marginBottom: 6,
   },
-  screenMockTitle: {
+  streamFallbackTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  screenMockTime: {
+  streamFallbackTime: {
     fontSize: 12,
     color: '#38BDF8',
     marginTop: 4,
@@ -593,31 +659,5 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontSize: 15,
     fontWeight: '800',
-  },
-  sampleChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
-  },
-  sampleChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  sampleChipActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
-    borderColor: '#38BDF8',
-  },
-  sampleChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  sampleChipTextActive: {
-    color: '#38BDF8',
   },
 });

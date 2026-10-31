@@ -55,12 +55,16 @@ export const StreamCatalogView: React.FC<StreamCatalogViewProps> = React.memo(
         renderItem={({ item }) => (
           <View style={styles.streamCard}>
             <View style={styles.streamBackdropContainer}>
-              <Image
-                source={{ uri: item.backdropUrl || item.posterUrl }}
-                style={styles.streamBackdrop}
-                progressiveRenderingEnabled
-                fadeDuration={200}
-              />
+              {item.backdropUrl || item.posterUrl ? (
+                <Image
+                  source={{ uri: item.backdropUrl || item.posterUrl }}
+                  style={styles.streamBackdrop}
+                  progressiveRenderingEnabled
+                  fadeDuration={200}
+                />
+              ) : (
+                <View style={[styles.streamBackdrop, styles.fallbackStreamBackdrop]} />
+              )}
               <View style={styles.streamOverlayGradient}>
                 <View style={styles.streamPillRow}>
                   <View style={styles.streamTypePill}>
@@ -201,6 +205,9 @@ const styles = StyleSheet.create({
   streamBackdrop: {
     width: '100%',
     height: '100%',
+  },
+  fallbackStreamBackdrop: {
+    backgroundColor: '#1E2536',
   },
   streamOverlayGradient: {
     position: 'absolute',

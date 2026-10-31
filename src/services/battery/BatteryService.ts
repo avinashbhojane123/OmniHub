@@ -5,7 +5,9 @@ import notifee, {
   AndroidCategory,
 } from '@notifee/react-native';
 import { settingsRepository } from '../../database/repositories/SettingsRepository';
+import { batteryRepository, BatterySessionRecord } from '../../database/repositories/BatteryRepository';
 import { alarmService } from '../alarm/AlarmService';
+import { batterySyncService } from './BatterySyncService';
 
 const { DeviceBattery, AlarmRingtone } = NativeModules;
 
@@ -23,6 +25,9 @@ export interface BatteryStatus {
   wattage?: number; // in W (e.g. 18.5)
   technology: string;
   present: boolean;
+  chargeTimeRemainingMs?: number;
+  cycleCount?: number;
+  capacityMah?: number;
 }
 
 export interface BatteryAlarmSettings {
@@ -54,16 +59,16 @@ class BatteryService {
   private initialized = false;
 
   private currentStatus: BatteryStatus = {
-    level: 63,
-    isCharging: true,
-    chargingType: 'USB',
-    status: 'Charging',
+    level: 0,
+    isCharging: false,
+    chargingType: 'Unplugged',
+    status: 'Discharging',
     health: 'Good',
-    temperature: 37.0,
-    voltage: 3964,
-    currentNow: 1850,
-    wattage: 7.3,
-    technology: 'Li-poly',
+    temperature: 25.0,
+    voltage: 0,
+    currentNow: 0,
+    wattage: 0,
+    technology: 'Li-ion',
     present: true,
   };
 
@@ -181,8 +186,39 @@ class BatteryService {
         autoRepeatAlarm: autoRepeat === 'true',
       };
       this.notifySettings();
+      this.syncNativeSettings();
+
+      // Restore any active charging session from SQLite
+      batteryRepository.getActiveSession().then((active) => {
+        if (active && this.currentStatus.isCharging) {
+          this.sessionStartTime = new Date(active.startTime).getTime();
+          this.sessionStartLevel = active.startLevel;
+        }
+      }).catch(() => {});
     } catch (e) {
       console.warn('Failed to load battery settings:', e);
+    }
+  }
+
+  private syncNativeSettings() {
+    if (DeviceBattery && typeof DeviceBattery.syncSettings === 'function') {
+      try {
+        DeviceBattery.syncSettings({
+          batteryGuardActive: this.currentSettings.batteryGuardActive,
+          fullChargeAlarmEnabled: this.currentSettings.fullChargeAlarmEnabled,
+          fullChargeTarget: this.currentSettings.fullChargeTarget,
+          overchargeFailsafeEnabled: this.currentSettings.overchargeFailsafeEnabled,
+          lowBatteryAlarmEnabled: this.currentSettings.lowBatteryAlarmEnabled,
+          lowBatteryTarget: this.currentSettings.lowBatteryTarget,
+          criticalLowAlarmEnabled: this.currentSettings.criticalLowAlarmEnabled,
+          tempAlarmEnabled: this.currentSettings.tempAlarmEnabled,
+          tempTarget: this.currentSettings.tempTarget,
+          soundEnabled: this.currentSettings.soundEnabled,
+          vibrationEnabled: this.currentSettings.vibrationEnabled,
+        });
+      } catch (e) {
+        console.warn('Failed to sync native battery settings:', e);
+      }
     }
   }
 
@@ -225,6 +261,8 @@ class BatteryService {
   public async updateSettings(updates: Partial<BatteryAlarmSettings>): Promise<void> {
     this.currentSettings = { ...this.currentSettings, ...updates };
     this.notifySettings();
+    this.syncNativeSettings();
+    batterySyncService.syncSettingsToCloud(this.currentSettings).catch(() => {});
 
     try {
       if (updates.batteryGuardActive !== undefined) {
@@ -345,9 +383,10 @@ class BatteryService {
     // Plug/unplug transition detection
     if (this.lastChargingState !== null && this.lastChargingState !== newStatus.isCharging) {
       if (newStatus.isCharging) {
-        // Charger plugged in: start session tracking
+        // Charger plugged in: start session tracking in memory & SQLite
         this.sessionStartTime = Date.now();
         this.sessionStartLevel = newStatus.level;
+        batteryRepository.startSession(newStatus.level, newStatus.chargingType).catch(() => {});
         if (newStatus.level >= this.currentSettings.fullChargeTarget) {
           this.hasTriggeredFullAlarm = true;
         } else {
@@ -358,16 +397,24 @@ class BatteryService {
           this.notifyPlugEvent('🔌 Charger Connected', `Battery is now charging at ${newStatus.level}%`);
         }
       } else {
-        // Charger unplugged: reset alarms and session
+        // Charger unplugged: reset alarms and finalize session in SQLite & cloud
         this.hasTriggeredLowAlarm = false;
         this.hasTriggeredCritical5Alarm = false;
         this.hasTriggered100Alarm = false;
         this.sessionStartTime = null;
         this.sessionStartLevel = null;
+        batteryRepository.finishActiveSession(newStatus.level).then((sess) => {
+          if (sess) {
+            batterySyncService.syncSessionToCloud(sess).catch(() => {});
+          }
+        }).catch(() => {});
+        this.stopAlarm();
         if (this.currentSettings.unpluggedAlertEnabled) {
           this.notifyPlugEvent('⚡ Charger Disconnected', `Device unplugged at ${newStatus.level}%`);
         }
       }
+    } else if (newStatus.isCharging) {
+      batteryRepository.updateActiveSession(newStatus.level, newStatus.temperature, newStatus.wattage || 0).catch(() => {});
     }
     this.lastChargingState = newStatus.isCharging;
 
@@ -511,7 +558,25 @@ class BatteryService {
    * Trigger the loud battery alarm using AlarmService
    */
   public async triggerBatteryAlarm(title: string, message: string): Promise<void> {
-    // 1. Display prominent lock-screen alert
+    // Log event to backend cloud diagnostics
+    const eventType = title.toLowerCase().includes('100%')
+      ? 'overcharge_100'
+      : title.toLowerCase().includes('temp') || title.toLowerCase().includes('hot')
+      ? 'overheat'
+      : title.toLowerCase().includes('critical')
+      ? 'critical_low'
+      : title.toLowerCase().includes('low')
+      ? 'low_battery'
+      : 'full_charge';
+
+    batterySyncService.logAlertToCloud({
+      eventType: eventType as any,
+      level: this.currentStatus.level,
+      temperature: this.currentStatus.temperature,
+      message,
+    }).catch(() => {});
+
+    // 1. Display prominent lock-screen alert with full-screen wakeup intent
     try {
       await notifee.displayNotification({
         id: 'active_battery_alarm',
@@ -526,6 +591,8 @@ class BatteryService {
           asForegroundService: true,
           ongoing: true,
           autoCancel: false,
+          pressAction: { id: 'default' },
+          fullScreenAction: { id: 'default' },
           actions: [
             {
               title: '🔕 STOP ALARM',
@@ -542,7 +609,7 @@ class BatteryService {
       console.warn('Failed to display battery notification:', err);
     }
 
-    // 2. Ring native siren and show AlarmRingingModal
+    // 2. Ring native siren and show dedicated AlarmRingingModal
     try {
       if (this.currentSettings.soundEnabled || this.currentSettings.vibrationEnabled) {
         if (this.currentSettings.continuousRingtone) {
@@ -640,6 +707,10 @@ class BatteryService {
     } catch {
       // Ignore background notification exceptions
     }
+  }
+
+  public async getRecentChargingSessions(): Promise<BatterySessionRecord[]> {
+    return batteryRepository.getRecentSessions(10);
   }
 
   public cleanup() {

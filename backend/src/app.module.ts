@@ -9,6 +9,9 @@ import { StatusModule } from './status/status.module';
 import { KeepAliveModule } from './keep-alive/keep-alive.module';
 import { InstagramModule } from './instagram/instagram.module';
 import { MoviesModule } from './movies/movies.module';
+import { BatteryModule } from './battery/battery.module';
+
+import { TasksModule } from './tasks/tasks.module';
 
 const isProduction = process.env.NODE_ENV === 'production';
 const dbUrl = process.env.DATABASE_URL;
@@ -53,6 +56,8 @@ const isSslEnabled =
     KeepAliveModule,
     InstagramModule,
     MoviesModule,
+    BatteryModule,
+    TasksModule,
   ],
 })
 export class AppModule {}

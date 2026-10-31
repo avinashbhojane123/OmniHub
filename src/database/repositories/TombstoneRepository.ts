@@ -41,6 +41,17 @@ export class TombstoneRepository {
     }
   }
 
+  async deleteByIds(ids: string[]): Promise<void> {
+    if (!ids || ids.length === 0) return;
+    try {
+      const db = await getDatabase();
+      const placeholders = ids.map(() => '?').join(', ');
+      await db.execute(`DELETE FROM sync_tombstones WHERE id IN (${placeholders})`, ids);
+    } catch (e) {
+      console.warn('Failed to delete tombstones:', e);
+    }
+  }
+
   async clear(): Promise<void> {
     try {
       const db = await getDatabase();

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   seriesId TEXT,
   title TEXT NOT NULL,
   description TEXT,
-  date TEXT NOT NULL,
+  date TEXT,
   startTime TEXT,
   endTime TEXT,
   priority TEXT NOT NULL DEFAULT 'medium',
@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   snoozeUntil TEXT,
   notes TEXT,
   isLoudAlarm INTEGER DEFAULT 0,
+  isOvernight INTEGER DEFAULT 0,
   eisenhowerQuadrant TEXT,
   accentColor TEXT,
   estimatedMinutes INTEGER,
@@ -154,7 +155,7 @@ CREATE INDEX IF NOT EXISTS idx_tombstones_type ON sync_tombstones(entityType);
 
 CREATE TABLE IF NOT EXISTS movie_bookmarks (
   id TEXT PRIMARY KEY,
-  tmdbId INTEGER UNIQUE NOT NULL,
+  tmdbId INTEGER NOT NULL,
   title TEXT NOT NULL,
   overview TEXT,
   posterPath TEXT,
@@ -164,7 +165,37 @@ CREATE TABLE IF NOT EXISTS movie_bookmarks (
   genres TEXT,
   runtime INTEGER DEFAULT 0,
   isWatched INTEGER NOT NULL DEFAULT 0,
+  isTv INTEGER NOT NULL DEFAULT 0,
   savedAt TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_bookmarks_tmdb_tv ON movie_bookmarks(tmdbId, isTv);
 CREATE INDEX IF NOT EXISTS idx_movie_bookmarks_watched ON movie_bookmarks(isWatched);
+
+CREATE TABLE IF NOT EXISTS battery_sessions (
+  id TEXT PRIMARY KEY,
+  startTime TEXT NOT NULL,
+  endTime TEXT,
+  startLevel INTEGER NOT NULL,
+  endLevel INTEGER,
+  gained INTEGER DEFAULT 0,
+  durationMinutes INTEGER DEFAULT 0,
+  chargingType TEXT NOT NULL DEFAULT 'AC',
+  peakTemperature REAL DEFAULT 0,
+  peakWattage REAL DEFAULT 0,
+  avgSpeedPerHour REAL DEFAULT 0,
+  completed INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_battery_sessions_start ON battery_sessions(startTime);
+
+CREATE TABLE IF NOT EXISTS pending_sync_queue (
+  id TEXT PRIMARY KEY,
+  tabName TEXT NOT NULL,
+  entityType TEXT NOT NULL,
+  op TEXT NOT NULL,
+  itemId TEXT NOT NULL,
+  rowJson TEXT,
+  itemJson TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_queue_created ON pending_sync_queue(createdAt);
 `;

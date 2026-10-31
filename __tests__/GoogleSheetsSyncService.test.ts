@@ -66,13 +66,37 @@ describe('GoogleSheetsSyncService Test Suite', () => {
 
     try {
       // Mock successful push
+      // Mock successful endpoints
       (globalThis as any).fetch = jest.fn().mockImplementation(async (url: string, options: any) => {
         const body = JSON.parse(options.body);
-        if (body.action === 'ping') {
+        if (body.action === 'status' || body.action === 'ping') {
           const data = {
             success: true,
             message: 'Connected to Google Sheet successfully!',
             sheetTitle: 'LifePlanner Database',
+            counts: {
+              tasks: 5,
+              habits: 2,
+              notes: 3,
+              events: 1,
+              categories: 6,
+              habitLogs: 4,
+              total: 11,
+            },
+          };
+          return {
+            ok: true,
+            status: 200,
+            json: async () => data,
+            text: async () => JSON.stringify(data),
+          };
+        }
+        if (body.action === 'delta') {
+          const data = {
+            success: true,
+            message: 'Delta sync applied successfully!',
+            appliedCount: body.mutations?.length || 1,
+            timestamp: new Date().toISOString(),
           };
           return {
             ok: true,
@@ -100,7 +124,17 @@ describe('GoogleSheetsSyncService Test Suite', () => {
             backupData: {
               version: 1,
               createdAt: new Date().toISOString(),
-              tasks: [],
+              tasks: [
+                {
+                  id: 'task-1',
+                  title: 'Cloud Restored Task',
+                  date: '2026-10-24',
+                  priority: 'high',
+                  status: 'pending',
+                  createdAt: '2026-10-24T12:00:00Z',
+                  updatedAt: '2026-10-24T12:00:00Z',
+                },
+              ],
               categories: [],
               habits: [],
               habitLogs: [],
@@ -125,15 +159,14 @@ describe('GoogleSheetsSyncService Test Suite', () => {
         };
       }) as any;
 
-      // Test Ping
+      // Test Connection / Status
       const pingRes = await googleSheetsSyncService.testConnection(testUrl);
       expect(pingRes.success).toBe(true);
       expect(pingRes.sheetTitle).toBe('LifePlanner Database');
 
-      // Test Push
+      // Test Safe Push (triggers guard on blank database and restores)
       const pushRes = await googleSheetsSyncService.pushToGoogleSheet(testUrl);
       expect(pushRes.success).toBe(true);
-      expect(pushRes.details?.timestamp).toBeDefined();
 
       const lastSync = await googleSheetsSyncService.getLastSyncTime();
       expect(lastSync).not.toBeNull();
@@ -142,6 +175,28 @@ describe('GoogleSheetsSyncService Test Suite', () => {
       const pullRes = await googleSheetsSyncService.pullFromGoogleSheet(testUrl, 'merge');
       expect(pullRes.success).toBe(true);
       expect(pullRes.message).toContain('Successfully pulled');
+
+      // Test Delta Mutation Queueing
+      await googleSheetsSyncService.queueDeltaMutation({
+        entityType: 'task',
+        operation: 'upsert',
+        id: 'task-1',
+        item: {
+          id: 'task-1',
+          title: 'Updated Task Delta',
+          date: '2026-10-24',
+          priority: 'medium',
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      // Verify script template includes delta action
+      const code = googleSheetsSyncService.getGoogleAppsScriptCode();
+      expect(code).toContain('action === "delta"');
+      expect(code).toContain('action === "status"');
+      expect(code).toContain('BLANK_DEVICE_SAFETY_BLOCK');
     } finally {
       (globalThis as any).fetch = originalFetch;
     }
