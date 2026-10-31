@@ -97,6 +97,22 @@ export class TaskService {
       }
     }
 
+    // 4. Validate estimatedMinutes if provided
+    if (dto.estimatedMinutes !== undefined && dto.estimatedMinutes !== null) {
+      const est = Number(dto.estimatedMinutes);
+      if (isNaN(est) || est <= 0) {
+        throw new Error('Estimated minutes must be a positive number.');
+      }
+    }
+
+    // 5. Validate reminderMinutes if provided
+    if (dto.reminderMinutes !== undefined && dto.reminderMinutes !== null) {
+      const rem = Number(dto.reminderMinutes);
+      if (isNaN(rem) || rem < -1) {
+        throw new Error('Invalid reminder minutes.');
+      }
+    }
+
     const normStart = normalizeTimeTo24H(dto.startTime);
     const normEnd = normalizeTimeTo24H(dto.endTime);
     const isOvernight =
@@ -104,7 +120,7 @@ export class TaskService {
         ? Boolean(dto.isOvernight)
         : Boolean(dto.recurrenceRule?.isOvernight);
 
-    // 4. Start/End Time Validation (Non-overnight tasks cannot end before start)
+    // 6. Start/End Time Validation (Non-overnight tasks cannot end before start)
     if (normStart && normEnd && !isOvernight) {
       const startMin = parseTimeToMinutes(normStart);
       const endMin = parseTimeToMinutes(normEnd);
@@ -161,7 +177,7 @@ export class TaskService {
       startTime: normStart || undefined,
       endTime: normEnd || undefined,
       priority: dto.priority || 'medium',
-      categoryId: dto.categoryId || undefined,
+      categoryId: dto.categoryId?.trim() || undefined,
       status: 'pending',
       recurrenceRule,
       reminderMinutes,
@@ -208,6 +224,22 @@ export class TaskService {
       const str = String(dto.endTime).trim();
       if (str.length > 0 && !isTimeValid(str)) {
         throw new Error('Invalid end time format.');
+      }
+    }
+
+    // Validate estimatedMinutes if provided
+    if (dto.estimatedMinutes !== undefined && dto.estimatedMinutes !== null) {
+      const est = Number(dto.estimatedMinutes);
+      if (isNaN(est) || est <= 0) {
+        throw new Error('Estimated minutes must be a positive number.');
+      }
+    }
+
+    // Validate reminderMinutes if provided
+    if (dto.reminderMinutes !== undefined && dto.reminderMinutes !== null) {
+      const rem = Number(dto.reminderMinutes);
+      if (isNaN(rem) || rem < -1) {
+        throw new Error('Invalid reminder minutes.');
       }
     }
 
@@ -297,6 +329,9 @@ export class TaskService {
       ...(dto.startTime !== undefined ? { startTime: normStart || null } : {}),
       ...(dto.endTime !== undefined || (dto.startTime !== undefined && !normStart)
         ? { endTime: normEnd || null }
+        : {}),
+      ...(dto.categoryId !== undefined
+        ? { categoryId: dto.categoryId ? dto.categoryId.trim() || null : null }
         : {}),
       ...(dto.eisenhowerQuadrant !== undefined ? { eisenhowerQuadrant: dto.eisenhowerQuadrant } : {}),
       ...(dto.accentColor !== undefined ? { accentColor: dto.accentColor } : {}),
@@ -445,16 +480,18 @@ export class TaskService {
       case 'weekly':
       case 'custom': {
         if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
-          const sortedDays = [...rule.daysOfWeek].sort((a, b) => a - b);
-          const currentDay = d.getDay();
-          const nextDayThisWeek = sortedDays.find((day) => day > currentDay);
+          // Map to ISO day index (1 = Monday, 2 = Tuesday, ..., 7 = Sunday)
+          const toIsoDay = (day: number) => (day === 0 ? 7 : day);
+          const sortedDays = [...rule.daysOfWeek].map(toIsoDay).sort((a, b) => a - b);
+          const currentIsoDay = toIsoDay(d.getDay());
+          const nextDayThisWeek = sortedDays.find((day) => day > currentIsoDay);
           if (nextDayThisWeek !== undefined) {
-            return addDays(d, nextDayThisWeek - currentDay);
+            return addDays(d, nextDayThisWeek - currentIsoDay);
           }
           const firstDayNextWeek = sortedDays[0];
           const intervalWeeks = rule.interval && rule.interval > 1 ? rule.interval : 1;
-          const daysToSunday = 7 - currentDay;
-          const daysToAdd = daysToSunday + (intervalWeeks - 1) * 7 + firstDayNextWeek;
+          const daysToNextWeekStart = 8 - currentIsoDay;
+          const daysToAdd = daysToNextWeekStart + (intervalWeeks - 1) * 7 + (firstDayNextWeek - 1);
           return addDays(d, daysToAdd);
         }
         return addDays(d, (rule.interval && rule.interval > 0 ? rule.interval : 1) * 7);
@@ -715,9 +752,17 @@ export class TaskService {
 
     // If this was a recurring task that auto-spawned a future occurrence upon completion,
     // clean up any pending future instance in the same series to prevent ghost duplications.
-    if (original.seriesId && original.recurrenceRule && original.recurrenceRule.type !== 'none') {
+    if (original.recurrenceRule && original.recurrenceRule.type !== 'none') {
       try {
-        const seriesTasks = await taskRepository.findBySeriesId(original.seriesId);
+        let seriesTasks: Task[] = [];
+        if (original.seriesId) {
+          seriesTasks = await taskRepository.findBySeriesId(original.seriesId);
+        } else {
+          const allTasks = await taskRepository.findAll();
+          seriesTasks = allTasks.filter(
+            (t) => t.title.toLowerCase().trim() === original.title.toLowerCase().trim()
+          );
+        }
         const futureSpawned = seriesTasks.filter(
           (t) => t.id !== id && t.status === 'pending' && Boolean(t.date && original.date && t.date > original.date)
         );
@@ -832,8 +877,27 @@ export class TaskService {
   }
 
   async getTodayTasks(): Promise<Task[]> {
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    return await taskRepository.findByDate(todayStr);
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const todayTasks = await taskRepository.findByDate(todayStr);
+
+    // Also include yesterday's active overnight tasks spanning into today
+    const yesterdayStr = format(addDays(now, -1), 'yyyy-MM-dd');
+    const yesterdayTasks = await taskRepository.findByDate(yesterdayStr);
+    const overnightSpillover = yesterdayTasks.filter((t) => {
+      const isOvernight = Boolean(t.isOvernight || t.recurrenceRule?.isOvernight);
+      if (!isOvernight || !t.startTime || !t.endTime) return false;
+      const startMin = parseTimeToMinutes(t.startTime);
+      const endMin = parseTimeToMinutes(t.endTime);
+      return startMin !== null && endMin !== null && endMin < startMin;
+    });
+
+    if (overnightSpillover.length === 0) {
+      return todayTasks;
+    }
+
+    const existingIds = new Set(todayTasks.map((t) => t.id));
+    return [...overnightSpillover.filter((t) => !existingIds.has(t.id)), ...todayTasks];
   }
 
   async getBacklogTasks(): Promise<Task[]> {
@@ -887,6 +951,7 @@ export class TaskService {
   async getTasksByDate(date: string): Promise<Task[]> {
     if (date === undefined || date === null) return [];
     const clean = sanitizeDateString(date);
+    if (!clean) return [];
     return await taskRepository.findByDate(clean);
   }
 
@@ -995,10 +1060,12 @@ export class TaskService {
 
     if (activeTasks.length > 0) {
       activeTasks.sort((a, b) => {
+        const pA = priorityWeights[a.priority] || 2;
+        const pB = priorityWeights[b.priority] || 2;
+        if (pA !== pB) return pA - pB;
         const aStart = parseTimeToMinutes(a.startTime || '') ?? 0;
         const bStart = parseTimeToMinutes(b.startTime || '') ?? 0;
-        if (aStart !== bStart) return aStart - bStart;
-        return (priorityWeights[a.priority] || 2) - (priorityWeights[b.priority] || 2);
+        return aStart - bStart;
       });
       return activeTasks[0];
     }
@@ -1220,6 +1287,9 @@ export class TaskService {
         });
       }
     }
+
+    // Sort scheduled items chronologically for clear time ordering
+    scheduledItems.sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
 
     const formatConflictTime = (min: number) => {
       const normalizedMin = min % 1440;

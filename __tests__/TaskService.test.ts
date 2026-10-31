@@ -843,5 +843,74 @@ describe('TaskService Comprehensive Production Suite', () => {
       const afterEnsure = await taskService.getTasksBySeriesId(task.seriesId!);
       expect(afterEnsure.length).toBe(2);
     });
+
+    it('createTask and updateTask should reject negative or non-numeric estimatedMinutes and reminderMinutes', async () => {
+      await expect(
+        taskService.createTask({
+          title: 'Negative Minutes',
+          date: '2026-10-31',
+          estimatedMinutes: -15,
+        })
+      ).rejects.toThrow('Estimated minutes must be a positive number.');
+
+      await expect(
+        taskService.createTask({
+          title: 'Negative Reminder',
+          date: '2026-10-31',
+          reminderMinutes: -5,
+        })
+      ).rejects.toThrow('Invalid reminder minutes.');
+
+      const task = await taskService.createTask({
+        title: 'Valid Task',
+        date: '2026-10-31',
+      });
+
+      await expect(
+        taskService.updateTask(task.id, {
+          estimatedMinutes: 0,
+        })
+      ).rejects.toThrow('Estimated minutes must be a positive number.');
+
+      await expect(
+        taskService.updateTask(task.id, {
+          reminderMinutes: -10,
+        })
+      ).rejects.toThrow('Invalid reminder minutes.');
+    });
+
+    it('getTodayTasks should include yesterday active overnight tasks extending into today', async () => {
+      const yesterday = format(addDays(new Date(), -1), 'yyyy-MM-dd');
+      const overnightTask = await taskService.createTask({
+        title: 'Overnight Hospital Duty',
+        date: yesterday,
+        startTime: '22:00',
+        endTime: '08:00',
+        isOvernight: true,
+      });
+
+      const todayList = await taskService.getTodayTasks();
+      expect(todayList.some((t) => t.id === overnightTask.id)).toBe(true);
+    });
+
+    it('weekly recurrence on Saturday and Sunday should advance to Sunday of same weekend', async () => {
+      // 2026-10-31 is Saturday (day 6)
+      const task = await taskService.createTask({
+        title: 'Weekend Yoga',
+        date: '2026-10-31',
+        recurrenceRule: {
+          type: 'weekly',
+          interval: 2,
+          daysOfWeek: [6, 0], // Saturday and Sunday
+        },
+      });
+
+      await taskService.completeTask(task.id);
+      const series = await taskService.getTasksBySeriesId(task.seriesId!);
+      const nextInstance = series.find((t) => t.id !== task.id);
+      expect(nextInstance).toBeDefined();
+      // Next instance MUST be Sunday 2026-11-01 of the same weekend
+      expect(nextInstance?.date).toBe('2026-11-01');
+    });
   });
 });
