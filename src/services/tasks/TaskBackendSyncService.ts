@@ -3,7 +3,8 @@ import { getDatabase } from '../../database/connection';
 import { taskRepository } from '../../database/repositories/TaskRepository';
 import { tombstoneRepository } from '../../database/repositories/TombstoneRepository';
 import { settingsRepository } from '../../database/repositories/SettingsRepository';
-import { Task } from '../../types';
+import { categoryRepository } from '../../database/repositories/CategoryRepository';
+import { Task, TaskPriority, TaskStatus, EisenhowerQuadrant } from '../../types';
 import { syncEventBus } from '../backup/SyncEventBus';
 import { normalizeTimeTo24H } from '../../utils/time';
 import { sanitizeDateString } from './TaskService';
@@ -15,6 +16,15 @@ export interface TaskSyncResult {
   serverDeleteCount?: number;
   message: string;
 }
+
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+}
+
+const VALID_PRIORITIES = new Set<TaskPriority>(['low', 'medium', 'high']);
+const VALID_STATUSES = new Set<TaskStatus>(['pending', 'in_progress', 'completed', 'overdue', 'cancelled']);
+const VALID_QUADRANTS = new Set<EisenhowerQuadrant>(['q1', 'q2', 'q3', 'q4']);
 
 export class TaskBackendSyncService {
   private static instance: TaskBackendSyncService;
@@ -32,6 +42,7 @@ export class TaskBackendSyncService {
   private lastSyncTimestamp: string | null = null;
   private listeners: Set<(connected: boolean) => void> = new Set();
   private syncTimer: any = null;
+  private retryTimer: any = null;
   private unsubscribeEventBus: (() => void) | null = null;
 
   public static getInstance(): TaskBackendSyncService {
@@ -68,6 +79,10 @@ export class TaskBackendSyncService {
     return this.isConnected;
   }
 
+  public getIsSyncing(): boolean {
+    return this.isSyncing;
+  }
+
   private notifyStatus(connected: boolean): void {
     const statusChanged = this.isConnected !== connected;
     this.isConnected = connected;
@@ -98,6 +113,10 @@ export class TaskBackendSyncService {
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
       this.syncTimer = null;
+    }
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
     }
   }
 
@@ -165,6 +184,36 @@ export class TaskBackendSyncService {
     try {
       await settingsRepository.set(TaskBackendSyncService.SETTINGS_KEY_LAST_SYNC, '');
     } catch {}
+  }
+
+  public async testConnection(customUrl?: string, timeoutMs = 4000): Promise<ConnectionTestResult> {
+    try {
+      const activeUrl = customUrl ? customUrl.trim().replace(/\/+$/, '') : await this.getBackendUrl();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetch(`${activeUrl}/api/tasks?limit=1`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+
+        const ok = response.ok;
+        this.notifyStatus(ok);
+        return {
+          success: ok,
+          message: ok ? 'Successfully connected to NestJS backend.' : `Backend returned HTTP ${response.status}`,
+        };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (e: any) {
+      this.notifyStatus(false);
+      return {
+        success: false,
+        message: e?.message || 'Could not connect to backend server.',
+      };
+    }
   }
 
   public async syncWithBackend(timeoutMs = 8000): Promise<TaskSyncResult> {
@@ -261,89 +310,123 @@ export class TaskBackendSyncService {
       // Build a set of recently deleted task IDs to prevent resurrecting deleted tasks
       const deletedIdSet = new Set(deletedTaskIds);
 
-      // 2. Ingest server deletions into local SQLite without recording new tombstones
-      if (result.serverDeletions && Array.isArray(result.serverDeletions) && result.serverDeletions.length > 0) {
-        for (const delId of result.serverDeletions) {
-          if (!delId) continue;
-          await db.execute('DELETE FROM tasks WHERE id = ?', [delId]);
-          await tombstoneRepository.deleteByIds([delId]);
-          changedCount++;
-          serverDeleteCount++;
-        }
-      }
-
-      // 3. Ingest server tasks into local SQLite (Two-Way Delta Merge with Last-Write-Wins)
-      if (result.serverTasks && Array.isArray(result.serverTasks) && result.serverTasks.length > 0) {
-        for (const st of result.serverTasks) {
-          if (!st || !st.id || deletedIdSet.has(st.id)) {
-            continue;
+      // Perform all ingestion inside an atomic transaction for speed & ACID integrity
+      await db.transaction(async (tx) => {
+        // 2. Ingest server deletions into local SQLite without recording new tombstones
+        if (result.serverDeletions && Array.isArray(result.serverDeletions) && result.serverDeletions.length > 0) {
+          for (const delId of result.serverDeletions) {
+            if (!delId) continue;
+            await tx.execute('DELETE FROM tasks WHERE id = ?', [delId]);
+            await tombstoneRepository.deleteByIds([delId]);
+            changedCount++;
+            serverDeleteCount++;
           }
+        }
 
-          let recurrenceJson: string | null = null;
-          if (st.recurrenceRule) {
-            if (typeof st.recurrenceRule === 'object') {
-              recurrenceJson = JSON.stringify(st.recurrenceRule);
-            } else if (typeof st.recurrenceRule === 'string') {
-              try {
-                JSON.parse(st.recurrenceRule);
-                recurrenceJson = st.recurrenceRule;
-              } catch {
-                recurrenceJson = null;
+        // 3. Ingest server tasks into local SQLite (Two-Way Delta Merge with Last-Write-Wins)
+        if (result.serverTasks && Array.isArray(result.serverTasks) && result.serverTasks.length > 0) {
+          for (const st of result.serverTasks) {
+            if (!st || !st.id || deletedIdSet.has(st.id)) {
+              continue;
+            }
+
+            let recurrenceJson: string | null = null;
+            if (st.recurrenceRule) {
+              if (typeof st.recurrenceRule === 'object') {
+                recurrenceJson = JSON.stringify(st.recurrenceRule);
+              } else if (typeof st.recurrenceRule === 'string') {
+                try {
+                  JSON.parse(st.recurrenceRule);
+                  recurrenceJson = st.recurrenceRule;
+                } catch {
+                  recurrenceJson = null;
+                }
               }
             }
-          }
 
-          const existing = await taskRepository.findById(st.id);
-          const serverUpdated = st.updatedAt ? new Date(st.updatedAt).getTime() : 0;
-          const localUpdated = existing?.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+            const existing = await taskRepository.findById(st.id);
+            const serverUpdated = st.updatedAt ? new Date(st.updatedAt).getTime() : 0;
+            const localUpdated = existing?.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
 
-          // If task does not exist locally or server has newer/equal modification timestamp:
-          if (!existing || serverUpdated >= localUpdated) {
-            const isLoudAlarmVal = st.isLoudAlarm ? 1 : 0;
-            const isOvernightVal = st.isOvernight ? 1 : 0;
-            const normDate = st.date ? sanitizeDateString(st.date) : '';
-            const normStart = st.startTime ? (normalizeTimeTo24H(st.startTime) ?? null) : null;
-            const normEnd = st.endTime ? (normalizeTimeTo24H(st.endTime) ?? null) : null;
-            const nowIso = new Date().toISOString();
+            // If task does not exist locally or server has newer/equal modification timestamp:
+            if (!existing || serverUpdated >= localUpdated) {
+              const isLoudAlarmVal = st.isLoudAlarm ? 1 : 0;
+              const isOvernightVal = st.isOvernight ? 1 : 0;
+              const normDate = st.date ? sanitizeDateString(st.date) : '';
+              const normStart = st.startTime ? (normalizeTimeTo24H(st.startTime) ?? null) : null;
+              const normEnd = st.endTime ? (normalizeTimeTo24H(st.endTime) ?? null) : null;
+              const nowIso = new Date().toISOString();
 
-            await db.execute(
-              `INSERT OR REPLACE INTO tasks (
-                id, seriesId, title, description, date, startTime, endTime,
-                priority, categoryId, status, recurrenceRule,
-                reminderMinutes, snoozeUntil, notes, isLoudAlarm, isOvernight,
-                eisenhowerQuadrant, accentColor, estimatedMinutes,
-                createdAt, updatedAt, completedAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                st.id,
-                st.seriesId ?? null,
-                st.title ? String(st.title).trim() : 'Untitled Task',
-                st.description ?? null,
-                normDate,
-                normStart,
-                normEnd,
-                st.priority ?? 'medium',
-                st.categoryId ? String(st.categoryId).trim() : null,
-                st.status ?? 'pending',
-                recurrenceJson,
-                typeof st.reminderMinutes === 'number' && st.reminderMinutes >= 0 ? st.reminderMinutes : 0,
-                st.snoozeUntil ?? null,
-                st.notes ?? null,
-                isLoudAlarmVal,
-                isOvernightVal,
-                st.eisenhowerQuadrant ?? null,
-                st.accentColor ?? null,
-                typeof st.estimatedMinutes === 'number' && st.estimatedMinutes > 0 ? st.estimatedMinutes : null,
-                st.createdAt ? new Date(st.createdAt).toISOString() : nowIso,
-                st.updatedAt ? new Date(st.updatedAt).toISOString() : nowIso,
-                st.completedAt ?? null,
-              ]
-            );
-            changedCount++;
-            serverUpsertCount++;
+              // Foreign key safety for categories
+              let validCategoryId: string | null = null;
+              if (st.categoryId && typeof st.categoryId === 'string') {
+                const cleanCat = st.categoryId.trim();
+                if (cleanCat.length > 0) {
+                  const catExists = await categoryRepository.findById(cleanCat);
+                  if (catExists) {
+                    validCategoryId = cleanCat;
+                  }
+                }
+              }
+
+              // Validate enums
+              const validPriority = VALID_PRIORITIES.has(st.priority) ? st.priority : 'medium';
+              const validStatus = VALID_STATUSES.has(st.status) ? st.status : 'pending';
+              const validQuadrant = VALID_QUADRANTS.has(st.eisenhowerQuadrant) ? st.eisenhowerQuadrant : null;
+
+              // Ensure completedAt consistency
+              const resolvedCompletedAt = validStatus === 'completed'
+                ? (st.completedAt ? new Date(st.completedAt).toISOString() : nowIso)
+                : null;
+
+              // Sanitize snoozeUntil
+              let validSnooze: string | null = null;
+              if (st.snoozeUntil && typeof st.snoozeUntil === 'string') {
+                const parsedSnooze = new Date(st.snoozeUntil);
+                if (!isNaN(parsedSnooze.getTime())) {
+                  validSnooze = parsedSnooze.toISOString();
+                }
+              }
+
+              await tx.execute(
+                `INSERT OR REPLACE INTO tasks (
+                  id, seriesId, title, description, date, startTime, endTime,
+                  priority, categoryId, status, recurrenceRule,
+                  reminderMinutes, snoozeUntil, notes, isLoudAlarm, isOvernight,
+                  eisenhowerQuadrant, accentColor, estimatedMinutes,
+                  createdAt, updatedAt, completedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  st.id,
+                  st.seriesId ?? null,
+                  st.title ? String(st.title).trim() : 'Untitled Task',
+                  st.description ?? null,
+                  normDate,
+                  normStart,
+                  normEnd,
+                  validPriority,
+                  validCategoryId,
+                  validStatus,
+                  recurrenceJson,
+                  typeof st.reminderMinutes === 'number' && st.reminderMinutes >= 0 ? st.reminderMinutes : 0,
+                  validSnooze,
+                  st.notes ?? null,
+                  isLoudAlarmVal,
+                  isOvernightVal,
+                  validQuadrant,
+                  st.accentColor ?? null,
+                  typeof st.estimatedMinutes === 'number' && st.estimatedMinutes > 0 ? st.estimatedMinutes : null,
+                  st.createdAt ? new Date(st.createdAt).toISOString() : nowIso,
+                  st.updatedAt ? new Date(st.updatedAt).toISOString() : nowIso,
+                  resolvedCompletedAt,
+                ]
+              );
+              changedCount++;
+              serverUpsertCount++;
+            }
           }
         }
-      }
+      });
 
       // Notify UI screens that local SQLite task store has been updated from the cloud
       if (changedCount > 0) {
@@ -359,6 +442,13 @@ export class TaskBackendSyncService {
       };
     } catch (err: any) {
       this.notifyStatus(false);
+
+      // Auto-retry once in 15 seconds if offline to self-heal when connection returns
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = setTimeout(() => {
+        this.syncWithBackend().catch(() => {});
+      }, 15000);
+
       return {
         success: false,
         syncedCount: 0,

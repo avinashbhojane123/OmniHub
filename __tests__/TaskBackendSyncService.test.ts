@@ -1,5 +1,4 @@
-import http from 'http';
-import { AddressInfo } from 'net';
+const http = require('http');
 import { taskBackendSyncService, TaskBackendSyncService } from '../src/services/tasks/TaskBackendSyncService';
 import { taskRepository } from '../src/database/repositories/TaskRepository';
 import { tombstoneRepository } from '../src/database/repositories/TombstoneRepository';
@@ -9,18 +8,18 @@ import { syncEventBus } from '../src/services/backup/SyncEventBus';
 import { Task } from '../src/types';
 
 describe('TaskBackendSyncService Integration Test Suite (No Mocks)', () => {
-  let server: http.Server;
+  let server: any;
   let serverPort: number;
-  let serverHandler: (req: http.IncomingMessage, res: http.ServerResponse, body: any) => void;
+  let serverHandler: (req: any, res: any, body: any) => void;
 
   beforeAll(async () => {
     await getDatabase();
 
     // Start a real, local HTTP server to handle sync requests over loopback
     await new Promise<void>((resolve) => {
-      server = http.createServer((req, res) => {
+      server = http.createServer((req: any, res: any) => {
         let rawBody = '';
-        req.on('data', (chunk) => {
+        req.on('data', (chunk: any) => {
           rawBody += chunk;
         });
         req.on('end', () => {
@@ -38,7 +37,7 @@ describe('TaskBackendSyncService Integration Test Suite (No Mocks)', () => {
       });
 
       server.listen(0, '127.0.0.1', () => {
-        const addr = server.address() as AddressInfo;
+        const addr = server.address();
         serverPort = addr.port;
         resolve();
       });
@@ -414,5 +413,103 @@ describe('TaskBackendSyncService Integration Test Suite (No Mocks)', () => {
     taskBackendSyncService.cancelScheduledSync();
     // Verify no throw and clean cancellation
     expect(taskBackendSyncService.getIsConnected()).toBeDefined();
+  });
+
+  it('12. should test backend connection endpoint with success and failure responses', async () => {
+    serverHandler = (req, res) => {
+      if (req.url?.startsWith('/api/tasks?limit=1')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, count: 0, data: [] }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    };
+
+    const successResult = await taskBackendSyncService.testConnection();
+    expect(successResult.success).toBe(true);
+    expect(successResult.message).toContain('Successfully connected');
+
+    serverHandler = (_req, res) => {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Service Unavailable' }));
+    };
+
+    const failResult = await taskBackendSyncService.testConnection();
+    expect(failResult.success).toBe(false);
+  });
+
+  it('13. should sanitize and normalize invalid enums, completedAt, and snoozeUntil from server', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_with_weird_enums',
+              title: 'Weird Enums Task',
+              date: '2026-10-31',
+              priority: 'super_ultra_high', // Invalid priority
+              status: 'sleeping', // Invalid status
+              eisenhowerQuadrant: 'q99', // Invalid quadrant
+              snoozeUntil: 'invalid-snooze-string',
+            },
+            {
+              id: 'task_completed_auto_timestamp',
+              title: 'Completed Without Timestamp',
+              date: '2026-10-31',
+              status: 'completed',
+              completedAt: null, // Should get auto timestamp
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const weirdTask = await taskRepository.findById('task_with_weird_enums');
+    expect(weirdTask?.priority).toBe('medium');
+    expect(weirdTask?.status).toBe('pending');
+    expect(weirdTask?.eisenhowerQuadrant).toBeUndefined();
+    expect(weirdTask?.snoozeUntil).toBeUndefined();
+
+    const completedTask = await taskRepository.findById('task_completed_auto_timestamp');
+    expect(completedTask?.status).toBe('completed');
+    expect(completedTask?.completedAt).toBeDefined();
+  });
+
+  it('14. should safeguard against non-existent category IDs to prevent foreign key errors', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_with_fake_cat',
+              title: 'Ghost Category Task',
+              date: '2026-10-31',
+              categoryId: 'completely_nonexistent_category_id_9999',
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const task = await taskRepository.findById('task_with_fake_cat');
+    expect(task).toBeDefined();
+    expect(task?.categoryId).toBeUndefined();
+  });
+
+  it('15. should reflect getIsSyncing status properly during execution', async () => {
+    expect(taskBackendSyncService.getIsSyncing()).toBe(false);
   });
 });

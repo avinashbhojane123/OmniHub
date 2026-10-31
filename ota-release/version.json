@@ -1,8 +1,8 @@
 {
-  "version": 1793429166830,
-  "buildTime": "12:16:06 pm",
-  "sizeBytes": 2669856,
+  "version": 1793429567594,
+  "buildTime": "12:22:47 pm",
+  "sizeBytes": 2671342,
   "sizeMb": "2.55",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "TaskBackendSyncService two-way delta sync hardening"
+  "notes": "TaskBackendSyncService foreign keys, ACID transactions, and enum sanitization"
 }
