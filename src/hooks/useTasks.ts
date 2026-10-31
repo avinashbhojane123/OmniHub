@@ -6,6 +6,7 @@ import { taskRepository } from '../database/repositories/TaskRepository';
 import { categoryRepository } from '../database/repositories/CategoryRepository';
 import { calendarRepository } from '../database/repositories/CalendarRepository';
 import { toggleBulletInRawText } from '../utils/bulletNotes';
+import { syncEventBus } from '../services/backup/SyncEventBus';
 
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -52,8 +53,13 @@ export function useTasks() {
       }
     });
 
+    const unsubRestore = syncEventBus.subscribeToRestore(() => {
+      refresh();
+    });
+
     return () => {
       subscription.remove();
+      unsubRestore();
     };
   }, [refresh]);
 

@@ -216,6 +216,15 @@ export class InMemoryDatabaseAdapter implements DatabaseAdapter {
           }
         }
 
+        const isReplace = trimmed.toUpperCase().startsWith('INSERT OR REPLACE');
+        if (newRow.id !== undefined && (isReplace || trimmed.includes('ON CONFLICT'))) {
+          const existingIdx = table.findIndex((r) => r.id === newRow.id);
+          if (existingIdx >= 0) {
+            table[existingIdx] = { ...table[existingIdx], ...newRow };
+            this.tables.set(tableName, table);
+            return { rows: [], rowsAffected: 1 };
+          }
+        }
 
         table.push(newRow);
         this.tables.set(tableName, table);

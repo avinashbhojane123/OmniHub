@@ -93,4 +93,22 @@ export class CreateTaskDto {
   @IsString()
   @IsOptional()
   completedAt?: string;
+
+  @IsString()
+  @IsOptional()
+  categoryName?: string;
+
+  @IsString()
+  @IsOptional()
+  categoryColor?: string;
+
+  @IsString()
+  @IsOptional()
+  categoryIcon?: string;
+
+  @IsOptional()
+  createdAt?: any;
+
+  @IsOptional()
+  updatedAt?: any;
 }

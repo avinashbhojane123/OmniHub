@@ -1,8 +1,8 @@
 {
-  "version": 1793421093329,
-  "buildTime": "10:01:33 am",
-  "sizeBytes": 2665243,
-  "sizeMb": "2.54",
+  "version": 1793429166830,
+  "buildTime": "12:16:06 pm",
+  "sizeBytes": 2669856,
+  "sizeMb": "2.55",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "TaskService reliability & edge case hardening"
+  "notes": "TaskBackendSyncService two-way delta sync hardening"
 }

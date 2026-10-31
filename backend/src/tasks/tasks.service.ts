@@ -254,6 +254,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
           accentColor: item.accentColor ?? null,
           estimatedMinutes: item.estimatedMinutes ?? null,
           completedAt: item.completedAt ?? null,
+          createdAt: item.createdAt ? new Date(item.createdAt) : undefined,
+          updatedAt: item.updatedAt ? new Date(item.updatedAt) : undefined,
         });
       }
     }

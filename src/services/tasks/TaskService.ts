@@ -24,7 +24,7 @@ const CHECKBOX_TAG_REGEX = /\[([ xXvV\u2713\u2714]?)\]/;
  * Handles dates containing ISO timestamp suffixes, slashes, unpadded components, Date objects, or timezone offsets.
  * Returns empty string if the date is invalid or empty.
  */
-function sanitizeDateString(dateStr?: string | Date | number | null): string {
+export function sanitizeDateString(dateStr?: string | Date | number | null): string {
   if (!dateStr && dateStr !== 0) return '';
 
   if (dateStr instanceof Date) {
