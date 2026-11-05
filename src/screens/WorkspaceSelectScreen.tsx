@@ -330,7 +330,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
         try {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 3500);
-          const resp = await fetch('https://backend-9i6w.onrender.com/api/keep-alive/ping', {
+          const resp = await fetch('https://omnihub-1x3r.onrender.com/api/keep-alive/ping', {
             signal: controller.signal,
           });
           clearTimeout(timeout);

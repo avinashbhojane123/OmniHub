@@ -24,7 +24,7 @@ class ChatSocketManager {
   private socket: Socket | null = null;
   private currentNickname: string = '';
   private currentPasscode: string = '';
-  public static readonly CLOUD_SERVER_URL = 'https://backend-9i6w.onrender.com';
+  public static readonly CLOUD_SERVER_URL = 'https://omnihub-1x3r.onrender.com';
   private serverUrl: string = ChatSocketManager.CLOUD_SERVER_URL;
   private sessionToken: string = '';
 

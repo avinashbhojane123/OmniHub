@@ -52,7 +52,7 @@ export const ChatUploadModal: React.FC<ChatUploadModalProps> = ({
 
   if (!visible) return null;
 
-  const cleanServerUrl = (serverUrl || 'https://backend-9i6w.onrender.com')
+  const cleanServerUrl = (serverUrl || 'https://omnihub-1x3r.onrender.com')
     .replace(/\/api\/?$/, '')
     .replace(/\/+$/, '');
   const uploadEndpoint = `${cleanServerUrl}/upload`;

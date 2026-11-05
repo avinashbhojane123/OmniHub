@@ -35,11 +35,11 @@ describe('ChatSocketService', () => {
     chatSocketService.connect({
       nickname: 'Alex',
       passcode: 'SecretRoom',
-      serverUrl: 'https://backend-9i6w.onrender.com',
+      serverUrl: 'https://omnihub-1x3r.onrender.com',
     });
 
     expect(chatSocketService.nickname).toBe('Alex');
     expect(chatSocketService.passcode).toBe('SecretRoom');
-    expect(chatSocketService.activeServerUrl).toBe('https://backend-9i6w.onrender.com');
+    expect(chatSocketService.activeServerUrl).toBe('https://omnihub-1x3r.onrender.com');
   });
 });

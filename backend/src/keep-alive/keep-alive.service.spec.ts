@@ -81,7 +81,7 @@ describe('KeepAliveService', () => {
     it('should default to dynamic local host and port when no env vars configured', () => {
       const url = service.getTargetUrl();
       expect(url).toBe('http://127.0.0.1:10000/api/keep-alive/ping');
-      expect(url).not.toContain('backend-9i6w.onrender.com');
+      expect(url).not.toContain('omnihub-1x3r.onrender.com');
     });
 
     it('should respect custom PORT and HOST in fallback', () => {

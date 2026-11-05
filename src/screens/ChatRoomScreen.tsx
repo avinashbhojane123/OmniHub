@@ -134,10 +134,10 @@ const AUDIO_BRIDGE_HTML = `
 </html>
 `;
 
-const DEFAULT_INTERNET_SERVER = 'https://backend-9i6w.onrender.com';
+const DEFAULT_INTERNET_SERVER = 'https://omnihub-1x3r.onrender.com';
 const HOTSPOT_SERVER = 'http://10.16.64.73:10000';
 const SERVER_PRESETS = [
-  { label: '🌐 Render Cloud (Live Internet)', url: 'https://backend-9i6w.onrender.com' },
+  { label: '🌐 Render Cloud (Live Internet)', url: 'https://omnihub-1x3r.onrender.com' },
   { label: '📡 Local Hotspot (10.16.64.73:10000)', url: 'http://10.16.64.73:10000' },
   { label: '📱 Android Hotspot (192.168.43.1:10000)', url: 'http://192.168.43.1:10000' },
   { label: '🏠 Local Wi-Fi (192.168.1.100:10000)', url: 'http://192.168.1.100:10000' },

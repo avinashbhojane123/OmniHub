@@ -11,7 +11,7 @@ import {
 import { movieRepository } from '../../database/repositories';
 import { settingsRepository } from '../../database/repositories';
 
-const DEFAULT_CLOUD_SERVER_URL = 'https://backend-9i6w.onrender.com';
+const DEFAULT_CLOUD_SERVER_URL = 'https://omnihub-1x3r.onrender.com';
 
 export const GENRE_LIST: Genre[] = [...ALL_GENRES];
 
