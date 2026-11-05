@@ -15,7 +15,10 @@ export class Message {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column()
+  @Column({
+    type: 'varchar',
+    length: 50,
+  })
   nickname!: string;
 
   @Column({
