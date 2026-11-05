@@ -1,8 +1,8 @@
 {
-  "version": 1793699822400,
-  "buildTime": "03:27:02 pm",
+  "version": 1793854790617,
+  "buildTime": "10:29:50 am",
   "sizeBytes": 2760574,
   "sizeMb": "2.63",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "Fix React hook order violation and battery alarm stop with complete DND support"
+  "notes": "OTA update from Antigravity"
 }
