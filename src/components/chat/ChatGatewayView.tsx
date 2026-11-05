@@ -121,7 +121,7 @@ export const ChatGatewayView: React.FC<ChatGatewayViewProps> = React.memo(({
             {/* Room Passcode */}
             <View style={styles.fieldSection}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <Text style={styles.label}>Room Passcode / Name</Text>
+                <Text style={styles.label}>Room Passcode </Text>
                 <TouchableOpacity
                   onPress={() => setHidePasscode(!hidePasscode)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

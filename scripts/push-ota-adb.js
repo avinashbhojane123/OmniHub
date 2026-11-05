@@ -38,3 +38,4 @@ try {
   console.error('[OTA ADB ERROR]:', err.message);
   process.exit(1);
 }
+

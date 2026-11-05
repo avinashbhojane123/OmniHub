@@ -57,6 +57,16 @@ class ChatSocketManager {
 
   constructor() {
     this.sessionToken = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    settingsRepository
+      .get('chat_session_token')
+      .then((saved) => {
+        if (saved && saved.trim()) {
+          this.sessionToken = saved.trim();
+        } else {
+          settingsRepository.set('chat_session_token', this.sessionToken).catch(() => {});
+        }
+      })
+      .catch(() => {});
   }
 
   // --- Getters ---
@@ -402,6 +412,15 @@ class ChatSocketManager {
         if (bStatus) {
           batteryLabel = `${bStatus.level}%`;
           batteryIsCharging = bStatus.isCharging;
+        }
+      } catch {
+        // non-critical
+      }
+
+      try {
+        const savedToken = await settingsRepository.get('chat_session_token');
+        if (savedToken && savedToken.trim()) {
+          this.sessionToken = savedToken.trim();
         }
       } catch {
         // non-critical

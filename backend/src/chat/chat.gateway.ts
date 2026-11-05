@@ -663,20 +663,30 @@ export class ChatGateway
       )
       .getOne();
 
+    const existingSockets = this.findSocketsInRoom(
+      cleanPass,
+      cleanNick,
+      client.id,
+    );
+
     if (user) {
       cleanNick = user.nickname;
-      if (
-        user.sessionToken &&
-        data.sessionToken &&
-        user.sessionToken !== data.sessionToken
-      ) {
-        client.emit('error', {
-          message: `The nickname "${cleanNick}" is already in use by another session in this room. Please choose another nickname.`,
-        });
-        return {
-          success: false,
-          message: `Nickname "${cleanNick}" is already taken in this room`,
-        };
+      // Only block nickname collision if another active socket is currently connected in the room
+      if (existingSockets.length > 0) {
+        const isSameSession =
+          user.sessionToken &&
+          data.sessionToken &&
+          user.sessionToken === data.sessionToken;
+
+        if (!isSameSession) {
+          client.emit('error', {
+            message: `The nickname "${cleanNick}" is already in use by another session in this room. Please choose another nickname.`,
+          });
+          return {
+            success: false,
+            message: `Nickname "${cleanNick}" is already taken in this room`,
+          };
+        }
       }
     }
 
@@ -705,11 +715,6 @@ export class ChatGateway
       }
     }
 
-    const existingSockets = this.findSocketsInRoom(
-      cleanPass,
-      cleanNick,
-      client.id,
-    );
     if (existingSockets.length > 0) {
       for (const existing of existingSockets) {
         const oldSocket =
