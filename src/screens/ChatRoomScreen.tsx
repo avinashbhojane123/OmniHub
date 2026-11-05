@@ -209,6 +209,7 @@ export const ChatRoomScreen: React.FC = () => {
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [directTarget, setDirectTarget] = useState<string | null>(null);
   const [disappearingSecs, setDisappearingSecs] = useState<number | undefined>(undefined);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // 6. Scroll & Unread Badge State
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
@@ -1161,6 +1162,8 @@ export const ChatRoomScreen: React.FC = () => {
   // Memoized Item Renderer using ChatMessageBubble with debounced search query
   const renderMessageItem = useCallback(({ item, index }: { item: ChatMessage; index: number }) => {
     const prevItem = roomState.messages[index - 1];
+    const nextItem = roomState.messages[index + 1];
+
     const isDifferentDay =
       index === 0 ||
       Boolean(
@@ -1169,11 +1172,27 @@ export const ChatRoomScreen: React.FC = () => {
         new Date(item.createdAt).toDateString() !== new Date(prevItem.createdAt).toDateString()
       );
 
+    const isSameSenderAsPrev =
+      Boolean(prevItem) &&
+      !isDifferentDay &&
+      (prevItem?.nickname || '').trim().toLowerCase() === (item.nickname || '').trim().toLowerCase();
+
+    const isSameSenderAsNext =
+      Boolean(nextItem) &&
+      (nextItem?.nickname || '').trim().toLowerCase() === (item.nickname || '').trim().toLowerCase() &&
+      Boolean(
+        nextItem?.createdAt &&
+        item?.createdAt &&
+        new Date(nextItem.createdAt).toDateString() === new Date(item.createdAt).toDateString()
+      );
+
     return (
       <ChatMessageBubble
         item={item}
         index={index}
         isDifferentDay={isDifferentDay}
+        isSameSenderAsPrev={isSameSenderAsPrev}
+        isSameSenderAsNext={isSameSenderAsNext}
         currentNickname={chatSocketService.nickname}
         onlineCount={roomState.users.length}
         isSearching={searchState.isSearching}
@@ -1304,30 +1323,42 @@ export const ChatRoomScreen: React.FC = () => {
               >
                 <Text style={styles.headerBackText}>‹</Text>
               </TouchableOpacity>
-              <View>
-                <Text style={styles.roomNameText} numberOfLines={1}>
-                  #{chatSocketService.passcode || passcode || 'Room'}
-                </Text>
-                <View style={styles.latencyRow}>
-                  <View
-                    style={[
-                      styles.onlineDot,
-                      roomState.connectionStatus === 'connecting'
-                        ? styles.dotConnecting
-                        : roomState.connectionStatus === 'disconnected'
-                        ? styles.dotDisconnected
-                        : styles.dotConnected,
-                    ]}
-                  />
-                  <Text style={styles.latencyText}>
-                    {roomState.connectionStatus === 'connected'
-                      ? `${roomState.users.length} online • ${roomState.latency}ms`
-                      : roomState.connectionStatus === 'connecting'
-                      ? 'Reconnecting...'
-                      : 'Offline'}
-                  </Text>
+
+              <TouchableOpacity
+                style={styles.headerInfoTouch}
+                activeOpacity={0.75}
+                onPress={() => setModalVisible('roster', true)}
+              >
+                {/* Room Avatar */}
+                <View style={styles.headerRoomAvatar}>
+                  <Text style={styles.headerRoomAvatarText}>#</Text>
                 </View>
-              </View>
+
+                <View style={styles.headerTitleCol}>
+                  <Text style={styles.roomNameText} numberOfLines={1}>
+                    {chatSocketService.passcode || passcode || 'Room'}
+                  </Text>
+                  <View style={styles.latencyRow}>
+                    <View
+                      style={[
+                        styles.onlineDot,
+                        roomState.connectionStatus === 'connecting'
+                          ? styles.dotConnecting
+                          : roomState.connectionStatus === 'disconnected'
+                          ? styles.dotDisconnected
+                          : styles.dotConnected,
+                      ]}
+                    />
+                    <Text style={styles.latencyText} numberOfLines={1}>
+                      {roomState.connectionStatus === 'connected'
+                        ? `${roomState.users.length} members • ${roomState.latency}ms`
+                        : roomState.connectionStatus === 'connecting'
+                        ? 'Connecting...'
+                        : 'Offline'}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
             </View>
 
             {/* Right Col: Quick action buttons */}
@@ -1848,6 +1879,24 @@ export const ChatRoomScreen: React.FC = () => {
               </View>
             )}
 
+            {/* Quick Emoji Bar */}
+            {showEmojiPicker && (
+              <View style={styles.quickEmojiBar}>
+                {['😀', '😂', '😍', '❤️', '🔥', '👍', '🙏', '🎉', '😮', '😢', '💯', '✨', '⚡'].map((em) => (
+                  <TouchableOpacity
+                    key={em}
+                    style={styles.quickEmojiItem}
+                    onPress={() => {
+                      setInputText((prev) => prev + em);
+                    }}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  >
+                    <Text style={styles.quickEmojiText}>{em}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
             {/* Bottom Composer Container */}
             <View
               style={[
@@ -1856,7 +1905,7 @@ export const ChatRoomScreen: React.FC = () => {
                   paddingBottom:
                     isKeyboardVisible && Platform.OS === 'android'
                       ? 8
-                      : Math.max(insets.bottom, 12),
+                      : Math.max(insets.bottom, 10),
                 },
               ]}
             >
@@ -1865,42 +1914,83 @@ export const ChatRoomScreen: React.FC = () => {
                 style={styles.attachBtn}
                 onPress={() => {
                   Keyboard.dismiss();
+                  setShowEmojiPicker(false);
                   setModalVisible('attach', !modals.attach);
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Add attachment"
               >
                 <Text style={styles.attachBtnIcon}>+</Text>
               </TouchableOpacity>
 
-              {/* Text Input */}
-              <TextInput
-                ref={composerInputRef}
-                style={styles.composerInput}
-                placeholder={
-                  editingMessage
-                    ? 'Edit your message...'
-                    : directTarget
-                    ? `🔒 Whisper to @${directTarget}...`
-                    : 'Message...'
-                }
-                placeholderTextColor="#64748B"
-                value={inputText}
-                onChangeText={handleTextChange}
-                multiline
-                maxLength={2000}
-              />
+              {/* Input Capsule with embedded Emoji & Camera button */}
+              <View style={styles.composerInputCapsule}>
+                <TouchableOpacity
+                  style={styles.emojiToggleBtn}
+                  onPress={() => setShowEmojiPicker((v) => !v)}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Toggle emoji bar"
+                >
+                  <Text style={styles.emojiToggleIcon}>{showEmojiPicker ? '⌨️' : '😀'}</Text>
+                </TouchableOpacity>
 
+                <TextInput
+                  ref={composerInputRef}
+                  style={styles.composerInput}
+                  placeholder={
+                    editingMessage
+                      ? 'Edit your message...'
+                      : directTarget
+                      ? `🔒 Whisper to @${directTarget}...`
+                      : 'Message...'
+                  }
+                  placeholderTextColor="#8696A0"
+                  value={inputText}
+                  onChangeText={handleTextChange}
+                  multiline
+                  maxLength={2000}
+                />
 
-              {/* Send Button */}
-              <TouchableOpacity
-                style={[
-                  styles.sendBtn,
-                  { opacity: inputText.trim() ? 1 : 0.4 },
-                ]}
-                onPress={handleSendMessage}
-                disabled={!inputText.trim()}
-              >
-                <Text style={styles.sendBtnIcon}>{editingMessage ? '✓' : '➤'}</Text>
-              </TouchableOpacity>
+                {!inputText.trim() && (
+                  <TouchableOpacity
+                    style={styles.cameraInlineBtn}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setUploadModal({ visible: true, tab: 'file' });
+                    }}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Send photo"
+                  >
+                    <Text style={styles.cameraInlineIcon}>📷</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Dynamic Action Button: Send or Voice Recorder */}
+              {inputText.trim() || editingMessage ? (
+                <TouchableOpacity
+                  style={[styles.sendBtn, styles.sendBtnActive]}
+                  onPress={handleSendMessage}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send message"
+                >
+                  <Text style={styles.sendBtnIcon}>{editingMessage ? '✓' : '➤'}</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.sendBtn, styles.micBtn]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setUploadModal({ visible: true, tab: 'voice' });
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Record voice note"
+                >
+                  <Text style={styles.micBtnIcon}>🎙️</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </KeyboardAvoidingView>
 

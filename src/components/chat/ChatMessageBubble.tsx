@@ -271,6 +271,8 @@ export interface ChatMessageBubbleProps {
   item: ChatMessage;
   index: number;
   isDifferentDay: boolean;
+  isSameSenderAsPrev?: boolean;
+  isSameSenderAsNext?: boolean;
   currentNickname: string;
   onlineCount: number;
   isSearching: boolean;
@@ -287,6 +289,27 @@ export interface ChatMessageBubbleProps {
   onRetryPendingMessage: (msg: ChatMessage) => void;
   isHighlighted?: boolean;
 }
+
+const NICK_PALETTE = [
+  '#25D366', // WhatsApp Green
+  '#38BDF8', // Sky Cyan
+  '#F472B6', // Rose Pink
+  '#FBBF24', // Amber
+  '#A78BFA', // Violet
+  '#FB923C', // Coral Orange
+  '#34D399', // Emerald
+  '#60A5FA', // Dodger Blue
+  '#E879F9', // Orchid
+];
+
+export const getMemberNicknameColor = (nick?: string | null): string => {
+  if (!nick) return '#25D366';
+  let hash = 0;
+  for (let i = 0; i < nick.length; i++) {
+    hash = nick.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return NICK_PALETTE[Math.abs(hash) % NICK_PALETTE.length];
+};
 
 const renderWithSearchHighlight = (
   plainText: string | undefined | null,
@@ -510,7 +533,10 @@ export const TypingIndicatorBubble: React.FC<{ typingUsers: string[] }> = React.
 
 const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
   item,
+  index,
   isDifferentDay,
+  isSameSenderAsPrev = false,
+  isSameSenderAsNext = false,
   currentNickname,
   onlineCount,
   isSearching,
@@ -530,15 +556,114 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
   const isMe = (item.nickname || '').trim().toLowerCase() === (currentNickname || '').trim().toLowerCase();
   const isDirectWhisper = Boolean(item.isDirect || item.targetNickname);
   const hasReactions = Boolean(item.reactions && Object.keys(item.reactions).length > 0);
+  const memberColor = getMemberNicknameColor(item.nickname);
+
+  // Grouping dynamics
+  const isLastInGroup = !isSameSenderAsNext;
+
+  // Short single-line text messages format with inline timestamp
+  const isSimpleText =
+    !item.fileUrl &&
+    !item.pollData &&
+    !item.locationData &&
+    !item.replyTo &&
+    !item.isVoiceNote;
+  const isShortText =
+    isSimpleText &&
+    Boolean(item.message) &&
+    item.message.length <= 32 &&
+    !item.message.includes('\n');
+
+  const renderMetaContent = () => (
+    <>
+      {item.expiresAt && <ExpiringCountdownBadge expiresAt={item.expiresAt} />}
+      {item.isWithoutSound && <Text style={styles.silentIcon}>🔕</Text>}
+      {item.isEdited && <Text style={styles.editedTag}>edited</Text>}
+      <Text style={styles.timeText}>{formatSafeTime(item.createdAt)}</Text>
+      {isMe && (
+        typeof item.id === 'string' && item.id.startsWith('offline_') ? (
+          <TouchableOpacity
+            onPress={() => onRetryPendingMessage(item)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.pendingTick}>🕒</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              const readers = (item.readBy || []).filter(
+                (r) => (r || '').trim().toLowerCase() !== (currentNickname || '').trim().toLowerCase()
+              );
+              if (readers.length > 0) {
+                Alert.alert(
+                  'Read Receipts',
+                  `Read by:\n\n${readers.map((r) => `• @${r}`).join('\n')}`
+                );
+              } else if (onlineCount > 1) {
+                Alert.alert('Message Status', 'Delivered to room participants.');
+              } else {
+                Alert.alert('Message Status', 'Sent to server.');
+              }
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text
+              style={[
+                styles.readTicks,
+                onlineCount > 1 && styles.readTicksDelivered,
+                Boolean(
+                  item.readBy &&
+                  item.readBy.some(
+                    (r) => (r || '').trim().toLowerCase() !== (currentNickname || '').trim().toLowerCase()
+                  )
+                ) && { color: '#53BDEB' },
+              ]}
+            >
+              {onlineCount > 1 ? '✓✓' : '✓'}
+            </Text>
+          </TouchableOpacity>
+        )
+      )}
+    </>
+  );
 
   return (
     <View key={item.id}>
       {isDifferentDay && item.createdAt && renderDateSeparator(item.createdAt)}
-      <View style={[styles.messageRow, isMe ? styles.messageRowMe : styles.messageRowOther]}>
+      <View
+        style={[
+          styles.messageRow,
+          isMe ? styles.messageRowMe : styles.messageRowOther,
+          { marginTop: isSameSenderAsPrev ? 1.5 : 7 },
+        ]}
+      >
+        {/* Left Avatar for other members in group */}
+        {!isMe && (
+          <View style={styles.avatarGutter}>
+            {isLastInGroup ? (
+              <TouchableOpacity
+                style={[styles.memberAvatar, { backgroundColor: memberColor }]}
+                activeOpacity={0.75}
+                onPress={() => onDirectMessage(item.nickname)}
+              >
+                <Text style={styles.memberAvatarText}>
+                  {(item.nickname || '?').charAt(0).toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.memberAvatarSpacer} />
+            )}
+          </View>
+        )}
+
         <TouchableOpacity
           style={[
             styles.bubble,
             isMe ? styles.bubbleMe : styles.bubbleOther,
+            isMe
+              ? (isLastInGroup ? styles.bubbleMeTail : styles.bubbleMeGrouped)
+              : (isLastInGroup ? styles.bubbleOtherTail : styles.bubbleOtherGrouped),
             isDirectWhisper && styles.bubbleWhisper,
             isHighlighted && styles.bubbleHighlighted,
           ]}
@@ -546,7 +671,7 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
           activeOpacity={0.92}
         >
           {/* Sender Nickname with Quick Whisper/Call Option for others, and Whisper indication for sender */}
-          {!isMe ? (
+          {!isMe && !isSameSenderAsPrev ? (
             <TouchableOpacity
               style={styles.senderHeader}
               activeOpacity={0.7}
@@ -559,14 +684,14 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
                 ]);
               }}
             >
-              <Text style={styles.senderNickname}>
+              <Text style={[styles.senderNickname, { color: memberColor }]}>
                 @{renderWithSearchHighlight(item.nickname, `nick_${item.id}`, isSearching, searchQuery)}
               </Text>
               {isDirectWhisper && (
                 <Text style={styles.whisperBadge}>🔒 Private Whisper</Text>
               )}
             </TouchableOpacity>
-          ) : isDirectWhisper ? (
+          ) : isMe && isDirectWhisper ? (
             <View style={styles.senderHeader}>
               <Text style={styles.whisperBadgeMe}>
                 🔒 Whispered to @{renderWithSearchHighlight(item.targetNickname || 'Member', `target_${item.id}`, isSearching, searchQuery)}
@@ -716,71 +841,25 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
                 </Text>
               </View>
             );
-          })() : (
-            /* Regular Message Text with Clickable Links */
-            renderMessageTextWithLinks(item.message, item.isDeleted, isSearching, searchQuery)
+          })() : isShortText ? (
+            /* Short Text with Inline Timestamp */
+            <View style={styles.inlineMessageRow}>
+              <View style={{ flexShrink: 1 }}>
+                {renderMessageTextWithLinks(item.message, item.isDeleted, isSearching, searchQuery)}
+              </View>
+              <View style={styles.inlineMetaBox}>
+                {renderMetaContent()}
+              </View>
+            </View>
+          ) : (
+            /* Multi-line or complex message with bottom meta */
+            <>
+              {renderMessageTextWithLinks(item.message, item.isDeleted, isSearching, searchQuery)}
+              <View style={styles.metaRow}>
+                {renderMetaContent()}
+              </View>
+            </>
           )}
-
-          {/* Message Meta: Disappearing icon with countdown, edited tag, timestamp, read ticks */}
-          <View style={styles.metaRow}>
-            {item.expiresAt && (
-              <ExpiringCountdownBadge expiresAt={item.expiresAt} />
-            )}
-            {item.isWithoutSound && (
-              <Text style={styles.silentIcon}>🔕</Text>
-            )}
-            {item.isEdited && (
-              <Text style={styles.editedTag}>edited</Text>
-            )}
-            <Text style={styles.timeText}>
-              {formatSafeTime(item.createdAt)}
-            </Text>
-            {isMe && (
-              typeof item.id === 'string' && item.id.startsWith('offline_') ? (
-                <TouchableOpacity
-                  onPress={() => onRetryPendingMessage(item)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={styles.pendingTick}>🕒 Sending... (Tap to retry)</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    const readers = (item.readBy || []).filter(
-                      (r) => (r || '').trim().toLowerCase() !== (currentNickname || '').trim().toLowerCase()
-                    );
-                    if (readers.length > 0) {
-                      Alert.alert(
-                        'Read Receipts',
-                        `Read by:\n\n${readers.map((r) => `• @${r}`).join('\n')}`
-                      );
-                    } else if (onlineCount > 1) {
-                      Alert.alert('Message Status', 'Delivered to room participants (Unread).');
-                    } else {
-                      Alert.alert('Message Status', 'Sent to server (Waiting for participants).');
-                    }
-                  }}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text
-                    style={[
-                      styles.readTicks,
-                      onlineCount > 1 && styles.readTicksDelivered,
-                      Boolean(
-                        item.readBy &&
-                        item.readBy.some(
-                          (r) => (r || '').trim().toLowerCase() !== (currentNickname || '').trim().toLowerCase()
-                        )
-                      ) && { color: '#38BDF8' },
-                    ]}
-                  >
-                    {onlineCount > 1 ? '✓✓' : '✓'}
-                  </Text>
-                </TouchableOpacity>
-              )
-            )}
-          </View>
 
           {/* Reactions Pill Display with Tap/Long-Press Author Inspector */}
           {hasReactions && item.reactions && (
@@ -836,6 +915,8 @@ export const areBubblePropsEqual = (
   if (prevProps.item !== nextProps.item) return false;
   if (prevProps.currentNickname !== nextProps.currentNickname) return false;
   if (prevProps.isDifferentDay !== nextProps.isDifferentDay) return false;
+  if (prevProps.isSameSenderAsPrev !== nextProps.isSameSenderAsPrev) return false;
+  if (prevProps.isSameSenderAsNext !== nextProps.isSameSenderAsNext) return false;
   if (prevProps.isPlayingVoice !== nextProps.isPlayingVoice) return false;
   if (prevProps.isSearching !== nextProps.isSearching) return false;
   if (prevProps.isSearching && prevProps.searchQuery !== nextProps.searchQuery) return false;
