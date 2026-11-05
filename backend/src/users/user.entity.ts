@@ -36,7 +36,9 @@ export class User {
   isOnline!: boolean;
 
   @Column({
-    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'datetime' : 'timestamptz') as any,
+    type: (process.env.DB_TYPE === 'better-sqlite3'
+      ? 'datetime'
+      : 'timestamptz') as any,
     nullable: true,
   })
   lastSeen!: Date | null;
@@ -77,7 +79,7 @@ export class User {
     length: 100,
     nullable: true,
   })
-  browser!: string | null;
+  appVersion!: string | null;
 
   @Column({
     type: 'varchar',
@@ -129,7 +131,9 @@ export class User {
   isBanned!: boolean;
 
   @Column({
-    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'datetime' : 'timestamptz') as any,
+    type: (process.env.DB_TYPE === 'better-sqlite3'
+      ? 'datetime'
+      : 'timestamptz') as any,
     nullable: true,
   })
   bannedAt!: Date | null;
@@ -147,7 +151,9 @@ export class User {
   isCreator!: boolean;
 
   @Column({
-    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'datetime' : 'timestamptz') as any,
+    type: (process.env.DB_TYPE === 'better-sqlite3'
+      ? 'datetime'
+      : 'timestamptz') as any,
     nullable: true,
   })
   mutedUntil!: Date | null;

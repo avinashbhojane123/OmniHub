@@ -238,16 +238,12 @@ export const CallOverlayModal: React.FC<CallOverlayModalProps> = ({
   const webViewRef = useRef<any>(null);
   const pendingSignalsRef = useRef<any[]>([]);
 
-  if (!call || call.state === 'idle' || call.state === 'ended') {
-    return null;
-  }
+  const isIncoming = call?.state === 'incoming';
+  const isCalling = call?.state === 'calling';
+  const isActive = call?.state === 'active';
 
-  const isIncoming = call.state === 'incoming';
-  const isCalling = call.state === 'calling';
-  const isActive = call.state === 'active';
-
-  const isCaller = call.callerNickname?.trim().toLowerCase() === chatSocketService.nickname.trim().toLowerCase();
-  const targetSocketId = isCaller ? (call.calleeSocketId || '') : (call.callerSocketId || '');
+  const isCaller = call?.callerNickname?.trim().toLowerCase() === chatSocketService.nickname.trim().toLowerCase();
+  const targetSocketId = isCaller ? (call?.calleeSocketId || '') : (call?.callerSocketId || '');
 
   useEffect(() => {
     setIsBridgeReady(false);
@@ -360,6 +356,10 @@ export const CallOverlayModal: React.FC<CallOverlayModalProps> = ({
       return () => sub.remove();
     }
   }, [isMinimized, isActive, isCalling, isIncoming, onToggleMinimize, onEndCall]);
+
+  if (!call || call.state === 'idle' || call.state === 'ended') {
+    return null;
+  }
 
   return (
     <View

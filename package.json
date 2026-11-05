@@ -14,7 +14,8 @@
     "ota:serve": "node scripts/serve-apk.js",
     "serve": "node scripts/serve-apk.js",
     "deploy": "node scripts/deploy.js",
-    "deploy:wifi": "node scripts/deploy.js"
+    "deploy:wifi": "node scripts/deploy.js",
+    "security:audit": "node backend/scripts/security-audit.js"
   },
   "dependencies": {
     "@notifee/react-native": "^9.1.8",

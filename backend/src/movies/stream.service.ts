@@ -1,8 +1,14 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Request, Response } from 'express';
 import * as fs from 'fs';
-import { statSync, createReadStream, readdirSync, existsSync, mkdirSync } from 'fs';
-import { join, extname, basename } from 'path';
+import {
+  statSync,
+  createReadStream,
+  readdirSync,
+  existsSync,
+  mkdirSync,
+} from 'fs';
+import { join, extname, basename, isAbsolute } from 'path';
 
 export interface StreamableMedia {
   id: string;
@@ -96,7 +102,10 @@ export class StreamService {
   private readonly videosDir: string;
 
   constructor() {
-    this.videosDir = join(process.cwd(), 'videos');
+    const customDir = process.env.VIDEOS_DIR || 'videos';
+    this.videosDir = isAbsolute(customDir)
+      ? customDir
+      : join(process.cwd(), customDir);
     if (!existsSync(this.videosDir)) {
       mkdirSync(this.videosDir, { recursive: true });
     }
@@ -104,6 +113,18 @@ export class StreamService {
 
   getVideosDirectory(): string {
     return this.videosDir;
+  }
+
+  public getAllowedVideoExtensions(): string[] {
+    const raw = process.env.ALLOWED_VIDEO_EXTENSIONS;
+    if (raw) {
+      return raw
+        .split(',')
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean)
+        .map((e) => (e.startsWith('.') ? e : `.${e}`));
+    }
+    return ['.mp4', '.mkv', '.webm', '.mov', '.avi'];
   }
 
   /**
@@ -115,9 +136,10 @@ export class StreamService {
     try {
       if (existsSync(this.videosDir)) {
         const files = readdirSync(this.videosDir);
+        const allowedExts = this.getAllowedVideoExtensions();
         for (const file of files) {
           const ext = extname(file).toLowerCase();
-          if (['.mp4', '.mkv', '.webm', '.mov'].includes(ext)) {
+          if (allowedExts.includes(ext)) {
             const filePath = join(this.videosDir, file);
             const stat = statSync(filePath);
             const base = basename(file, ext);
@@ -131,10 +153,16 @@ export class StreamService {
             localVideos.push({
               id: `local-${encodeURIComponent(file)}`,
               title: cleanTitle || file,
-              type: file.toLowerCase().includes('s01') || file.toLowerCase().includes('e01') ? 'series' : 'movie',
+              type:
+                file.toLowerCase().includes('s01') ||
+                file.toLowerCase().includes('e01')
+                  ? 'series'
+                  : 'movie',
               filename: file,
               sourceType: 'local',
-              quality: file.toLowerCase().includes('4k') ? '4K Ultra HD' : '1080p HD',
+              quality: file.toLowerCase().includes('4k')
+                ? '4K Ultra HD'
+                : '1080p HD',
               sizeBytes: stat.size,
               overview: `Local video stream from server storage (${(stat.size / (1024 * 1024)).toFixed(1)} MB). Full seek and scrub support.`,
               posterUrl: '',
@@ -149,18 +177,17 @@ export class StreamService {
       this.logger.warn(`Failed to scan local videos directory: ${err.message}`);
     }
 
-    return [...localVideos, ...BUILTIN_STREAM_CATALOG];
+    const enableBuiltin = process.env.ENABLE_BUILTIN_STREAMS !== 'false';
+    return enableBuiltin
+      ? [...localVideos, ...BUILTIN_STREAM_CATALOG]
+      : localVideos;
   }
 
   /**
    * Streams a video file using HTTP 206 Partial Content range requests.
    * Enables instant scrubbing, fast seeking, and low memory footprint.
    */
-  async streamMedia(
-    id: string,
-    req: Request,
-    res: Response,
-  ): Promise<void> {
+  async streamMedia(id: string, req: Request, res: Response): Promise<void> {
     // 1. Check if it's a local video file
     if (id.startsWith('local-')) {
       const rawFilename = decodeURIComponent(id.replace('local-', ''));
@@ -169,7 +196,9 @@ export class StreamService {
       const filePath = join(this.videosDir, safeFilename);
 
       if (!existsSync(filePath)) {
-        throw new NotFoundException(`Video file "${safeFilename}" not found on server`);
+        throw new NotFoundException(
+          `Video file "${safeFilename}" not found on server`,
+        );
       }
 
       const stat = statSync(filePath);
@@ -177,7 +206,12 @@ export class StreamService {
       const range = req.headers.range;
 
       const ext = extname(filePath).toLowerCase();
-      const contentType = ext === '.webm' ? 'video/webm' : ext === '.mkv' ? 'video/x-matroska' : 'video/mp4';
+      const contentType =
+        ext === '.webm'
+          ? 'video/webm'
+          : ext === '.mkv'
+            ? 'video/x-matroska'
+            : 'video/mp4';
 
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-');
@@ -201,7 +235,6 @@ export class StreamService {
           'Accept-Ranges': 'bytes',
           'Content-Length': chunkSize,
           'Content-Type': contentType,
-          'Access-Control-Allow-Origin': '*',
         });
 
         stream.pipe(res);
@@ -210,7 +243,6 @@ export class StreamService {
           'Content-Length': fileSize,
           'Content-Type': contentType,
           'Accept-Ranges': 'bytes',
-          'Access-Control-Allow-Origin': '*',
         });
 
         const stream = createReadStream(filePath);
@@ -233,7 +265,7 @@ export class StreamService {
       const targetUrl = catalogItem.sourceUrl;
       const headers: Record<string, string> = {};
       if (req.headers.range) {
-        headers['range'] = req.headers.range as string;
+        headers['range'] = req.headers.range;
       }
 
       const abortController = new AbortController();
@@ -300,7 +332,9 @@ export class StreamService {
       pump();
     } catch (err: any) {
       if (!res.writableEnded) {
-        this.logger.error(`Error streaming remote media "${id}": ${err.message}`);
+        this.logger.error(
+          `Error streaming remote media "${id}": ${err.message}`,
+        );
         res.status(500).json({ error: 'Failed to stream requested media' });
       }
     }

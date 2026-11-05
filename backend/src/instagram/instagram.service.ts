@@ -34,7 +34,6 @@ export interface InstagramPreviewResult {
     musicArtist?: string;
     audioStartTimeMs?: number;
   };
-  embedHtml?: string;
   originalUrl: string;
   cleanUrl: string;
 }
@@ -44,19 +43,96 @@ export class InstagramService {
   private readonly logger = new Logger(InstagramService.name);
   private customSessionId: string | null = null;
 
+  public getPreviewCacheMax(): number {
+    const raw =
+      this.configService.get<string>('INSTAGRAM_CACHE_MAX') ||
+      process.env.INSTAGRAM_CACHE_MAX;
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    return !isNaN(parsed) && parsed > 0 ? parsed : 500;
+  }
+
+  public getPreviewCacheTtlMs(): number {
+    const raw =
+      this.configService.get<string>('INSTAGRAM_CACHE_TTL_MS') ||
+      process.env.INSTAGRAM_CACHE_TTL_MS;
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    return !isNaN(parsed) && parsed > 0 ? parsed : 60 * 60 * 1000;
+  }
+
+  public getRequestTimeoutMs(defaultMs = 7000): number {
+    const raw =
+      this.configService.get<string>('INSTAGRAM_REQUEST_TIMEOUT_MS') ||
+      process.env.INSTAGRAM_REQUEST_TIMEOUT_MS;
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    return !isNaN(parsed) && parsed > 0 ? parsed : defaultMs;
+  }
+
+  public getMediaCacheMaxAge(): number {
+    const raw =
+      this.configService.get<string>('INSTAGRAM_MEDIA_CACHE_MAX_AGE') ||
+      process.env.INSTAGRAM_MEDIA_CACHE_MAX_AGE;
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    return !isNaN(parsed) && parsed >= 0 ? parsed : 86400;
+  }
+
+  public getUserAgent(): string {
+    return (
+      this.configService.get<string>('INSTAGRAM_USER_AGENT') ||
+      process.env.INSTAGRAM_USER_AGENT ||
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro Build/UD1A.230803.041) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36'
+    );
+  }
+
+  public getMobileUserAgent(): string {
+    return (
+      this.configService.get<string>('INSTAGRAM_MOBILE_USER_AGENT') ||
+      process.env.INSTAGRAM_MOBILE_USER_AGENT ||
+      'Instagram 300.0.0.29.110 Android (33/13; 420dpi; 1080x2400; samsung; SM-G998B; p3s; exynos2100; en_US; 523671234)'
+    );
+  }
+
+  public getAppId(): string {
+    return (
+      this.configService.get<string>('INSTAGRAM_APP_ID') ||
+      process.env.INSTAGRAM_APP_ID ||
+      '936619743392459'
+    );
+  }
+
+  public getAsbdId(): string {
+    return (
+      this.configService.get<string>('INSTAGRAM_ASBD_ID') ||
+      process.env.INSTAGRAM_ASBD_ID ||
+      '129477'
+    );
+  }
+
+  public getOembedUrl(): string {
+    return (
+      this.configService.get<string>('INSTAGRAM_OEMBED_URL') ||
+      process.env.INSTAGRAM_OEMBED_URL ||
+      'https://noembed.com/embed'
+    );
+  }
+
+  private readonly previewCache = new Map<
+    string,
+    { result: InstagramPreviewResult; expiresAt: number }
+  >();
+
   constructor(private readonly configService: ConfigService) {}
 
   public getSessionId(): string {
-    return (
+    const raw =
       this.customSessionId ||
       this.configService.get<string>('INSTAGRAM_SESSION_ID') ||
       process.env.INSTAGRAM_SESSION_ID ||
-      ''
-    ).trim();
+      '';
+    return raw.replace(/[\r\n\t]/g, '').trim();
   }
 
   public setCustomSessionId(sessionId: string): void {
-    this.customSessionId = (sessionId || '').trim();
+    this.customSessionId = (sessionId || '').replace(/[\r\n\t]/g, '').trim();
     this.logger.log(
       `Updated runtime Instagram session key: ${this.customSessionId ? 'configured' : 'cleared'}`,
     );
@@ -67,24 +143,35 @@ export class InstagramService {
   }
 
   /**
-   * Parse Instagram URL and extract shortcode and clean URL
+   * Parse Instagram URL and extract shortcode, clean URL, and content type.
+   * Supports standard web, mobile (m.instagram.com), shortener (instagr.am), and share URLs.
    */
   public parseUrl(
     inputUrl: string,
   ): { shortcode: string; cleanUrl: string; type: string } | null {
     if (!inputUrl || typeof inputUrl !== 'string') return null;
 
+    const trimmed = inputUrl.trim();
     const regex =
-      /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|instagr\.am)\/(?:(reel|reels|p|tv|share\/reel))\/([a-zA-Z0-9_-]+)/i;
-    const match = inputUrl.match(regex);
+      /(?:https?:\/\/)?(?:[a-zA-Z0-9-]+\.)?(?:instagram\.com|instagr\.am)\/(?:(reel|reels|p|tv|share\/reel))\/([a-zA-Z0-9_-]+)/i;
+    const match = trimmed.match(regex);
 
     if (match && match[2]) {
-      const type =
-        match[1] === 'reels' || match[1] === 'share/reel' ? 'reel' : match[1];
+      const rawType = match[1].toLowerCase();
       const shortcode = match[2];
+      const type =
+        rawType === 'reels' || rawType === 'share/reel' ? 'reel' : rawType;
+
+      let pathSegment = 'reel';
+      if (type === 'p') {
+        pathSegment = 'p';
+      } else if (type === 'tv') {
+        pathSegment = 'tv';
+      }
+
       return {
         shortcode,
-        cleanUrl: `https://www.instagram.com/reel/${shortcode}/`,
+        cleanUrl: `https://www.instagram.com/${pathSegment}/${shortcode}/`,
         type,
       };
     }
@@ -95,6 +182,7 @@ export class InstagramService {
    * Convert Instagram Base64 shortcode to numeric media ID
    */
   public shortcodeToMediaId(shortcode: string): string {
+    if (!shortcode || typeof shortcode !== 'string') return '0';
     const alphabet =
       'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
     let mediaId = BigInt(0);
@@ -108,17 +196,16 @@ export class InstagramService {
   }
 
   /**
-   * Build headers for Instagram requests with session key
+   * Build headers for Instagram requests with session key and anti-header-injection sanitation
    */
   private getInstagramHeaders(refererUrl?: string): Record<string, string> {
     const sessionId = this.getSessionId();
     const headers: Record<string, string> = {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'User-Agent': this.getUserAgent(),
       Accept: '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
-      'X-IG-App-ID': '936619743392459',
-      'X-ASBD-ID': '129477',
+      'X-IG-App-ID': this.getAppId(),
+      'X-ASBD-ID': this.getAsbdId(),
       'X-Requested-With': 'XMLHttpRequest',
       'Sec-Fetch-Dest': 'empty',
       'Sec-Fetch-Mode': 'cors',
@@ -140,6 +227,66 @@ export class InstagramService {
   }
 
   /**
+   * Cache helper with LRU eviction
+   */
+  private setPreviewCache(key: string, result: InstagramPreviewResult): void {
+    const maxEntries = this.getPreviewCacheMax();
+    const ttl = this.getPreviewCacheTtlMs();
+
+    if (this.previewCache.size >= maxEntries && !this.previewCache.has(key)) {
+      const oldestKey = this.previewCache.keys().next().value;
+      if (oldestKey) {
+        this.previewCache.delete(oldestKey);
+      }
+    }
+    this.previewCache.delete(key);
+    this.previewCache.set(key, {
+      result,
+      expiresAt: Date.now() + ttl,
+    });
+  }
+
+  /**
+   * Adjust proxy URLs in cached result to match the current request's baseUrlPrefix
+   */
+  private applyBaseUrlPrefix(
+    result: InstagramPreviewResult,
+    baseUrlPrefix?: string,
+  ): InstagramPreviewResult {
+    const prefix = baseUrlPrefix || '';
+    return {
+      ...result,
+      proxyVideoUrl: result.videoUrl
+        ? `${prefix}/api/instagram/proxy-media?url=${encodeURIComponent(result.videoUrl)}`
+        : undefined,
+      proxyThumbnailUrl: result.thumbnailUrl
+        ? `${prefix}/api/instagram/proxy-media?url=${encodeURIComponent(result.thumbnailUrl)}`
+        : undefined,
+      author: {
+        ...result.author,
+        proxyProfilePicUrl: result.author.profilePicUrl
+          ? `${prefix}/api/instagram/proxy-media?url=${encodeURIComponent(result.author.profilePicUrl)}`
+          : undefined,
+      },
+      audio: result.audio
+        ? {
+            ...result.audio,
+            proxyAudioUrl: result.audio.audioUrl
+              ? `${prefix}/api/instagram/proxy-media?url=${encodeURIComponent(result.audio.audioUrl)}`
+              : undefined,
+          }
+        : undefined,
+    };
+  }
+
+  /**
+   * Clear cache for testing or runtime reset
+   */
+  public clearCache(): void {
+    this.previewCache.clear();
+  }
+
+  /**
    * Main method to fetch Instagram Post or Reel Preview
    */
   public async getPreview(
@@ -152,6 +299,13 @@ export class InstagramService {
     }
 
     const { shortcode, cleanUrl } = parsed;
+
+    // Check in-memory LRU cache first
+    const cached = this.previewCache.get(shortcode);
+    if (cached && cached.expiresAt > Date.now()) {
+      return this.applyBaseUrlPrefix(cached.result, baseUrlPrefix);
+    }
+
     const mediaId = this.shortcodeToMediaId(shortcode);
 
     let result: InstagramPreviewResult | null = null;
@@ -164,6 +318,7 @@ export class InstagramService {
         baseUrlPrefix,
       );
       if (result && (result.videoUrl || result.thumbnailUrl)) {
+        this.setPreviewCache(shortcode, result);
         return result;
       }
     } catch (err: any) {
@@ -173,20 +328,23 @@ export class InstagramService {
     }
 
     // Strategy 2: Instagram Mobile / Media Info API
-    try {
-      result = await this.fetchViaMediaInfoApi(
-        mediaId,
-        shortcode,
-        cleanUrl,
-        baseUrlPrefix,
-      );
-      if (result && (result.videoUrl || result.thumbnailUrl)) {
-        return result;
+    if (mediaId !== '0') {
+      try {
+        result = await this.fetchViaMediaInfoApi(
+          mediaId,
+          shortcode,
+          cleanUrl,
+          baseUrlPrefix,
+        );
+        if (result && (result.videoUrl || result.thumbnailUrl)) {
+          this.setPreviewCache(shortcode, result);
+          return result;
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `Strategy 2 (Media info API) failed for ${shortcode}: ${err?.message || err}`,
+        );
       }
-    } catch (err: any) {
-      this.logger.debug(
-        `Strategy 2 (Media info API) failed for ${shortcode}: ${err?.message || err}`,
-      );
     }
 
     // Strategy 3: Instagram Web HTML OpenGraph & SSR Extraction
@@ -197,6 +355,7 @@ export class InstagramService {
         baseUrlPrefix,
       );
       if (result && (result.videoUrl || result.thumbnailUrl)) {
+        this.setPreviewCache(shortcode, result);
         return result;
       }
     } catch (err: any) {
@@ -209,6 +368,7 @@ export class InstagramService {
     try {
       result = await this.fetchViaOembed(cleanUrl, shortcode, baseUrlPrefix);
       if (result) {
+        this.setPreviewCache(shortcode, result);
         return result;
       }
     } catch (err: any) {
@@ -217,19 +377,21 @@ export class InstagramService {
       );
     }
 
-    // Final fallback: Basic preview object with embed url
-    return {
+    // Final fallback: Basic preview object with clean media URLs
+    const fallbackResult: InstagramPreviewResult = {
       success: true,
       shortcode,
-      mediaType: 'embed',
+      mediaType: 'video',
       isVideo: true,
       cleanUrl,
       originalUrl: url,
       author: {
         username: 'Instagram User',
       },
-      embedHtml: `<iframe src="https://www.instagram.com/p/${shortcode}/embed/" width="100%" height="480" frameborder="0" scrolling="no" allowtransparency="true"></iframe>`,
     };
+
+    this.setPreviewCache(shortcode, fallbackResult);
+    return fallbackResult;
   }
 
   /**
@@ -244,7 +406,10 @@ export class InstagramService {
     const headers = this.getInstagramHeaders(cleanUrl);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.getRequestTimeoutMs(7000),
+    );
 
     try {
       const response = await fetch(targetUrl, {
@@ -282,11 +447,13 @@ export class InstagramService {
   ): Promise<InstagramPreviewResult | null> {
     const targetUrl = `https://i.instagram.com/api/v1/media/${mediaId}/info/`;
     const headers = this.getInstagramHeaders(cleanUrl);
-    headers['User-Agent'] =
-      'Instagram 300.0.0.29.110 Android (33/13; 420dpi; 1080x2400; samsung; SM-G998B; p3s; exynos2100; en_US; 523671234)';
+    headers['User-Agent'] = this.getMobileUserAgent();
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.getRequestTimeoutMs(7000),
+    );
 
     try {
       const response = await fetch(targetUrl, {
@@ -313,6 +480,7 @@ export class InstagramService {
     }
   }
 
+
   /**
    * Strategy 3: HTML Scraper for OpenGraph and Embedded JSON
    */
@@ -321,11 +489,15 @@ export class InstagramService {
     cleanUrl: string,
     baseUrlPrefix?: string,
   ): Promise<InstagramPreviewResult | null> {
-    const targetUrl = `https://www.instagram.com/reel/${shortcode}/`;
+    const targetUrl =
+      cleanUrl || `https://www.instagram.com/reel/${shortcode}/`;
     const headers = this.getInstagramHeaders(cleanUrl);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.getRequestTimeoutMs(7000),
+    );
 
     try {
       const response = await fetch(targetUrl, {
@@ -389,11 +561,19 @@ export class InstagramService {
       let username = 'Instagram User';
       let fullName: string | undefined;
       if (title) {
-        const titleUserMatch =
-          title.match(/^([^:]+)\s+on Instagram/i) ||
-          title.match(/^@?([a-zA-Z0-9._]+)/);
-        if (titleUserMatch) {
-          username = titleUserMatch[1].trim();
+        const titleMatchWithHandle = title.match(
+          /^([^(@]+)\s*\(@([a-zA-Z0-9._]+)\)\s+on Instagram/i,
+        );
+        if (titleMatchWithHandle) {
+          fullName = titleMatchWithHandle[1].trim();
+          username = titleMatchWithHandle[2].trim();
+        } else {
+          const titleUserMatch =
+            title.match(/^([^:]+)\s+on Instagram/i) ||
+            title.match(/^@?([a-zA-Z0-9._]+)/);
+          if (titleUserMatch) {
+            username = titleUserMatch[1].trim();
+          }
         }
       }
 
@@ -458,15 +638,18 @@ export class InstagramService {
     shortcode: string,
     baseUrlPrefix?: string,
   ): Promise<InstagramPreviewResult | null> {
-    const oembedUrl = `https://noembed.com/embed?url=${encodeURIComponent(cleanUrl)}`;
+    const oembedBase = this.getOembedUrl();
+    const oembedUrl = `${oembedBase}?url=${encodeURIComponent(cleanUrl)}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.getRequestTimeoutMs(6000),
+    );
 
     try {
       const response = await fetch(oembedUrl, {
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': this.getUserAgent(),
         },
         signal: controller.signal,
       });
@@ -493,7 +676,6 @@ export class InstagramService {
         author: {
           username: data.author_name || 'Instagram User',
         },
-        embedHtml: data.html,
         originalUrl: cleanUrl,
         cleanUrl,
       };
@@ -513,11 +695,18 @@ export class InstagramService {
   ): InstagramPreviewResult {
     const prefix = baseUrlPrefix || '';
 
+    const firstCarousel = item.carousel_media?.[0];
+    const isCarousel =
+      (Array.isArray(item.carousel_media) && item.carousel_media.length > 0) ||
+      item.media_type === 8;
+
     const isVideo = Boolean(
       item.is_video ||
       item.media_type === 2 ||
       (item.video_versions && item.video_versions.length > 0) ||
-      item.video_url,
+      item.video_url ||
+      firstCarousel?.is_video ||
+      firstCarousel?.video_versions?.length > 0,
     );
 
     let videoUrl: string | undefined;
@@ -532,6 +721,17 @@ export class InstagramService {
       videoUrl = sortedVideos[0]?.url;
     } else if (item.video_url) {
       videoUrl = item.video_url;
+    } else if (
+      firstCarousel?.video_versions &&
+      Array.isArray(firstCarousel.video_versions) &&
+      firstCarousel.video_versions.length > 0
+    ) {
+      const sortedVideos = [...firstCarousel.video_versions].sort(
+        (a, b) => (b.width || 0) - (a.width || 0),
+      );
+      videoUrl = sortedVideos[0]?.url;
+    } else if (firstCarousel?.video_url) {
+      videoUrl = firstCarousel.video_url;
     }
 
     let thumbnailUrl: string | undefined;
@@ -547,6 +747,16 @@ export class InstagramService {
       thumbnailUrl = item.display_url;
     } else if (item.thumbnail_src) {
       thumbnailUrl = item.thumbnail_src;
+    } else if (
+      firstCarousel?.image_versions2?.candidates &&
+      Array.isArray(firstCarousel.image_versions2.candidates)
+    ) {
+      const sortedImages = [...firstCarousel.image_versions2.candidates].sort(
+        (a, b) => (b.width || 0) - (a.width || 0),
+      );
+      thumbnailUrl = sortedImages[0]?.url;
+    } else if (firstCarousel?.display_url) {
+      thumbnailUrl = firstCarousel.display_url;
     }
 
     let caption: string | undefined;
@@ -559,7 +769,7 @@ export class InstagramService {
     const user = item.user || item.owner || {};
     const username = user.username || 'Instagram User';
     const fullName = user.full_name;
-    const profilePicUrl = user.profile_pic_url;
+    const profilePicUrl = user.profile_pic_url_hd || user.profile_pic_url;
 
     const likeCount =
       item.like_count ??
@@ -642,7 +852,7 @@ export class InstagramService {
     return {
       success: true,
       shortcode,
-      mediaType: isVideo ? 'video' : 'image',
+      mediaType: isCarousel ? 'carousel' : isVideo ? 'video' : 'image',
       isVideo,
       videoUrl,
       thumbnailUrl,
@@ -682,19 +892,41 @@ export class InstagramService {
   }
 
   private decodeHtmlEntities(str: string): string {
+    if (!str || typeof str !== 'string') return '';
     return str
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
-      .replace(/\\u0026/g, '&');
+      .replace(/&apos;/g, "'")
+      .replace(/&#x27;/g, "'")
+      .replace(/&#x2F;/g, '/')
+      .replace(/&#x3D;/g, '=')
+      .replace(/&#x26;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\\u0026/g, '&')
+      .replace(/\\u003c/gi, '<')
+      .replace(/\\u003e/gi, '>')
+      .replace(/\\u0022/g, '"');
   }
 
   /**
-   * Proxy media with Range streaming and CORS headers
+   * Proxy media with Range streaming, CORS headers, SSRF domain validation, and redirect bounds
    */
-  public proxyMedia(mediaUrl: string, req: Request, res: Response): void {
+  public proxyMedia(
+    mediaUrl: string,
+    req: Request,
+    res: Response,
+    redirectCount = 0,
+  ): void {
+    if (redirectCount > 5) {
+      if (!res.headersSent) {
+        res.status(508).json({ error: 'Too many upstream redirects' });
+      }
+      return;
+    }
+
     if (!mediaUrl) {
       throw new BadRequestException('Media URL is required');
     }
@@ -715,17 +947,31 @@ export class InstagramService {
       hostname.endsWith('.cdninstagram.com') ||
       hostname.endsWith('.fbcdn.net') ||
       hostname.endsWith('.instagram.com') ||
+      hostname.endsWith('.fbsbx.com') ||
       hostname === 'cdninstagram.com' ||
       hostname === 'fbcdn.net' ||
-      hostname === 'instagram.com';
+      hostname === 'instagram.com' ||
+      hostname === 'fbsbx.com';
 
     if (!isAllowedHost) {
       throw new BadRequestException('Disallowed target domain for media proxy');
     }
 
+    // Handle CORS preflight directly
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Range, Content-Type, Accept',
+      );
+      res.setHeader('Access-Control-Max-Age', '86400');
+      res.status(204).end();
+      return;
+    }
+
     const headers: http.OutgoingHttpHeaders = {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'User-Agent': this.getUserAgent(),
       Referer: 'https://www.instagram.com/',
       Accept: '*/*',
     };
@@ -735,36 +981,58 @@ export class InstagramService {
     }
 
     const client = parsedUrl.protocol === 'https:' ? https : http;
+    const httpMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
+
+    let upstreamResRef: http.IncomingMessage | null = null;
 
     const request = client.request(
       parsedUrl,
       {
-        method: 'GET',
+        method: httpMethod,
         headers,
       },
       (upstreamRes) => {
+        upstreamResRef = upstreamRes;
         const statusCode = upstreamRes.statusCode || 200;
 
+        // Follow safe redirects with loop protection and relative URL resolution
         if (
           statusCode >= 300 &&
           statusCode < 400 &&
           upstreamRes.headers.location
         ) {
-          return this.proxyMedia(upstreamRes.headers.location, req, res);
+          try {
+            const redirectUrl = new URL(
+              upstreamRes.headers.location,
+              parsedUrl,
+            ).toString();
+            return this.proxyMedia(redirectUrl, req, res, redirectCount + 1);
+          } catch {
+            if (!res.headersSent) {
+              res.status(502).json({ error: 'Invalid redirect location' });
+            }
+            return;
+          }
         }
 
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-        res.setHeader(
-          'Access-Control-Allow-Headers',
-          'Range, Content-Type, Accept',
-        );
-        res.setHeader(
-          'Access-Control-Expose-Headers',
-          'Content-Range, Content-Length, Accept-Ranges',
-        );
+        // Attach error listener on upstream response stream to prevent unhandled process crashes
+        upstreamRes.on('error', (err) => {
+          this.logger.warn(`Upstream stream error: ${err.message}`);
+          request.destroy();
+          if (!res.headersSent) {
+            res
+              .status(502)
+              .json({ error: 'Error streaming media from upstream' });
+          } else {
+            res.destroy();
+          }
+        });
+
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader(
+          'Cache-Control',
+          `public, max-age=${this.getMediaCacheMaxAge()}`,
+        );
 
         if (upstreamRes.headers['content-type']) {
           res.setHeader('Content-Type', upstreamRes.headers['content-type']);
@@ -780,11 +1048,16 @@ export class InstagramService {
         }
 
         res.status(statusCode);
-        upstreamRes.pipe(res);
+
+        if (httpMethod === 'HEAD') {
+          res.end();
+        } else {
+          upstreamRes.pipe(res);
+        }
       },
     );
 
-    request.setTimeout(15000, () => {
+    request.setTimeout(this.getRequestTimeoutMs(15000), () => {
       request.destroy();
       if (!res.headersSent) {
         res.status(504).json({ error: 'Upstream media server timed out' });
@@ -793,10 +1066,26 @@ export class InstagramService {
 
     res.on('close', () => {
       request.destroy();
+      if (upstreamResRef && typeof upstreamResRef.destroy === 'function') {
+        upstreamResRef.destroy();
+      }
     });
 
-    request.on('error', (err) => {
-      this.logger.error(`Media proxy error: ${err.message}`);
+    request.on('error', (err: any) => {
+      const isClientAbort =
+        err.name === 'AbortError' ||
+        err.code === 'ECONNRESET' ||
+        err.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        err.message?.includes('socket hang up') ||
+        res.destroyed ||
+        res.writableEnded;
+
+      if (isClientAbort) {
+        this.logger.debug(`Media proxy connection closed: ${err.message}`);
+      } else {
+        this.logger.error(`Media proxy error: ${err.message}`);
+      }
+
       if (!res.headersSent) {
         res
           .status(502)

@@ -1,4 +1,4 @@
-import { BackupData, Task, Habit, HabitLog, KeepNote, CalendarEvent, Category } from '../../types';
+import { BackupData, Task, Habit, HabitLog, KeepNote, CalendarEvent, Category, RecurrenceRule, RecurrenceType } from '../../types';
 import { backupService, RestoreMode } from './BackupService';
 import { settingsRepository } from '../../database/repositories/SettingsRepository';
 import { SETTINGS_KEYS } from '../../constants/settingsKeys';
@@ -44,6 +44,9 @@ export const DEFAULT_GOOGLE_SHEET_WEBHOOK_URL =
 export class GoogleSheetsSyncService {
   private syncTimer: any = null;
   private deltaTimer: any = null;
+  private isFlushing = false;
+  private hasPendingFlush = false;
+  private isPushing = false;
 
   constructor() {
     syncEventBus.subscribeToChanges((mutation) => {
@@ -56,6 +59,64 @@ export class GoogleSheetsSyncService {
   }
 
   /**
+   * Checks whether the given URL is empty or matches an inactive placeholder demo URL.
+   */
+  isPlaceholderUrl(url?: string): boolean {
+    if (!url) return true;
+    const trimmed = url.trim();
+    return (
+      !trimmed ||
+      trimmed.includes('AKfycbwelZyo3EpfPDgbVb9b_7WWj7spsPp20DZs-4mxC_leoSta3B2VJiuxbgtEfsU50UTVUg') ||
+      trimmed.includes('AKfycbwWSp3Y47KKz4LSJTgGRfUkh0qwDNZnuqSWG2Ud7tBdKmJhBI_bMhh4Lidi9jE5tKzZ') ||
+      trimmed.includes('YOUR_DEPLOYMENT_ID') ||
+      trimmed.includes('YOUR_SCRIPT_ID')
+    );
+  }
+
+  /**
+   * Validates the Google Apps Script Webhook URL format and configuration status.
+   */
+  validateWebhookUrl(url?: string): { valid: boolean; error?: string } {
+    if (!url || !url.trim()) {
+      return {
+        valid: false,
+        error: 'Google Sheet Webhook URL is not configured. Please enter your Webhook URL in Settings.',
+      };
+    }
+    const trimmed = url.trim();
+    if (this.isPlaceholderUrl(trimmed)) {
+      return {
+        valid: false,
+        error:
+          'Webhook URL is currently set to an inactive placeholder.\n\nTo connect to your private Google Drive:\n1. In Settings, tap "📋 Copy Script Code"\n2. Open https://sheets.new in browser -> Extensions -> Apps Script\n3. Paste the code, Save, and click Deploy -> New deployment -> Web app\n4. Set "Who has access" to "Anyone" and copy the Web App URL\n5. Paste your Web App URL here and tap "Test Link"!',
+      };
+    }
+    if (trimmed.includes('docs.google.com/spreadsheets')) {
+      return {
+        valid: false,
+        error:
+          'You entered a Google Sheet document link instead of an Apps Script Web App URL.\n\nPlease follow the setup guide: Extensions -> Apps Script -> Deploy -> New deployment -> Web app, and copy the Web App URL that ends in /exec.',
+      };
+    }
+    if (!trimmed.startsWith('https://script.google.com/macros/s/')) {
+      return {
+        valid: false,
+        error:
+          'Invalid Webhook URL format. A valid Google Apps Script Web App URL must begin with "https://script.google.com/macros/s/".',
+      };
+    }
+    const trimmedBase = trimmed.split('?')[0];
+    if (trimmedBase.endsWith('/dev')) {
+      return {
+        valid: false,
+        error:
+          'You entered a "/dev" test URL instead of the production "/exec" Web App URL.\n\nPlease Deploy -> New deployment / Manage Deployments and copy the URL ending in /exec.',
+      };
+    }
+    return { valid: true };
+  }
+
+  /**
    * Cloud-First on Reinstall:
    * Automatically restores database on first app launch / reinstall if the local database is fresh
    * and the connected Google Sheet contains existing tasks, habits, or notes.
@@ -63,20 +124,25 @@ export class GoogleSheetsSyncService {
   async autoRestoreIfEmptyOnStartup(): Promise<boolean> {
     try {
       const url = await this.getWebhookUrl();
-      if (this.isPlaceholderUrl(url) || !url.startsWith('https://script.google.com/macros/s/')) {
+      const validation = this.validateWebhookUrl(url);
+      if (!validation.valid) {
         return false;
       }
 
       const db = await getDatabase();
-      const [tRes, hRes, nRes] = await Promise.all([
+      const [tRes, hRes, nRes, eRes, genNotesRes] = await Promise.all([
         db.execute('SELECT COUNT(*) as count FROM tasks'),
         db.execute('SELECT COUNT(*) as count FROM habits'),
         db.execute('SELECT COUNT(*) as count FROM keep_notes'),
+        db.execute('SELECT COUNT(*) as count FROM calendar_events'),
+        db.execute('SELECT COUNT(*) as count FROM notes'),
       ]);
       const count =
         Number(tRes.rows[0]?.count || 0) +
         Number(hRes.rows[0]?.count || 0) +
-        Number(nRes.rows[0]?.count || 0);
+        Number(nRes.rows[0]?.count || 0) +
+        Number(eRes.rows[0]?.count || 0) +
+        Number(genNotesRes.rows[0]?.count || 0);
 
       // If local database has records, local is populated. Flush any queued offline changes.
       if (count > 0) {
@@ -91,7 +157,6 @@ export class GoogleSheetsSyncService {
         console.log(`[GoogleSheetsSync] Cloud-First: Google Sheet contains ${statusRes.counts.total} items. Auto-restoring...`);
         const res = await this.pullFromGoogleSheet(url, 'replace');
         if (res.success) {
-          syncEventBus.notifyDataRestored();
           console.log('[GoogleSheetsSync] Auto-restore completed successfully:', res.details);
           return true;
         }
@@ -108,8 +173,9 @@ export class GoogleSheetsSyncService {
    */
   async fetchRemoteStatus(customUrl?: string, customSecret?: string): Promise<RemoteSheetStatus> {
     const url = (customUrl !== undefined ? customUrl : await this.getWebhookUrl()).trim();
-    if (!url || this.isPlaceholderUrl(url)) {
-      return { success: false, message: 'Google Sheet Webhook URL is not configured.' };
+    const validation = this.validateWebhookUrl(url);
+    if (!validation.valid) {
+      return { success: false, message: validation.error };
     }
 
     const secret = (customSecret !== undefined ? customSecret : await this.getSyncSecret()).trim();
@@ -143,6 +209,7 @@ export class GoogleSheetsSyncService {
       return {
         success: Boolean(res && res.success),
         sheetTitle: res?.sheetTitle || 'LifePlanner Database',
+        sheetUrl: res?.sheetUrl || '',
         message: res?.message,
       };
     } catch (err: any) {
@@ -159,12 +226,13 @@ export class GoogleSheetsSyncService {
     localData: BackupData,
     customUrl?: string,
     customSecret?: string
-  ): Promise<{ safe: boolean; restored?: boolean; message?: string }> {
+  ): Promise<{ safe: boolean; restored?: boolean; message?: string; restoredDetails?: any }> {
     const localTotal =
       (localData.tasks?.length || 0) +
       (localData.habits?.length || 0) +
       (localData.keepNotes?.length || 0) +
-      (localData.calendarEvents?.length || 0);
+      (localData.calendarEvents?.length || 0) +
+      (localData.notes?.length || 0);
 
     // If local device has records, it is safe to sync
     if (localTotal > 0) {
@@ -182,18 +250,18 @@ export class GoogleSheetsSyncService {
         // Automatically pull and restore to phone
         const restoreRes = await this.pullFromGoogleSheet(customUrl, 'replace', customSecret);
         if (restoreRes.success) {
-          syncEventBus.notifyDataRestored();
           return {
             safe: false,
             restored: true,
             message: `Blank device protection activated! Retrieved and restored ${statusRes.counts.total} items from Google Drive.`,
+            restoredDetails: restoreRes.details,
           };
         }
 
         return {
           safe: false,
           restored: false,
-          message: `Blocked overwrite of ${statusRes.counts.total} items in Google Drive by empty device.`,
+          message: `Blocked overwrite of ${statusRes.counts.total} items in Google Drive by empty device. Pull failed: ${restoreRes.message}`,
         };
       }
     } catch (guardErr) {
@@ -243,6 +311,16 @@ export class GoogleSheetsSyncService {
 
       if (!tabName) return;
 
+      let op = mutation.operation;
+      // If keep note is marked as trashed, ensure its op is 'delete'
+      if (mutation.entityType === 'keepNote' && mutation.item?.isTrashed) {
+        op = 'delete';
+        rowData = [];
+      }
+
+      // De-duplicate: replace any existing un-flushed mutation for the same item
+      await db.execute('DELETE FROM pending_sync_queue WHERE itemId = ?', [mutation.id]);
+
       const qId = `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       await db.execute(
         `INSERT INTO pending_sync_queue (id, tabName, entityType, op, itemId, rowJson, itemJson, createdAt)
@@ -251,7 +329,7 @@ export class GoogleSheetsSyncService {
           qId,
           tabName,
           mutation.entityType,
-          mutation.operation,
+          op,
           mutation.id,
           JSON.stringify(rowData),
           mutation.item ? JSON.stringify(mutation.item) : null,
@@ -266,39 +344,43 @@ export class GoogleSheetsSyncService {
   }
 
   /**
-   * Flushes queued Delta Sync mutations in batch to Google Sheets.
+   * Flushes queued Delta Sync mutations in batch to Google Sheets with mutex lock.
    */
   flushSyncQueue(delayMs = 1500): void {
+    if (this.isFlushing) {
+      this.hasPendingFlush = true;
+      return;
+    }
+
     if (this.deltaTimer) {
       clearTimeout(this.deltaTimer);
     }
 
     this.deltaTimer = setTimeout(async () => {
+      if (this.isFlushing || this.isPushing) {
+        this.hasPendingFlush = true;
+        return;
+      }
+
+      this.isFlushing = true;
       try {
         const url = await this.getWebhookUrl();
-        if (this.isPlaceholderUrl(url) || !url.startsWith('https://script.google.com/macros/s/')) {
+        const validation = this.validateWebhookUrl(url);
+        if (!validation.valid) {
           return;
         }
 
         const db = await getDatabase();
 
-        // Ensure any locally trashed notes have delete mutations queued so they are removed from Google Sheets
+        // Remove any pending upserts for notes that are now in trash
         try {
           const trashed = await db.execute('SELECT id FROM keep_notes WHERE isTrashed = 1');
           if (trashed.rows && trashed.rows.length > 0) {
             for (const tr of trashed.rows) {
-              const check = await db.execute(
-                'SELECT id FROM pending_sync_queue WHERE itemId = ? AND op = ?',
-                [tr.id, 'delete']
+              await db.execute(
+                "DELETE FROM pending_sync_queue WHERE itemId = ? AND op = 'upsert'",
+                [tr.id]
               );
-              if (!check.rows || check.rows.length === 0) {
-                const qId = `q_trash_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-                await db.execute(
-                  `INSERT INTO pending_sync_queue (id, tabName, entityType, op, itemId, rowJson, itemJson, createdAt)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                  [qId, 'Keep_Notes', 'keepNote', 'delete', tr.id, '[]', null, new Date().toISOString()]
-                );
-              }
             }
           }
         } catch {}
@@ -312,14 +394,28 @@ export class GoogleSheetsSyncService {
           return;
         }
 
-        const mutations = pending.rows.map((r: any) => ({
-          tabName: r.tabName,
-          entityType: r.entityType,
-          op: r.op,
-          id: r.itemId,
-          row: r.rowJson ? JSON.parse(r.rowJson) : [],
-          item: r.itemJson ? JSON.parse(r.itemJson) : null,
-        }));
+        const mutations = pending.rows.map((r: any) => {
+          let row: any[] = [];
+          try {
+            row = r.rowJson ? JSON.parse(r.rowJson) : [];
+          } catch {
+            row = [];
+          }
+          let item: any = null;
+          try {
+            item = r.itemJson ? JSON.parse(r.itemJson) : null;
+          } catch {
+            item = null;
+          }
+          return {
+            tabName: r.tabName,
+            entityType: r.entityType,
+            op: r.op,
+            id: r.itemId,
+            row,
+            item,
+          };
+        });
 
         const secret = await this.getSyncSecret();
         const headers: Record<string, string> = { 'Content-Type': 'text/plain;charset=utf-8' };
@@ -347,25 +443,33 @@ export class GoogleSheetsSyncService {
 
         if (result && result.success) {
           const sentIds = pending.rows.map((r: any) => r.id);
-          for (const sId of sentIds) {
-            await db.execute('DELETE FROM pending_sync_queue WHERE id = ?', [sId]);
+          if (sentIds.length > 0) {
+            const placeholders = sentIds.map(() => '?').join(',');
+            await db.execute(`DELETE FROM pending_sync_queue WHERE id IN (${placeholders})`, sentIds);
           }
 
           const nowIso = new Date().toISOString();
           await settingsRepository.set(SETTINGS_KEYS.GOOGLE_SHEET_LAST_SYNC_TIME, nowIso);
           await settingsRepository.set('googleSheetPendingSync', 'false');
 
-          // Check if more mutations remain
+          // Check if more mutations remain in queue
           const remaining = await db.execute('SELECT COUNT(*) as count FROM pending_sync_queue');
           if (Number(remaining.rows[0]?.count || 0) > 0) {
-            this.flushSyncQueue(500);
+            this.hasPendingFlush = true;
           }
         } else {
           await settingsRepository.set('googleSheetPendingSync', 'true');
         }
       } catch (err) {
+        this.hasPendingFlush = false;
         await settingsRepository.set('googleSheetPendingSync', 'true').catch(() => {});
         console.warn('Delta sync flush paused (offline or transient error):', err);
+      } finally {
+        this.isFlushing = false;
+        if (this.hasPendingFlush) {
+          this.hasPendingFlush = false;
+          this.flushSyncQueue(500);
+        }
       }
     }, delayMs);
   }
@@ -380,7 +484,8 @@ export class GoogleSheetsSyncService {
     this.syncTimer = setTimeout(async () => {
       try {
         const url = await this.getWebhookUrl();
-        if (this.isPlaceholderUrl(url) || !url.startsWith('https://script.google.com/macros/s/')) return;
+        const validation = this.validateWebhookUrl(url);
+        if (!validation.valid) return;
         const res = await this.pushToGoogleSheet(url, undefined, false);
         if (res.success) {
           await settingsRepository.set('googleSheetPendingSync', 'false');
@@ -405,7 +510,7 @@ export class GoogleSheetsSyncService {
   }
 
   /**
-   * Saves the Google Apps Script Webhook URL.
+   * Saves the Google Apps Script Webhook URL after normalizing.
    */
   async setWebhookUrl(url: string): Promise<void> {
     await settingsRepository.set(SETTINGS_KEYS.GOOGLE_SHEET_WEBHOOK_URL, url.trim());
@@ -457,13 +562,14 @@ export class GoogleSheetsSyncService {
     if (!autoSync && !isPending) return;
 
     const url = await this.getWebhookUrl();
-    if (!url) return;
+    const validation = this.validateWebhookUrl(url);
+    if (!validation.valid) return;
 
     this.flushSyncQueue(500);
   }
 
   /**
-   * Performs an HTTP fetch with timeout and automatic retry for transient network hiccups and HTTP 429/503.
+   * Performs an HTTP fetch with timeout and automatic retry for transient network hiccups and HTTP 429/502/503.
    */
   private async fetchWithTimeout(url: string, options: any = {}, timeoutMs = 45000, maxRetries = 2): Promise<any> {
     let attempt = 0;
@@ -484,7 +590,7 @@ export class GoogleSheetsSyncService {
           signal: controller.signal,
         });
 
-        if ((response.status === 429 || response.status === 503) && attempt < maxRetries) {
+        if ((response.status === 429 || response.status === 502 || response.status === 503) && attempt < maxRetries) {
           attempt++;
           clearTimeout(timer);
           await new Promise<void>((resolve) => setTimeout(() => resolve(), attempt * 1500));
@@ -553,19 +659,6 @@ export class GoogleSheetsSyncService {
   }
 
   /**
-   * Checks whether the given URL is empty or matches an inactive placeholder demo URL.
-   */
-  isPlaceholderUrl(url?: string): boolean {
-    if (!url) return true;
-    const trimmed = url.trim();
-    return (
-      !trimmed ||
-      trimmed.includes('AKfycbwelZyo3EpfPDgbVb9b_7WWj7spsPp20DZs-4mxC_leoSta3B2VJiuxbgtEfsU50UTVUg') ||
-      trimmed.includes('AKfycbwWSp3Y47KKz4LSJTgGRfUkh0qwDNZnuqSWG2Ud7tBdKmJhBI_bMhh4Lidi9jE5tKzZ')
-    );
-  }
-
-  /**
    * Evaluates HTTP status codes and throws clear diagnostic messages for Google Apps Script responses.
    */
   private checkHttpStatus(response: any): void {
@@ -592,15 +685,9 @@ export class GoogleSheetsSyncService {
     customSecret?: string
   ): Promise<{ success: boolean; message: string; sheetTitle?: string; counts?: any }> {
     const url = (customUrl !== undefined ? customUrl : await this.getWebhookUrl()).trim();
-    if (!url) {
-      return { success: false, message: 'Please provide a valid Google Sheet Webhook URL.' };
-    }
-    if (this.isPlaceholderUrl(url)) {
-      return {
-        success: false,
-        message:
-          'Webhook URL is not configured yet.\n\nThe default URL is an inactive placeholder. To connect to your private Google Drive:\n\n1. In Settings, tap "📋 Copy Script Code"\n2. Open https://sheets.new in browser\n3. Click Extensions -> Apps Script\n4. Paste the code, Save, and click Deploy -> New deployment -> Web app\n5. Set "Who has access" to "Anyone" and copy the Web App URL\n6. Paste your Web App URL here and tap "Test Link"!',
-      };
+    const validation = this.validateWebhookUrl(url);
+    if (!validation.valid) {
+      return { success: false, message: validation.error! };
     }
 
     const secret = (customSecret !== undefined ? customSecret : await this.getSyncSecret()).trim();
@@ -610,19 +697,21 @@ export class GoogleSheetsSyncService {
     }
 
     try {
-      let response: any;
-      try {
-        response = await this.fetchWithTimeout(
-          url,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ action: 'status', ...(secret ? { secret } : {}) }),
-          },
-          15000
-        );
-      } catch {
-        // Fallback to ping
+      let response = await this.fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ action: 'status', ...(secret ? { secret } : {}) }),
+        },
+        15000
+      );
+
+      this.checkHttpStatus(response);
+      let res = await this.parseResponse(response);
+
+      // Fallback to ping if older deployment responded with unsupported action
+      if (res && !res.success && res.error && String(res.error).includes('Invalid action')) {
         response = await this.fetchWithTimeout(
           url,
           {
@@ -632,10 +721,9 @@ export class GoogleSheetsSyncService {
           },
           15000
         );
+        this.checkHttpStatus(response);
+        res = await this.parseResponse(response);
       }
-
-      this.checkHttpStatus(response);
-      const res = await this.parseResponse(response);
 
       if (res && res.success) {
         let msg = res.message || 'Connected to Google Sheet successfully!';
@@ -653,12 +741,12 @@ export class GoogleSheetsSyncService {
 
       return {
         success: false,
-        message: res.error || res.message || 'Received unexpected response from Google Sheet.',
+        message: res?.error || res?.message || 'Received unexpected response from Google Sheet.',
       };
     } catch (err: any) {
       return {
         success: false,
-        message: err.message || 'Failed to connect to Google Sheet. Check the URL and deployment permissions.',
+        message: err?.message || 'Failed to connect to Google Sheet. Check the URL and deployment permissions.',
       };
     }
   }
@@ -671,8 +759,9 @@ export class GoogleSheetsSyncService {
    */
   async twoWaySync(customUrl?: string, customSecret?: string): Promise<GoogleSheetsSyncResult> {
     const url = (customUrl !== undefined ? customUrl : await this.getWebhookUrl()).trim();
-    if (!url) {
-      return { success: false, message: 'Google Sheet Webhook URL is not configured.' };
+    const validation = this.validateWebhookUrl(url);
+    if (!validation.valid) {
+      return { success: false, message: validation.error! };
     }
 
     const secret = (customSecret !== undefined ? customSecret : await this.getSyncSecret()).trim();
@@ -692,19 +781,29 @@ export class GoogleSheetsSyncService {
         },
         60000
       );
-      const pullResult = await pullResponse.json();
 
-      if (pullResult && pullResult.success && pullResult.backupData) {
-          const bData = pullResult.backupData;
-          bData.version = bData.version || 1;
-          bData.tasks = Array.isArray(bData.tasks) ? bData.tasks : [];
-          bData.categories = Array.isArray(bData.categories) ? bData.categories : [];
-          bData.habits = Array.isArray(bData.habits) ? bData.habits : [];
-          bData.habitLogs = Array.isArray(bData.habitLogs) ? bData.habitLogs : [];
-          bData.keepNotes = Array.isArray(bData.keepNotes) ? bData.keepNotes : [];
-          bData.calendarEvents = Array.isArray(bData.calendarEvents) ? bData.calendarEvents : [];
-          await backupService.importBackup(JSON.stringify(bData), 'merge');
-        }
+      this.checkHttpStatus(pullResponse);
+      const pullResult = await this.parseResponse(pullResponse);
+
+      if (!pullResult || !pullResult.success || !pullResult.backupData) {
+        throw new Error(pullResult?.error || pullResult?.message || 'Failed to pull remote data for two-way sync.');
+      }
+
+      const bData = pullResult.backupData;
+      bData.version = bData.version || 1;
+      bData.tasks = Array.isArray(bData.tasks) ? bData.tasks : [];
+      bData.categories = Array.isArray(bData.categories) ? bData.categories : [];
+      bData.habits = Array.isArray(bData.habits) ? bData.habits : [];
+      bData.habitLogs = Array.isArray(bData.habitLogs) ? bData.habitLogs : [];
+      bData.keepNotes = Array.isArray(bData.keepNotes) ? bData.keepNotes : [];
+      bData.calendarEvents = Array.isArray(bData.calendarEvents) ? bData.calendarEvents : [];
+      bData.notes = Array.isArray(bData.notes) ? bData.notes : [];
+      bData.settings = bData.settings && typeof bData.settings === 'object' ? bData.settings : {};
+
+      const importRes = await backupService.importBackup(JSON.stringify(bData), 'merge');
+      if (!importRes.success) {
+        throw new Error(`Failed to merge remote data: ${importRes.message}`);
+      }
 
       // 2. Export consolidated merged state and push back to Google Sheets
       const pushRes = await this.pushToGoogleSheet(url, secret, true);
@@ -712,7 +811,7 @@ export class GoogleSheetsSyncService {
     } catch (err: any) {
       return {
         success: false,
-        message: err.message || 'Failed during two-way synchronization.',
+        message: err?.message || 'Failed during two-way synchronization.',
       };
     }
   }
@@ -723,8 +822,9 @@ export class GoogleSheetsSyncService {
    */
   async pushToGoogleSheet(customUrl?: string, customSecret?: string, force = false): Promise<GoogleSheetsSyncResult> {
     const url = (customUrl !== undefined ? customUrl : await this.getWebhookUrl()).trim();
-    if (!url) {
-      return { success: false, message: 'Google Sheet Webhook URL is not configured.' };
+    const validation = this.validateWebhookUrl(url);
+    if (!validation.valid) {
+      return { success: false, message: validation.error! };
     }
 
     const secret = (customSecret !== undefined ? customSecret : await this.getSyncSecret()).trim();
@@ -733,6 +833,8 @@ export class GoogleSheetsSyncService {
       headers['X-Sync-Secret'] = secret;
     }
 
+    this.isPushing = true;
+    const pushStartTime = new Date().toISOString();
     try {
       const backupJson = await backupService.exportBackup();
       const backupData: BackupData = JSON.parse(backupJson);
@@ -743,13 +845,13 @@ export class GoogleSheetsSyncService {
         const guard = await this.safePushGuard(backupData, url, secret);
         if (!guard.safe) {
           return {
-            success: true,
+            success: guard.restored === true,
             message: guard.message || 'Blank device protection prevented sheet overwrite.',
-            details: {
+            details: guard.restoredDetails || {
               tasksCount: backupData.tasks.length,
               categoriesCount: backupData.categories?.length || 0,
               habitsCount: backupData.habits.length,
-              notesCount: backupData.keepNotes?.length || 0,
+              notesCount: (backupData.keepNotes || []).filter((n) => !n.isTrashed).length,
               eventsCount: backupData.calendarEvents?.length || 0,
               timestamp: new Date().toISOString(),
             },
@@ -783,21 +885,28 @@ export class GoogleSheetsSyncService {
 
       const result = await this.parseResponse(response);
       if (!result || !result.success) {
-        throw new Error(result.error || result.message || 'Failed to update Google Sheet.');
+        throw new Error(result?.error || result?.message || 'Failed to update Google Sheet.');
       }
 
       const nowIso = new Date().toISOString();
       await settingsRepository.set(SETTINGS_KEYS.GOOGLE_SHEET_LAST_SYNC_TIME, nowIso);
       await settingsRepository.set('googleSheetPendingSync', 'false');
 
+      // Purge any pending delta mutations captured in this full snapshot push
+      try {
+        const db = await getDatabase();
+        await db.execute('DELETE FROM pending_sync_queue WHERE createdAt <= ?', [pushStartTime]);
+      } catch {}
+
+      const activeNotesCount = (backupData.keepNotes || []).filter((n) => !n.isTrashed).length;
       return {
         success: true,
-        message: `Synced ${backupData.tasks.length} tasks, ${backupData.categories?.length || 0} categories, ${backupData.habits.length} routines, ${backupData.keepNotes?.length || 0} notes, and ${backupData.calendarEvents?.length || 0} events to Google Sheets.`,
+        message: `Synced ${backupData.tasks.length} tasks, ${backupData.categories?.length || 0} categories, ${backupData.habits.length} routines, ${activeNotesCount} notes, and ${backupData.calendarEvents?.length || 0} events to Google Sheets.`,
         details: {
           tasksCount: backupData.tasks.length,
           categoriesCount: backupData.categories?.length || 0,
           habitsCount: backupData.habits.length,
-          notesCount: backupData.keepNotes?.length || 0,
+          notesCount: activeNotesCount,
           eventsCount: backupData.calendarEvents?.length || 0,
           timestamp: nowIso,
         },
@@ -806,8 +915,14 @@ export class GoogleSheetsSyncService {
       await settingsRepository.set('googleSheetPendingSync', 'true').catch(() => { });
       return {
         success: false,
-        message: err.message || 'Failed to sync to Google Sheets.',
+        message: err?.message || 'Failed to sync to Google Sheets.',
       };
+    } finally {
+      this.isPushing = false;
+      if (this.hasPendingFlush) {
+        this.hasPendingFlush = false;
+        this.flushSyncQueue(500);
+      }
     }
   }
 
@@ -816,8 +931,9 @@ export class GoogleSheetsSyncService {
    */
   async pullFromGoogleSheet(customUrl?: string, mode: RestoreMode = 'merge', customSecret?: string): Promise<GoogleSheetsSyncResult> {
     const url = (customUrl !== undefined ? customUrl : await this.getWebhookUrl()).trim();
-    if (!url) {
-      return { success: false, message: 'Google Sheet Webhook URL is not configured.' };
+    const validation = this.validateWebhookUrl(url);
+    if (!validation.valid) {
+      return { success: false, message: validation.error! };
     }
 
     const secret = (customSecret !== undefined ? customSecret : await this.getSyncSecret()).trim();
@@ -841,7 +957,7 @@ export class GoogleSheetsSyncService {
 
       const result = await this.parseResponse(response);
       if (!result || !result.success || !result.backupData) {
-        throw new Error(result.error || result.message || 'No backup data found in Google Sheet.');
+        throw new Error(result?.error || result?.message || 'No backup data found in Google Sheet.');
       }
 
       const backupData = result.backupData;
@@ -852,6 +968,8 @@ export class GoogleSheetsSyncService {
       backupData.habitLogs = Array.isArray(backupData.habitLogs) ? backupData.habitLogs : [];
       backupData.keepNotes = Array.isArray(backupData.keepNotes) ? backupData.keepNotes : [];
       backupData.calendarEvents = Array.isArray(backupData.calendarEvents) ? backupData.calendarEvents : [];
+      backupData.notes = Array.isArray(backupData.notes) ? backupData.notes : [];
+      backupData.settings = backupData.settings && typeof backupData.settings === 'object' ? backupData.settings : {};
 
       const importRes = await backupService.importBackup(JSON.stringify(backupData), mode);
       if (!importRes.success) {
@@ -862,15 +980,17 @@ export class GoogleSheetsSyncService {
       await settingsRepository.set(SETTINGS_KEYS.GOOGLE_SHEET_LAST_SYNC_TIME, nowIso);
 
       const tasksCount = result.backupData.tasks?.length || 0;
+      const categoriesCount = result.backupData.categories?.length || 0;
       const habitsCount = result.backupData.habits?.length || 0;
       const notesCount = result.backupData.keepNotes?.length || 0;
       const eventsCount = result.backupData.calendarEvents?.length || 0;
 
       return {
         success: true,
-        message: `Successfully pulled ${tasksCount} tasks, ${habitsCount} routines, ${notesCount} notes & ${eventsCount} events into local SQLite.`,
+        message: `Successfully pulled ${tasksCount} tasks, ${categoriesCount} categories, ${habitsCount} routines, ${notesCount} notes & ${eventsCount} events into local database.`,
         details: {
           tasksCount,
+          categoriesCount,
           habitsCount,
           notesCount,
           eventsCount,
@@ -880,18 +1000,43 @@ export class GoogleSheetsSyncService {
     } catch (err: any) {
       return {
         success: false,
-        message: err.message || 'Failed to pull from Google Sheets.',
+        message: err?.message || 'Failed to pull from Google Sheets.',
       };
     }
   }
 
+  /**
+   * Sanitizes cell values, truncates to 45,000 characters, and protects against formula injection.
+   */
   private safeCell(val: any, maxLength = 45000): string | number {
     if (val === undefined || val === null) return '';
-    if (typeof val === 'number') return val;
-    const str = String(val);
-    if (str.length > maxLength) {
-      return str.substring(0, maxLength) + '... [TRUNCATED]';
+    if (typeof val === 'number') {
+      return isNaN(val) || !isFinite(val) ? '' : val;
     }
+    if (typeof val === 'boolean') {
+      return val ? 'YES' : 'NO';
+    }
+
+    let str: string;
+    if (typeof val === 'object') {
+      try {
+        str = JSON.stringify(val);
+      } catch {
+        str = String(val);
+      }
+    } else {
+      str = String(val);
+    }
+
+    if (str.length > maxLength) {
+      str = str.substring(0, maxLength) + '... [TRUNCATED]';
+    }
+
+    // Guard against Spreadsheet Formula Injection: prefix formula characters with single quote
+    if (str.length > 0 && /^[-=+@]/.test(str) && !/^-?\d+(\.\d+)?$/.test(str)) {
+      return `'${str}`;
+    }
+
     return str;
   }
 
@@ -968,7 +1113,7 @@ export class GoogleSheetsSyncService {
       this.safeCell(h.description),
       this.safeCell(h.icon || '🎯'),
       this.safeCell(h.color || '#FF6B00'),
-      h.target || 1,
+      h.target ?? 1,
       this.safeCell(h.reminderTime),
       this.safeCell(repeatDays),
       h.archivedAt ? 'YES' : 'NO',
@@ -985,7 +1130,7 @@ export class GoogleSheetsSyncService {
       this.safeCell(l.habitId),
       this.safeCell(l.date),
       l.completed ? 'YES' : 'NO',
-      l.value || 1,
+      l.value ?? 1,
       this.safeCell(l.notes),
       this.safeCell(l.createdAt),
     ];
@@ -1051,6 +1196,7 @@ export class GoogleSheetsSyncService {
 
   /**
    * Transforms SQLite JSON structures into human-readable 2D row matrices for Google Sheets.
+   * Filters out trashed keep notes so they are not pushed to visual tabs.
    */
   buildSheetTabs(data: BackupData): Record<string, any[][]> {
     const taskHeaders = [
@@ -1077,7 +1223,9 @@ export class GoogleSheetsSyncService {
       'Note ID', 'Title', 'Content', 'Type', 'Color', 'Pinned', 'Archived',
       'Labels', 'Checklist Items', 'Reminder Time', 'Updated At',
     ];
-    const noteRows = (data.keepNotes || []).map((n) => this.buildKeepNoteRow(n));
+    const noteRows = (data.keepNotes || [])
+      .filter((n) => !n.isTrashed)
+      .map((n) => this.buildKeepNoteRow(n));
 
     const eventHeaders = [
       'Event ID', 'Title', 'Description', 'Date', 'Time', 'Ring Alarm',
@@ -1103,7 +1251,7 @@ export class GoogleSheetsSyncService {
  * Google Apps Script Webhook for LifePlanner & Tasks (Local-First Real-Time Delta Sync)
  * 
  * Features:
- * 1. Delta Sync: Row-level upsert and delete by item ID (No more sheet.clear() wipeouts!)
+ * 1. Delta Sync: Row-level upsert and delete by item ID (No sheet.clear() wipeouts!)
  * 2. Cloud-First Safety Guard: Protects populated sheets from blank-device overwrites
  * 3. Fast Status Reporting: Returns live count of tasks, habits, notes & events
  * 4. Lossless Two-Way Restore: Pulls raw state from _SyncState or visual tabs
@@ -1120,6 +1268,48 @@ export class GoogleSheetsSyncService {
  *    - Who has access: Anyone (allows mobile app to sync seamlessly)
  * 6. Click Deploy, authorize access, and copy the Web App URL!
  */
+
+function formatDateCell(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    var y = val.getFullYear();
+    var m = ('0' + (val.getMonth() + 1)).slice(-2);
+    var d = ('0' + val.getDate()).slice(-2);
+    return y + '-' + m + '-' + d;
+  }
+  var s = String(val).trim();
+  if (s.indexOf('T') > 0) return s.split('T')[0];
+  return s;
+}
+
+function formatTimeCell(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    var h = ('0' + val.getHours()).slice(-2);
+    var min = ('0' + val.getMinutes()).slice(-2);
+    return h + ':' + min;
+  }
+  var s = String(val).trim();
+  if (s.indexOf('T') > 0) {
+    try {
+      var d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        var dh = ('0' + d.getHours()).slice(-2);
+        var dm = ('0' + d.getMinutes()).slice(-2);
+        return dh + ':' + dm;
+      }
+    } catch(e) {}
+  }
+  return s;
+}
+
+function formatIsoCell(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return val.toISOString();
+  }
+  return String(val).trim();
+}
 
 function getOrCreateSpreadsheet(payload) {
   if (payload) {
@@ -1198,6 +1388,8 @@ function ensureSheetWithHeader(ss, tabName, customHeaders) {
   var sheet = ss.getSheetByName(tabName);
   if (!sheet) {
     sheet = ss.insertSheet(tabName);
+  }
+  if (sheet.getLastRow() === 0) {
     var headers = customHeaders || getTabDefaultHeaders(tabName);
     if (headers && headers.length > 0) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -1213,6 +1405,10 @@ function ensureSheetWithHeader(ss, tabName, customHeaders) {
 
 function doPost(e) {
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return responseJSON({ success: false, error: "Empty POST body received." });
+    }
+
     var rawText = e.postData.contents;
     var payload = JSON.parse(rawText);
     var action = payload.action;
@@ -1264,11 +1460,11 @@ function doPost(e) {
       var eventsCount = eventsSheet ? Math.max(0, eventsSheet.getLastRow() - 1) : 0;
       var categoriesCount = categoriesSheet ? Math.max(0, categoriesSheet.getLastRow() - 1) : 0;
       var logsCount = logsSheet ? Math.max(0, logsSheet.getLastRow() - 1) : 0;
-      var total = tasksCount + habitsCount + notesCount + eventsCount;
+      var total = tasksCount + habitsCount + notesCount + eventsCount + categoriesCount;
 
       var configSheet = ss.getSheetByName("_SyncState");
       var lastSyncTime = "";
-      if (configSheet) {
+      if (configSheet && configSheet.getLastRow() >= 1) {
         try { lastSyncTime = configSheet.getRange(1, 2).getValue() || ""; } catch(e) {}
       }
 
@@ -1321,14 +1517,16 @@ function doPost(e) {
         }
       }
 
+      // Update _SyncState chunked cache if it exists
       try {
         var configSheet = ss.getSheetByName("_SyncState");
-        if (configSheet) {
+        if (configSheet && configSheet.getLastRow() >= 2) {
           var numChunksOrData = configSheet.getRange(2, 2).getValue();
           var rawJson = "";
           if (typeof numChunksOrData === "number" && numChunksOrData > 0) {
-            for (var c = 0; c < numChunksOrData; c++) {
-              rawJson += configSheet.getRange(3 + c, 2).getValue();
+            var chunkData = configSheet.getRange(3, 2, numChunksOrData, 1).getValues();
+            for (var c = 0; c < chunkData.length; c++) {
+              rawJson += chunkData[c][0];
             }
           } else if (typeof numChunksOrData === "string" && numChunksOrData.length > 0) {
             rawJson = numChunksOrData;
@@ -1370,11 +1568,18 @@ function doPost(e) {
             var updatedJsonStr = JSON.stringify(backupData);
             var chunkSize = 45000;
             var numChunks = Math.ceil(updatedJsonStr.length / chunkSize);
+            configSheet.clear();
+            configSheet.getRange(1, 1).setValue("LAST_SYNC_TIME");
             configSheet.getRange(1, 2).setValue(new Date().toISOString());
+            configSheet.getRange(2, 1).setValue("RAW_BACKUP_JSON");
             configSheet.getRange(2, 2).setValue(numChunks);
+
+            var chunkRows = [];
             for (var c = 0; c < numChunks; c++) {
-              configSheet.getRange(3 + c, 1).setValue("CHUNK_" + c);
-              configSheet.getRange(3 + c, 2).setValue(updatedJsonStr.substring(c * chunkSize, (c + 1) * chunkSize));
+              chunkRows.push(["CHUNK_" + c, updatedJsonStr.substring(c * chunkSize, (c + 1) * chunkSize)]);
+            }
+            if (chunkRows.length > 0) {
+              configSheet.getRange(3, 1, chunkRows.length, 2).setValues(chunkRows);
             }
           }
         }
@@ -1443,9 +1648,13 @@ function doPost(e) {
       var chunkSize = 45000;
       var numChunks = Math.ceil(jsonStr.length / chunkSize);
       configSheet.getRange(2, 2).setValue(numChunks);
+
+      var chunkRows = [];
       for (var c = 0; c < numChunks; c++) {
-        configSheet.getRange(3 + c, 1).setValue("CHUNK_" + c);
-        configSheet.getRange(3 + c, 2).setValue(jsonStr.substring(c * chunkSize, (c + 1) * chunkSize));
+        chunkRows.push(["CHUNK_" + c, jsonStr.substring(c * chunkSize, (c + 1) * chunkSize)]);
+      }
+      if (chunkRows.length > 0) {
+        configSheet.getRange(3, 1, chunkRows.length, 2).setValues(chunkRows);
       }
 
       var defaultSheet = ss.getSheetByName("Sheet1");
@@ -1475,11 +1684,12 @@ function doPost(e) {
       var configSheet = ss.getSheetByName("_SyncState");
       var rawJson = "";
 
-      if (configSheet) {
+      if (configSheet && configSheet.getLastRow() >= 2) {
         var numChunksOrData = configSheet.getRange(2, 2).getValue();
         if (typeof numChunksOrData === "number" && numChunksOrData > 0) {
-          for (var c = 0; c < numChunksOrData; c++) {
-            rawJson += configSheet.getRange(3 + c, 2).getValue();
+          var chunkValues = configSheet.getRange(3, 2, numChunksOrData, 1).getValues();
+          for (var c = 0; c < chunkValues.length; c++) {
+            rawJson += chunkValues[c][0];
           }
         } else if (typeof numChunksOrData === "string" && numChunksOrData.length > 0) {
           rawJson = numChunksOrData;
@@ -1487,7 +1697,7 @@ function doPost(e) {
       }
 
       var lastSyncTime = "";
-      if (configSheet) {
+      if (configSheet && configSheet.getLastRow() >= 1) {
         try { lastSyncTime = configSheet.getRange(1, 2).getValue() || ""; } catch(e) {}
       }
 
@@ -1502,6 +1712,7 @@ function doPost(e) {
         } catch (parseErr) {}
       }
 
+      // Fallback: parse visual tabs directly if _SyncState is missing or corrupted
       var fallbackData = {
         version: 1,
         createdAt: new Date().toISOString(),
@@ -1511,6 +1722,7 @@ function doPost(e) {
         habitLogs: [],
         keepNotes: [],
         calendarEvents: [],
+        notes: [],
         settings: {}
       };
 
@@ -1520,26 +1732,65 @@ function doPost(e) {
         for (var i = 0; i < taskValues.length; i++) {
           var row = taskValues[i];
           if (!row[0] || !row[2]) continue;
+
+          var recurrenceRule = undefined;
+          var rawRec = String(row[15] || '').trim();
+          if (rawRec && rawRec !== 'None') {
+            var recType = 'daily';
+            var recInterval = 1;
+            var recDays = undefined;
+            var recEnd = undefined;
+
+            if (rawRec.indexOf('Every ') === 0) {
+              var intMatch = rawRec.match(/^Every\s+(\d+)\s+([a-zA-Z]+)/);
+              if (intMatch) {
+                recInterval = parseInt(intMatch[1], 10) || 1;
+                recType = intMatch[2].toLowerCase();
+              }
+            } else {
+              var firstWord = rawRec.split(' ')[0].toLowerCase();
+              if (firstWord) recType = firstWord;
+            }
+
+            var daysMatch = rawRec.match(/\[Days:\s*([^\]]+)\]/);
+            if (daysMatch) {
+              recDays = daysMatch[1].split(',').map(function(d) { return parseInt(d.trim(), 10); }).filter(function(n) { return !isNaN(n); });
+            }
+
+            var untilMatch = rawRec.match(/until\s+([^\s]+)/);
+            if (untilMatch) {
+              recEnd = untilMatch[1];
+            }
+
+            recurrenceRule = {
+              type: recType,
+              interval: recInterval > 1 ? recInterval : undefined,
+              daysOfWeek: recDays && recDays.length > 0 ? recDays : undefined,
+              endDate: recEnd
+            };
+          }
+
           fallbackData.tasks.push({
             id: String(row[0]),
             seriesId: row[1] ? String(row[1]) : undefined,
             title: String(row[2]),
             description: row[3] ? String(row[3]) : undefined,
-            date: String(row[4] || ''),
-            startTime: row[5] ? String(row[5]) : undefined,
-            endTime: row[6] ? String(row[6]) : undefined,
+            date: formatDateCell(row[4]),
+            startTime: formatTimeCell(row[5]) || undefined,
+            endTime: formatTimeCell(row[6]) || undefined,
             priority: String(row[7] || 'medium'),
             status: String(row[8] || 'pending'),
             categoryName: row[9] ? String(row[9]) : undefined,
-            eisenhowerQuadrant: row[10] ? String(row[10]) : undefined,
-            estimatedMinutes: row[11] ? Number(row[11]) : undefined,
+            eisenhowerQuadrant: row[10] && row[10] !== 'None' ? String(row[10]) : undefined,
+            estimatedMinutes: row[11] !== '' && !isNaN(Number(row[11])) ? Number(row[11]) : undefined,
             accentColor: row[12] ? String(row[12]) : undefined,
             isOvernight: row[13] === 'YES',
             isLoudAlarm: row[14] === 'YES',
+            recurrenceRule: recurrenceRule,
             notes: row[16] ? String(row[16]) : undefined,
-            reminderMinutes: row[17] ? Number(row[17]) : 0,
-            completedAt: row[18] ? String(row[18]) : undefined,
-            updatedAt: row[19] ? String(row[19]) : new Date().toISOString(),
+            reminderMinutes: row[17] !== '' && !isNaN(Number(row[17])) ? Number(row[17]) : 0,
+            completedAt: formatIsoCell(row[18]) || undefined,
+            updatedAt: formatIsoCell(row[19]) || new Date().toISOString(),
             createdAt: new Date().toISOString()
           });
         }
@@ -1575,13 +1826,15 @@ function doPost(e) {
             color: String(row[4] || 'default'),
             isPinned: row[5] === 'YES',
             isArchived: row[6] === 'YES',
-            labels: row[7] ? String(row[7]).split(',').map(function(s) { return s.trim(); }) : [],
+            labels: row[7] ? String(row[7]).split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; }) : [],
             checklistData: checklistItems,
-            reminderTime: row[9] ? String(row[9]) : undefined,
-            updatedAt: row[10] ? String(row[10]) : new Date().toISOString(),
+            reminderTime: formatIsoCell(row[9]) || undefined,
+            updatedAt: formatIsoCell(row[10]) || new Date().toISOString(),
             createdAt: new Date().toISOString()
           });
         }
+      }
+
       var categoriesSheet = ss.getSheetByName("Categories");
       if (categoriesSheet && categoriesSheet.getLastRow() > 1) {
         var catValues = categoriesSheet.getRange(2, 1, categoriesSheet.getLastRow() - 1, 5).getValues();
@@ -1593,7 +1846,7 @@ function doPost(e) {
             name: String(row[1]),
             color: String(row[2] || '#3B82F6'),
             icon: String(row[3] || 'tag'),
-            createdAt: row[4] ? String(row[4]) : new Date().toISOString()
+            createdAt: formatIsoCell(row[4]) || new Date().toISOString()
           });
         }
       }
@@ -1601,20 +1854,38 @@ function doPost(e) {
       var habitsSheet = ss.getSheetByName("Habits");
       if (habitsSheet && habitsSheet.getLastRow() > 1) {
         var habitValues = habitsSheet.getRange(2, 1, habitsSheet.getLastRow() - 1, 10).getValues();
+        var dayMap = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
         for (var i = 0; i < habitValues.length; i++) {
           var row = habitValues[i];
           if (!row[0] || !row[1]) continue;
+
+          var habitRec = { type: 'daily' };
+          var repStr = String(row[7] || '').trim();
+          if (repStr && repStr.toLowerCase() !== 'everyday') {
+            var daysFound = [];
+            var tokens = repStr.split(',');
+            for (var d = 0; d < tokens.length; d++) {
+              var dayKey = tokens[d].trim().toLowerCase().substring(0, 3);
+              if (dayMap[dayKey] !== undefined) {
+                daysFound.push(dayMap[dayKey]);
+              }
+            }
+            if (daysFound.length > 0) {
+              habitRec = { type: 'weekly', daysOfWeek: daysFound };
+            }
+          }
+
           fallbackData.habits.push({
             id: String(row[0]),
             name: String(row[1]),
             description: row[2] ? String(row[2]) : undefined,
-            icon: String(row[3] || 'flame'),
-            color: String(row[4] || '#8B5CF6'),
-            target: row[5] ? Number(row[5]) : 1,
-            reminderTime: row[6] ? String(row[6]) : undefined,
-            recurrenceRule: { type: 'daily' },
+            icon: String(row[3] || '🎯'),
+            color: String(row[4] || '#FF6B00'),
+            target: row[5] !== '' && !isNaN(Number(row[5])) ? Number(row[5]) : 1,
+            reminderTime: formatTimeCell(row[6]) || undefined,
+            recurrenceRule: habitRec,
             archivedAt: row[8] === 'YES' ? new Date().toISOString() : undefined,
-            createdAt: row[9] ? String(row[9]) : new Date().toISOString()
+            createdAt: formatIsoCell(row[9]) || new Date().toISOString()
           });
         }
       }
@@ -1628,11 +1899,11 @@ function doPost(e) {
           fallbackData.habitLogs.push({
             id: String(row[0]),
             habitId: String(row[1]),
-            date: String(row[2]),
+            date: formatDateCell(row[2]),
             completed: String(row[3]) === '1' || row[3] === true || String(row[3]).toUpperCase() === 'YES',
-            value: row[4] ? Number(row[4]) : 1,
+            value: row[4] !== '' && !isNaN(Number(row[4])) ? Number(row[4]) : 1,
             notes: row[5] ? String(row[5]) : undefined,
-            createdAt: row[6] ? String(row[6]) : new Date().toISOString()
+            createdAt: formatIsoCell(row[6]) || new Date().toISOString()
           });
         }
       }
@@ -1647,12 +1918,12 @@ function doPost(e) {
             id: String(row[0]),
             title: String(row[1]),
             description: row[2] ? String(row[2]) : undefined,
-            date: String(row[3] || ''),
-            time: String(row[4] || ''),
+            date: formatDateCell(row[3]),
+            time: formatTimeCell(row[4]),
             ringAlarm: row[5] === 'YES' || row[5] === true || row[5] === 1,
             status: String(row[6] || 'active'),
-            createdAt: row[7] ? String(row[7]) : new Date().toISOString(),
-            updatedAt: row[8] ? String(row[8]) : new Date().toISOString()
+            createdAt: formatIsoCell(row[7]) || new Date().toISOString(),
+            updatedAt: formatIsoCell(row[8]) || new Date().toISOString()
           });
         }
       }

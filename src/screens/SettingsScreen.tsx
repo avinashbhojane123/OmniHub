@@ -30,6 +30,7 @@ import { backupService } from '../services/backup/BackupService';
 import { radius, spacing, typography } from '../theme';
 import { notificationService } from '../services/notifications/NotificationService';
 import { alarmService } from '../services/alarm/AlarmService';
+import { batteryService } from '../services/battery/BatteryService';
 import { getDatabase } from '../database/connection';
 import { googleSheetsSyncService } from '../services/backup/GoogleSheetsSyncService';
 
@@ -43,6 +44,7 @@ export const SettingsScreen: React.FC = () => {
   const showBackBtn = Boolean(route?.params?.showBack);
 
   // Notification Settings State
+  const [dndEnabled, setDndEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
@@ -67,10 +69,12 @@ export const SettingsScreen: React.FC = () => {
   const loadSettings = useCallback(async () => {
     // 1. Load Notification & Alert Preferences
     try {
+      const dnd = (await settingsRepository.get(SETTINGS_KEYS.APP_DND_ENABLED, 'false')) === 'true';
       const notifs = (await settingsRepository.get(SETTINGS_KEYS.NOTIFICATIONS_ENABLED, 'true')) === 'true';
       const sound = (await settingsRepository.get(SETTINGS_KEYS.NOTIFICATION_SOUND, 'true')) === 'true';
       const vib = (await settingsRepository.get(SETTINGS_KEYS.NOTIFICATION_VIBRATION, 'true')) === 'true';
       const snooze = await settingsRepository.get(SETTINGS_KEYS.DEFAULT_SNOOZE_MINUTES, '10');
+      setDndEnabled(dnd);
       setNotificationsEnabled(notifs);
       setSoundEnabled(sound);
       setVibrationEnabled(vib);
@@ -149,6 +153,21 @@ export const SettingsScreen: React.FC = () => {
         } catch { }
       }
       await notificationService.restoreAllReminders();
+    }
+  };
+
+  const toggleDnd = async (val: boolean) => {
+    setDndEnabled(val);
+    try {
+      await settingsRepository.set(SETTINGS_KEYS.APP_DND_ENABLED, String(val));
+      await alarmService.setDndActive(val);
+      batteryService.setDndActive(val);
+      if (val) {
+        alarmService.stopRinging(true);
+        await batteryService.stopAlarm(true);
+      }
+    } catch (e) {
+      console.warn('Failed to toggle DND:', e);
     }
   };
 
@@ -341,6 +360,35 @@ export const SettingsScreen: React.FC = () => {
             ANDROID NOTIFICATIONS & ALARMS
           </Text>
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            {/* Complete Do Not Disturb (DND) */}
+            <View style={[styles.settingRow, dndEnabled && { backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: radius.medium, paddingHorizontal: 8 }]}>
+              <View style={styles.settingTextCol}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={[styles.settingLabel, typography.title, { color: dndEnabled ? colors.error : colors.text }]}>
+                    🌙 Complete Do Not Disturb
+                  </Text>
+                  {dndEnabled && (
+                    <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.error + '20', borderWidth: 1, borderColor: colors.error }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: colors.error }}>MUTED</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
+                  {dndEnabled
+                    ? 'All alarms, reminders & alerts are completely silenced application-wide.'
+                    : 'Mute all alarms, routines, loud reminders & battery alerts application-wide'}
+                </Text>
+              </View>
+              <Switch
+                value={dndEnabled}
+                onValueChange={toggleDnd}
+                trackColor={{ false: colors.border, true: colors.error }}
+                thumbColor={Platform.OS === 'android' ? (dndEnabled ? '#EF4444' : '#f4f3f4') : undefined}
+              />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+
             <View style={styles.settingRow}>
               <View style={styles.settingTextCol}>
                 <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>

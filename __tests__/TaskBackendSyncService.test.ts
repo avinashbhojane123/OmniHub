@@ -6,6 +6,7 @@ import { settingsRepository } from '../src/database/repositories/SettingsReposit
 import { getDatabase } from '../src/database/connection';
 import { syncEventBus } from '../src/services/backup/SyncEventBus';
 import { Task } from '../src/types';
+import { notificationService } from '../src/services/notifications/NotificationService';
 
 describe('TaskBackendSyncService Integration Test Suite (No Mocks)', () => {
   let server: any;
@@ -52,6 +53,7 @@ describe('TaskBackendSyncService Integration Test Suite (No Mocks)', () => {
   });
 
   beforeEach(async () => {
+    taskBackendSyncService.cancelScheduledSync();
     const db = await getDatabase();
     await db.execute('DELETE FROM tasks');
     await db.execute('DELETE FROM sync_tombstones');
@@ -59,6 +61,11 @@ describe('TaskBackendSyncService Integration Test Suite (No Mocks)', () => {
     await settingsRepository.set(TaskBackendSyncService.SETTINGS_KEY_LAST_SYNC, '');
     await taskBackendSyncService.setBackendUrl(`http://127.0.0.1:${serverPort}`);
     await taskBackendSyncService.resetSyncState();
+  });
+
+  afterEach(() => {
+    taskBackendSyncService.cancelScheduledSync();
+    jest.restoreAllMocks();
   });
 
   it('1. should resolve backend URL from settings repository and support OTA URL adaptation', async () => {
@@ -511,5 +518,553 @@ describe('TaskBackendSyncService Integration Test Suite (No Mocks)', () => {
 
   it('15. should reflect getIsSyncing status properly during execution', async () => {
     expect(taskBackendSyncService.getIsSyncing()).toBe(false);
+  });
+
+  it('16. should safely handle corrupted createdAt and updatedAt without RangeError', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: 'not-a-valid-timestamp',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_with_garbage_dates',
+              title: 'Corrupted Dates Task',
+              date: '2026-10-31',
+              createdAt: 'invalid-time-value',
+              updatedAt: 'another-broken-date',
+            },
+          ],
+        })
+      );
+    };
+
+    const syncResult = await taskBackendSyncService.syncWithBackend();
+    expect(syncResult.success).toBe(true);
+
+    const task = await taskRepository.findById('task_with_garbage_dates');
+    expect(task).toBeDefined();
+    expect(new Date(task!.createdAt).getTime()).not.toBeNaN();
+    expect(new Date(task!.updatedAt).getTime()).not.toBeNaN();
+  });
+
+  it('17. should convert whitespace-only titles to Untitled Task', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_blank_spaces_title',
+              title: '     ',
+              date: '2026-10-31',
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const task = await taskRepository.findById('task_blank_spaces_title');
+    expect(task?.title).toBe('Untitled Task');
+  });
+
+  it('18. should normalize Infinity and NaN on estimatedMinutes and reminderMinutes', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_infinite_numbers',
+              title: 'Infinite Numbers Task',
+              date: '2026-10-31',
+              estimatedMinutes: Infinity,
+              reminderMinutes: -5,
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const task = await taskRepository.findById('task_infinite_numbers');
+    expect(task?.estimatedMinutes).toBeUndefined();
+    expect(task?.reminderMinutes).toBe(0);
+  });
+
+  it('19. should safely handle unsubscription inside a status notification callback', async () => {
+    let callCount = 0;
+    let unsub1: (() => void) | null = null;
+
+    unsub1 = taskBackendSyncService.subscribeStatus((connected) => {
+      callCount++;
+      if (unsub1) {
+        unsub1(); // Unsubscribe during execution
+      }
+    });
+
+    const unsub2 = taskBackendSyncService.subscribeStatus(() => {
+      callCount++;
+    });
+
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, serverDeletions: [], serverTasks: [] }));
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+    expect(callCount).toBeGreaterThanOrEqual(2);
+
+    unsub2();
+  });
+
+  it('20. should clear startTime and endTime when a task is moved to backlog (empty date)', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_backlog_clears_times',
+              title: 'Backlog Task',
+              date: '',
+              startTime: '14:00',
+              endTime: '15:00',
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const task = await taskRepository.findById('task_backlog_clears_times');
+    expect(task).toBeDefined();
+    expect(task?.date).toBe('');
+    expect(task?.startTime).toBeUndefined();
+    expect(task?.endTime).toBeUndefined();
+  });
+
+  it('21. should inherit isLoudAlarm and isOvernight from recurrenceRule when top-level fields are undefined', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_recurrence_alarm_flags',
+              title: 'Recurring Loud Alarm Task',
+              date: '2026-10-31',
+              recurrenceRule: JSON.stringify({
+                type: 'daily',
+                interval: 1,
+                isLoudAlarm: true,
+                isOvernight: true,
+              }),
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const task = await taskRepository.findById('task_recurrence_alarm_flags');
+    expect(task?.isLoudAlarm).toBe(true);
+    expect(task?.isOvernight).toBe(true);
+  });
+
+  it('22. should fallback to createdAt when comparing timestamps if updatedAt is null', async () => {
+    const localTask: Task = {
+      id: 'task_created_at_fallback',
+      title: 'Local Task Older',
+      date: '2026-10-31',
+      priority: 'medium',
+      status: 'pending',
+      createdAt: '2026-10-31T07:00:00.000Z',
+      updatedAt: '2026-10-31T07:00:00.000Z',
+    };
+    await taskRepository.create(localTask);
+
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_created_at_fallback',
+              title: 'Server Task Newer via CreatedAt',
+              date: '2026-10-31',
+              status: 'in_progress',
+              createdAt: '2026-10-31T08:00:00.000Z', // 08:00 > 07:00
+              updatedAt: null,
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const task = await taskRepository.findById('task_created_at_fallback');
+    expect(task?.title).toBe('Server Task Newer via CreatedAt');
+    expect(task?.status).toBe('in_progress');
+  });
+
+  it('23. should preserve disabled reminderMinutes (-1) in outgoing payload and incoming server delta', async () => {
+    const disabledReminderTask: Task = {
+      id: 'task_reminder_disabled',
+      title: 'Task with Reminder Disabled',
+      date: '2026-10-31',
+      startTime: '14:00',
+      priority: 'medium',
+      status: 'pending',
+      reminderMinutes: -1,
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
+    };
+    await taskRepository.create(disabledReminderTask);
+
+    let sentUpserts: any[] = [];
+    serverHandler = (_req, res, body) => {
+      sentUpserts = body.upserts;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'server_disabled_reminder',
+              title: 'Server Task with Reminder Disabled',
+              date: '2026-10-31',
+              startTime: '15:00',
+              status: 'pending',
+              reminderMinutes: -1,
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    // Verify outgoing payload preserved -1
+    const outgoing = sentUpserts.find((u) => u.id === 'task_reminder_disabled');
+    expect(outgoing?.reminderMinutes).toBe(-1);
+
+    // Verify incoming task preserved -1 in SQLite
+    const incoming = await taskRepository.findById('server_disabled_reminder');
+    expect(incoming?.reminderMinutes).toBe(-1);
+  });
+
+  it('24. should normalize case-insensitive enums (e.g. HIGH, COMPLETED, Q1) from server', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_cased_enums',
+              title: 'Cased Enums Task',
+              date: '2026-10-31',
+              priority: 'HIGH',
+              status: 'COMPLETED',
+              eisenhowerQuadrant: 'Q1',
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const task = await taskRepository.findById('task_cased_enums');
+    expect(task?.priority).toBe('high');
+    expect(task?.status).toBe('completed');
+    expect(task?.eisenhowerQuadrant).toBe('q1');
+  });
+
+  it('25. should reconcile reminders: cancel reminder on remote deletion and schedule on remote upsert', async () => {
+    // 1. Create existing local task
+    const existingTask: Task = {
+      id: 'task_to_delete_remotely',
+      title: 'Task To Delete',
+      date: '2026-10-31',
+      startTime: '11:00',
+      priority: 'medium',
+      status: 'pending',
+      reminderMinutes: 10,
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
+    };
+    await taskRepository.create(existingTask);
+
+    const cancelSpy = jest.spyOn(notificationService, 'cancelTaskReminder').mockResolvedValue(undefined);
+    const scheduleSpy = jest.spyOn(notificationService, 'scheduleTaskReminder').mockResolvedValue('notification-id-1');
+
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: ['task_to_delete_remotely'],
+          serverTasks: [
+            {
+              id: 'task_to_schedule_remotely',
+              title: 'New Server Task with Reminder',
+              date: '2026-10-31',
+              startTime: '16:00',
+              status: 'pending',
+              reminderMinutes: 15,
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    expect(cancelSpy).toHaveBeenCalledWith('task_to_delete_remotely');
+    expect(scheduleSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'task_to_schedule_remotely',
+        title: 'New Server Task with Reminder',
+      })
+    );
+  });
+
+  it('26. should not resurrect tasks deleted locally while HTTP sync was in-flight', async () => {
+    let resolveServerRequest: () => void = () => {};
+    const serverRequestReceived = new Promise<void>((resolve) => {
+      resolveServerRequest = resolve;
+    });
+
+    serverHandler = (_req, res) => {
+      resolveServerRequest();
+      // Delay response slightly so client has time to record a local tombstone
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            success: true,
+            timestamp: '2026-10-31T10:00:00.000Z',
+            serverDeletions: [],
+            serverTasks: [
+              {
+                id: 'task_deleted_in_flight',
+                title: 'Task Deleted While Fetch In Flight',
+                date: '2026-10-31',
+                status: 'pending',
+                createdAt: '2026-10-31T08:00:00.000Z',
+                updatedAt: '2026-10-31T08:00:00.000Z',
+              },
+            ],
+          })
+        );
+      }, 50);
+    };
+
+    const syncPromise = taskBackendSyncService.syncWithBackend();
+
+    // Wait until HTTP request has arrived at server
+    await serverRequestReceived;
+
+    // Simulate user deleting the task locally right during the HTTP in-flight window
+    await tombstoneRepository.recordDeleted('task_deleted_in_flight', 'task');
+
+    await syncPromise;
+
+    // The in-flight deleted task must NOT be resurrected into SQLite
+    const task = await taskRepository.findById('task_deleted_in_flight');
+    expect(task).toBeNull();
+  });
+
+  it('27. should transmit createdAt and updatedAt in outgoing upserts for accurate LWW preservation', async () => {
+    const task: Task = {
+      id: 'task_with_timestamps',
+      title: 'Task With Timestamps',
+      date: '2026-10-31',
+      priority: 'medium',
+      status: 'pending',
+      createdAt: '2026-10-31T05:30:00.000Z',
+      updatedAt: '2026-10-31T06:45:00.000Z',
+    };
+    await taskRepository.create(task);
+
+    let sentUpserts: any[] = [];
+    serverHandler = (_req, res, body) => {
+      sentUpserts = body.upserts;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const sent = sentUpserts.find((u) => u.id === 'task_with_timestamps');
+    expect(sent?.createdAt).toBe('2026-10-31T05:30:00.000Z');
+    expect(sent?.updatedAt).toBe('2026-10-31T06:45:00.000Z');
+  });
+
+  it('28. should not persist lastSyncTimestamp if local database transaction fails', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T11:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'task_should_fail',
+              title: 'Should Fail Transaction',
+              date: '2026-10-31',
+            },
+          ],
+        })
+      );
+    };
+
+    const db = await getDatabase();
+    // Simulate transaction failure
+    const originalTransaction = db.transaction.bind(db);
+    jest.spyOn(db, 'transaction').mockRejectedValueOnce(new Error('Simulated SQLite disk error'));
+
+    const result = await taskBackendSyncService.syncWithBackend();
+    expect(result.success).toBe(false);
+
+    // Verify lastSyncTimestamp was NOT updated in settings repository
+    const savedTimestamp = await settingsRepository.get(TaskBackendSyncService.SETTINGS_KEY_LAST_SYNC, '');
+    expect(savedTimestamp).toBe('');
+  });
+
+  it('29. should convert string numbers on estimatedMinutes in both incoming and outgoing payloads', async () => {
+    const task: any = {
+      id: 'task_string_est_min',
+      title: 'String Estimated Minutes',
+      date: '2026-10-31',
+      priority: 'medium',
+      status: 'pending',
+      estimatedMinutes: '45' as any,
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
+    };
+    await taskRepository.create(task);
+
+    let sentUpserts: any[] = [];
+    serverHandler = (_req, res, body) => {
+      sentUpserts = body.upserts;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [
+            {
+              id: 'server_task_string_est',
+              title: 'Server String Est Min',
+              date: '2026-10-31',
+              estimatedMinutes: '60',
+            },
+          ],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const sent = sentUpserts.find((u) => u.id === 'task_string_est_min');
+    expect(sent?.estimatedMinutes).toBe(45);
+
+    const incoming = await taskRepository.findById('server_task_string_est');
+    expect(incoming?.estimatedMinutes).toBe(60);
+  });
+
+  it('30. should deduplicate identical serverDeletions and serverTasks within a single sync batch', async () => {
+    serverHandler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: ['dup_del_1', 'dup_del_1'],
+          serverTasks: [
+            { id: 'dup_task_1', title: 'Task 1', date: '2026-10-31' },
+            { id: 'dup_task_1', title: 'Task 1 Duplicate', date: '2026-10-31' },
+          ],
+        })
+      );
+    };
+
+    const syncResult = await taskBackendSyncService.syncWithBackend();
+    expect(syncResult.success).toBe(true);
+    expect(syncResult.serverUpsertCount).toBe(1);
+    expect(syncResult.serverDeleteCount).toBe(1);
+  });
+
+  it('31. should not send tasks that have active tombstones in outgoing upserts', async () => {
+    const task: Task = {
+      id: 'task_in_tombstone_and_db',
+      title: 'Should Not Be Sent',
+      date: '2026-10-31',
+      priority: 'low',
+      status: 'pending',
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
+    };
+    await taskRepository.create(task);
+    await tombstoneRepository.recordDeleted('task_in_tombstone_and_db', 'task');
+
+    let sentUpserts: any[] = [];
+    serverHandler = (_req, res, body) => {
+      sentUpserts = body.upserts;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          timestamp: '2026-10-31T10:00:00.000Z',
+          serverDeletions: [],
+          serverTasks: [],
+        })
+      );
+    };
+
+    await taskBackendSyncService.syncWithBackend();
+
+    const found = sentUpserts.find((u) => u.id === 'task_in_tombstone_and_db');
+    expect(found).toBeUndefined();
   });
 });

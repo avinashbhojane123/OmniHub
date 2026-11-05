@@ -24,7 +24,11 @@ describe('MoviesService (Backend)', () => {
   it('should return TMDb genres list', async () => {
     const res = await service.getGenres();
     expect(res.genres).toBeDefined();
-    expect(res.genres.some((g) => g.name === 'Science Fiction' || g.name === 'Sci-Fi')).toBe(true);
+    expect(
+      res.genres.some(
+        (g) => g.name === 'Science Fiction' || g.name === 'Sci-Fi',
+      ),
+    ).toBe(true);
     expect(res.genres.some((g) => g.name === 'Action')).toBe(true);
   }, 15000);
 
@@ -38,7 +42,9 @@ describe('MoviesService (Backend)', () => {
   it('should search movies by query', async () => {
     const searchRes = await service.search('dark knight');
     expect(searchRes.results.length).toBeGreaterThan(0);
-    expect(searchRes.results.some((m) => m.title.includes('Dark Knight'))).toBe(true);
+    expect(searchRes.results.some((m) => m.title.includes('Dark Knight'))).toBe(
+      true,
+    );
   }, 15000);
 
   it('should manage watchlist items in-memory and toggle watched', async () => {
@@ -82,6 +88,12 @@ describe('MoviesService (Backend)', () => {
     expect(cast).toBeDefined();
     expect(Array.isArray(cast)).toBe(true);
     expect(cast.length).toBeGreaterThan(0);
-    expect(cast.some((c: any) => c.person?.name === 'Thandiwe Newton' || c.person?.name === 'Evan Rachel Wood')).toBe(true);
+    expect(
+      cast.some(
+        (c: any) =>
+          c.person?.name === 'Thandiwe Newton' ||
+          c.person?.name === 'Evan Rachel Wood',
+      ),
+    ).toBe(true);
   }, 15000);
 });

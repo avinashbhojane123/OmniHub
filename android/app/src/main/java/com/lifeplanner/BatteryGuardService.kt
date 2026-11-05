@@ -52,6 +52,10 @@ class BatteryGuardService : Service() {
             } else if (action == Intent.ACTION_POWER_CONNECTED) {
                 hasTriggeredLowAlarm = false
                 hasTriggeredCritical5Alarm = false
+                // Charger plugged in: automatically silence low battery and critical discharge sirens
+                if (AlarmRingtoneModule.isPlaying && (AlarmRingtoneModule.activeAlarmId == "battery_low" || AlarmRingtoneModule.activeAlarmId == "battery_crit5")) {
+                    AlarmRingtoneModule.stopRingtone(this@BatteryGuardService)
+                }
             }
 
             evaluateBatteryStatus(intent)
@@ -123,6 +127,13 @@ class BatteryGuardService : Service() {
 
     private fun evaluateBatteryStatus(intent: Intent) {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val dndEnabled = prefs.getBoolean("app_dnd_enabled", false)
+        if (dndEnabled) {
+            if (AlarmRingtoneModule.isPlaying && AlarmRingtoneModule.activeAlarmId?.startsWith("battery_") == true) {
+                AlarmRingtoneModule.stopRingtone(this@BatteryGuardService)
+            }
+            return
+        }
         val guardActive = prefs.getBoolean("battery_guard_active", true)
         if (!guardActive) return
 

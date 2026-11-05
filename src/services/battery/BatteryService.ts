@@ -3,8 +3,10 @@ import notifee, {
   AndroidImportance,
   AndroidVisibility,
   AndroidCategory,
+  EventType,
 } from '@notifee/react-native';
 import { settingsRepository } from '../../database/repositories/SettingsRepository';
+import { SETTINGS_KEYS } from '../../constants/settingsKeys';
 import { batteryRepository, BatterySessionRecord } from '../../database/repositories/BatteryRepository';
 import { alarmService } from '../alarm/AlarmService';
 import { batterySyncService } from './BatterySyncService';
@@ -56,7 +58,12 @@ class BatteryService {
   private statusListeners: Set<BatteryStatusListener> = new Set();
   private settingsListeners: Set<BatterySettingsListener> = new Set();
   private pollerTimer: any = null;
+  private chimeTimer: any = null;
+  private nativeSubscription: any = null;
+  private notifeeUnsubscribe: (() => void) | null = null;
+  private snoozeUntil = 0;
   private initialized = false;
+  private hasReceivedReading = false;
 
   private currentStatus: BatteryStatus = {
     level: 0,
@@ -96,6 +103,12 @@ class BatteryService {
   private hasTriggeredLowAlarm = false;
   private hasTriggeredCritical5Alarm = false;
   private hasTriggeredTempAlarm = false;
+  private isAlarmDismissedForSession = false;
+  private isLowBatteryDismissed = false;
+  private isCritical5Dismissed = false;
+  private isTempDismissed = false;
+  private isDndActive = false;
+  private currentActiveBatteryAlarm: string | null = null;
   private lastAlarmTime = 0;
   private lastChargingState: boolean | null = null;
   private sessionStartTime: number | null = null;
@@ -110,7 +123,7 @@ class BatteryService {
   }
 
   public getCurrentStatus(): BatteryStatus {
-    return this.currentStatus;
+    return { ...this.currentStatus };
   }
 
   public async initialize(): Promise<void> {
@@ -119,8 +132,40 @@ class BatteryService {
 
     await this.loadSettings();
     await this.initNotificationChannel();
+    this.initNotificationListeners();
     this.startListening();
     await this.refreshBatteryStatus();
+  }
+
+  public setDndActive(active: boolean): void {
+    this.isDndActive = active;
+    if (active) {
+      this.stopAlarm(true);
+    }
+    this.syncNativeSettings();
+  }
+
+  public getDndActive(): boolean {
+    return this.isDndActive;
+  }
+
+  private initNotificationListeners(): void {
+    if (!this.notifeeUnsubscribe) {
+      try {
+        this.notifeeUnsubscribe = notifee.onForegroundEvent(async ({ type, detail }) => {
+          const actionId = detail?.pressAction?.id;
+          if (type === EventType.ACTION_PRESS || type === EventType.PRESS) {
+            if (actionId === 'stop_alarm' || actionId === 'dismiss') {
+              await this.stopAlarm(true);
+            } else if (actionId === 'snooze_alarm' || actionId === 'snooze') {
+              await this.snoozeAlarm(5);
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('Error attaching notifee battery alarm listener:', e);
+      }
+    }
   }
 
   private async initNotificationChannel(): Promise<void> {
@@ -152,21 +197,67 @@ class BatteryService {
 
   private async loadSettings(): Promise<void> {
     try {
-      const guard = await settingsRepository.get('battery_guard_active', 'true');
-      const fullEnabled = await settingsRepository.get('battery_full_enabled', 'true');
-      const fullTarget = await settingsRepository.get('battery_full_target', '80');
-      const overcharge100 = await settingsRepository.get('battery_overcharge_100', 'true');
-      const lowEnabled = await settingsRepository.get('battery_low_enabled', 'true');
-      const lowTarget = await settingsRepository.get('battery_low_target', '20');
-      const critLow = await settingsRepository.get('battery_critical_low_5', 'true');
-      const tempEnabled = await settingsRepository.get('battery_temp_enabled', 'true');
-      const tempTarget = await settingsRepository.get('battery_temp_target', '42');
-      const pluggedAlert = await settingsRepository.get('battery_plugged_alert', 'false');
-      const unpluggedAlert = await settingsRepository.get('battery_unplugged_alert', 'false');
-      const continuous = await settingsRepository.get('battery_continuous_ring', 'true');
-      const vibration = await settingsRepository.get('battery_vibration', 'true');
-      const sound = await settingsRepository.get('battery_sound', 'true');
-      const autoRepeat = await settingsRepository.get('battery_auto_repeat', 'true');
+      const allSettings = await settingsRepository.getAll();
+      const guard =
+        allSettings[SETTINGS_KEYS.BATTERY_GUARD_ACTIVE] ??
+        allSettings.battery_guard_active ??
+        'true';
+      const fullEnabled =
+        allSettings[SETTINGS_KEYS.BATTERY_FULL_ENABLED] ??
+        allSettings.battery_full_enabled ??
+        'true';
+      const fullTarget =
+        allSettings[SETTINGS_KEYS.BATTERY_FULL_TARGET] ??
+        allSettings.battery_full_target ??
+        '80';
+      const overcharge100 =
+        allSettings[SETTINGS_KEYS.BATTERY_OVERCHARGE_100] ??
+        allSettings.battery_overcharge_100 ??
+        'true';
+      const lowEnabled =
+        allSettings[SETTINGS_KEYS.BATTERY_LOW_ENABLED] ??
+        allSettings.battery_low_enabled ??
+        'true';
+      const lowTarget =
+        allSettings[SETTINGS_KEYS.BATTERY_LOW_TARGET] ??
+        allSettings.battery_low_target ??
+        '20';
+      const critLow =
+        allSettings[SETTINGS_KEYS.BATTERY_CRITICAL_LOW_5] ??
+        allSettings.battery_critical_low_5 ??
+        'true';
+      const tempEnabled =
+        allSettings[SETTINGS_KEYS.BATTERY_TEMP_ENABLED] ??
+        allSettings.battery_temp_enabled ??
+        'true';
+      const tempTarget =
+        allSettings[SETTINGS_KEYS.BATTERY_TEMP_TARGET] ??
+        allSettings.battery_temp_target ??
+        '42';
+      const pluggedAlert =
+        allSettings[SETTINGS_KEYS.BATTERY_PLUGGED_ALERT] ??
+        allSettings.battery_plugged_alert ??
+        'false';
+      const unpluggedAlert =
+        allSettings[SETTINGS_KEYS.BATTERY_UNPLUGGED_ALERT] ??
+        allSettings.battery_unplugged_alert ??
+        'false';
+      const continuous =
+        allSettings[SETTINGS_KEYS.BATTERY_CONTINUOUS_RING] ??
+        allSettings.battery_continuous_ring ??
+        'true';
+      const vibration =
+        allSettings[SETTINGS_KEYS.BATTERY_VIBRATION] ??
+        allSettings.battery_vibration ??
+        'true';
+      const sound =
+        allSettings[SETTINGS_KEYS.BATTERY_SOUND] ??
+        allSettings.battery_sound ??
+        'true';
+      const autoRepeat =
+        allSettings[SETTINGS_KEYS.BATTERY_AUTO_REPEAT] ??
+        allSettings.battery_auto_repeat ??
+        'true';
 
       this.currentSettings = {
         batteryGuardActive: guard === 'true',
@@ -185,16 +276,24 @@ class BatteryService {
         soundEnabled: sound === 'true',
         autoRepeatAlarm: autoRepeat === 'true',
       };
+      const dnd = allSettings[SETTINGS_KEYS.APP_DND_ENABLED] ?? allSettings.app_dnd_enabled ?? 'false';
+      this.isDndActive = dnd === 'true';
       this.notifySettings();
       this.syncNativeSettings();
 
-      // Restore any active charging session from SQLite
-      batteryRepository.getActiveSession().then((active) => {
-        if (active && this.currentStatus.isCharging) {
-          this.sessionStartTime = new Date(active.startTime).getTime();
+      // Deterministically restore any active charging session from SQLite
+      const active = await batteryRepository.getActiveSession();
+      if (active) {
+        const startMs = new Date(active.startTime).getTime();
+        const now = Date.now();
+        // If session started more than 24h ago, mark it closed to prevent zombie multi-day sessions
+        if (now - startMs > 24 * 60 * 60 * 1000) {
+          batteryRepository.finishActiveSession(this.currentStatus.level || active.startLevel).catch(() => {});
+        } else {
+          this.sessionStartTime = startMs;
           this.sessionStartLevel = active.startLevel;
         }
-      }).catch(() => {});
+      }
     } catch (e) {
       console.warn('Failed to load battery settings:', e);
     }
@@ -203,7 +302,7 @@ class BatteryService {
   private syncNativeSettings() {
     if (DeviceBattery && typeof DeviceBattery.syncSettings === 'function') {
       try {
-        DeviceBattery.syncSettings({
+        const res = DeviceBattery.syncSettings({
           batteryGuardActive: this.currentSettings.batteryGuardActive,
           fullChargeAlarmEnabled: this.currentSettings.fullChargeAlarmEnabled,
           fullChargeTarget: this.currentSettings.fullChargeTarget,
@@ -215,7 +314,11 @@ class BatteryService {
           tempTarget: this.currentSettings.tempTarget,
           soundEnabled: this.currentSettings.soundEnabled,
           vibrationEnabled: this.currentSettings.vibrationEnabled,
+          dndEnabled: this.isDndActive,
         });
+        if (res && typeof res.catch === 'function') {
+          res.catch((err: any) => console.warn('Native battery sync rejected:', err));
+        }
       } catch (e) {
         console.warn('Failed to sync native battery settings:', e);
       }
@@ -232,7 +335,11 @@ class BatteryService {
 
   public subscribeStatus(listener: BatteryStatusListener): () => void {
     this.statusListeners.add(listener);
-    listener({ ...this.currentStatus });
+    try {
+      listener({ ...this.currentStatus });
+    } catch (e) {
+      console.warn('Error in initial battery status listener call:', e);
+    }
     return () => {
       this.statusListeners.delete(listener);
     };
@@ -240,76 +347,120 @@ class BatteryService {
 
   public subscribeSettings(listener: BatterySettingsListener): () => void {
     this.settingsListeners.add(listener);
-    listener({ ...this.currentSettings });
+    try {
+      listener({ ...this.currentSettings });
+    } catch (e) {
+      console.warn('Error in initial battery settings listener call:', e);
+    }
     return () => {
       this.settingsListeners.delete(listener);
     };
   }
 
   private notifyStatus() {
+    const copy = { ...this.currentStatus };
     for (const listener of this.statusListeners) {
-      listener({ ...this.currentStatus });
+      try {
+        listener(copy);
+      } catch (e) {
+        console.warn('Error in battery status listener:', e);
+      }
     }
   }
 
   private notifySettings() {
+    const copy = { ...this.currentSettings };
     for (const listener of this.settingsListeners) {
-      listener({ ...this.currentSettings });
+      try {
+        listener(copy);
+      } catch (e) {
+        console.warn('Error in battery settings listener:', e);
+      }
     }
   }
 
   public async updateSettings(updates: Partial<BatteryAlarmSettings>): Promise<void> {
-    this.currentSettings = { ...this.currentSettings, ...updates };
+    const sanitized: Partial<BatteryAlarmSettings> = { ...updates };
+    if (updates.fullChargeTarget !== undefined) {
+      const parsed = Math.round(Number(updates.fullChargeTarget));
+      sanitized.fullChargeTarget = isNaN(parsed) ? 80 : Math.max(50, Math.min(100, parsed));
+    }
+    if (updates.lowBatteryTarget !== undefined) {
+      const parsed = Math.round(Number(updates.lowBatteryTarget));
+      sanitized.lowBatteryTarget = isNaN(parsed) ? 20 : Math.max(5, Math.min(50, parsed));
+    }
+    if (updates.tempTarget !== undefined) {
+      const parsed = Math.round(Number(updates.tempTarget));
+      sanitized.tempTarget = isNaN(parsed) ? 42 : Math.max(30, Math.min(70, parsed));
+    }
+
+    // Enforce lowBatteryTarget < fullChargeTarget
+    const targetFull = sanitized.fullChargeTarget ?? this.currentSettings.fullChargeTarget;
+    const targetLow = sanitized.lowBatteryTarget ?? this.currentSettings.lowBatteryTarget;
+    if (targetLow >= targetFull) {
+      if (sanitized.lowBatteryTarget !== undefined) {
+        sanitized.lowBatteryTarget = Math.max(5, targetFull - 10);
+      } else {
+        sanitized.fullChargeTarget = Math.min(100, targetLow + 10);
+      }
+    }
+
+    this.currentSettings = { ...this.currentSettings, ...sanitized };
+    if (sanitized.batteryGuardActive === false) {
+      this.stopAlarm().catch(() => {});
+    }
     this.notifySettings();
     this.syncNativeSettings();
     batterySyncService.syncSettingsToCloud(this.currentSettings).catch(() => {});
 
     try {
-      if (updates.batteryGuardActive !== undefined) {
-        await settingsRepository.set('battery_guard_active', String(updates.batteryGuardActive));
+      const persistPromises: Promise<void>[] = [];
+      if (sanitized.batteryGuardActive !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_GUARD_ACTIVE, String(sanitized.batteryGuardActive)));
       }
-      if (updates.fullChargeAlarmEnabled !== undefined) {
-        await settingsRepository.set('battery_full_enabled', String(updates.fullChargeAlarmEnabled));
+      if (sanitized.fullChargeAlarmEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_FULL_ENABLED, String(sanitized.fullChargeAlarmEnabled)));
       }
-      if (updates.fullChargeTarget !== undefined) {
-        await settingsRepository.set('battery_full_target', String(updates.fullChargeTarget));
+      if (sanitized.fullChargeTarget !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_FULL_TARGET, String(sanitized.fullChargeTarget)));
       }
-      if (updates.overchargeFailsafeEnabled !== undefined) {
-        await settingsRepository.set('battery_overcharge_100', String(updates.overchargeFailsafeEnabled));
+      if (sanitized.overchargeFailsafeEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_OVERCHARGE_100, String(sanitized.overchargeFailsafeEnabled)));
       }
-      if (updates.lowBatteryAlarmEnabled !== undefined) {
-        await settingsRepository.set('battery_low_enabled', String(updates.lowBatteryAlarmEnabled));
+      if (sanitized.lowBatteryAlarmEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_LOW_ENABLED, String(sanitized.lowBatteryAlarmEnabled)));
       }
-      if (updates.lowBatteryTarget !== undefined) {
-        await settingsRepository.set('battery_low_target', String(updates.lowBatteryTarget));
+      if (sanitized.lowBatteryTarget !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_LOW_TARGET, String(sanitized.lowBatteryTarget)));
       }
-      if (updates.criticalLowAlarmEnabled !== undefined) {
-        await settingsRepository.set('battery_critical_low_5', String(updates.criticalLowAlarmEnabled));
+      if (sanitized.criticalLowAlarmEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_CRITICAL_LOW_5, String(sanitized.criticalLowAlarmEnabled)));
       }
-      if (updates.tempAlarmEnabled !== undefined) {
-        await settingsRepository.set('battery_temp_enabled', String(updates.tempAlarmEnabled));
+      if (sanitized.tempAlarmEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_TEMP_ENABLED, String(sanitized.tempAlarmEnabled)));
       }
-      if (updates.tempTarget !== undefined) {
-        await settingsRepository.set('battery_temp_target', String(updates.tempTarget));
+      if (sanitized.tempTarget !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_TEMP_TARGET, String(sanitized.tempTarget)));
       }
-      if (updates.pluggedAlertEnabled !== undefined) {
-        await settingsRepository.set('battery_plugged_alert', String(updates.pluggedAlertEnabled));
+      if (sanitized.pluggedAlertEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_PLUGGED_ALERT, String(sanitized.pluggedAlertEnabled)));
       }
-      if (updates.unpluggedAlertEnabled !== undefined) {
-        await settingsRepository.set('battery_unplugged_alert', String(updates.unpluggedAlertEnabled));
+      if (sanitized.unpluggedAlertEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_UNPLUGGED_ALERT, String(sanitized.unpluggedAlertEnabled)));
       }
-      if (updates.continuousRingtone !== undefined) {
-        await settingsRepository.set('battery_continuous_ring', String(updates.continuousRingtone));
+      if (sanitized.continuousRingtone !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_CONTINUOUS_RING, String(sanitized.continuousRingtone)));
       }
-      if (updates.vibrationEnabled !== undefined) {
-        await settingsRepository.set('battery_vibration', String(updates.vibrationEnabled));
+      if (sanitized.vibrationEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_VIBRATION, String(sanitized.vibrationEnabled)));
       }
-      if (updates.soundEnabled !== undefined) {
-        await settingsRepository.set('battery_sound', String(updates.soundEnabled));
+      if (sanitized.soundEnabled !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_SOUND, String(sanitized.soundEnabled)));
       }
-      if (updates.autoRepeatAlarm !== undefined) {
-        await settingsRepository.set('battery_auto_repeat', String(updates.autoRepeatAlarm));
+      if (sanitized.autoRepeatAlarm !== undefined) {
+        persistPromises.push(settingsRepository.set(SETTINGS_KEYS.BATTERY_AUTO_REPEAT, String(sanitized.autoRepeatAlarm)));
       }
+      await Promise.all(persistPromises);
     } catch (e) {
       console.warn('Failed to save battery settings:', e);
     }
@@ -320,12 +471,22 @@ class BatteryService {
   }
 
   private startListening() {
-    if (DeviceBattery) {
+    if (DeviceBattery && typeof DeviceBattery.startMonitoring === 'function') {
       try {
         DeviceBattery.startMonitoring();
+        if (this.nativeSubscription) {
+          try {
+            if (typeof this.nativeSubscription.remove === 'function') {
+              this.nativeSubscription.remove();
+            }
+          } catch {}
+          this.nativeSubscription = null;
+        }
         const eventEmitter = new NativeEventEmitter(DeviceBattery);
-        eventEmitter.addListener('BatteryStatusChanged', (data: any) => {
-          this.handleNewStatus(data as BatteryStatus);
+        this.nativeSubscription = eventEmitter.addListener('BatteryStatusChanged', (data: any) => {
+          if (data && typeof data === 'object') {
+            this.handleNewStatus(data as BatteryStatus);
+          }
         });
       } catch (e) {
         console.warn('Error attaching DeviceBattery event listener:', e);
@@ -337,7 +498,10 @@ class BatteryService {
       return;
     }
 
-    if (this.pollerTimer) clearInterval(this.pollerTimer);
+    if (this.pollerTimer) {
+      clearInterval(this.pollerTimer);
+      this.pollerTimer = null;
+    }
     this.pollerTimer = setInterval(() => {
       // While charging, poll every 4s to track live wattage and current.
       // When unplugged, poll every 30s to conserve energy, relying on native broadcasts.
@@ -348,13 +512,17 @@ class BatteryService {
         this.refreshBatteryStatus();
       }
     }, 4000);
+
+    if (this.pollerTimer && typeof this.pollerTimer.unref === 'function') {
+      this.pollerTimer.unref();
+    }
   }
 
   public async refreshBatteryStatus(): Promise<BatteryStatus> {
     if (DeviceBattery && typeof DeviceBattery.getBatteryInfo === 'function') {
       try {
         const info = await DeviceBattery.getBatteryInfo();
-        if (info && typeof info.level === 'number') {
+        if (info && typeof info.level === 'number' && info.level >= 0 && info.level <= 100) {
           this.handleNewStatus(info);
           return this.currentStatus;
         }
@@ -363,30 +531,54 @@ class BatteryService {
       }
     }
 
-    // Fallback if native module is unavailable (e.g. during testing or web)
-    this.handleNewStatus(this.currentStatus);
     return this.currentStatus;
   }
 
   private handleNewStatus(newStatus: BatteryStatus) {
-    this.currentStatus = { ...newStatus };
-
-    // Initial status on app startup: if already charging, initialize session tracking
-    if (this.lastChargingState === null && newStatus.isCharging) {
-      this.sessionStartTime = Date.now();
-      this.sessionStartLevel = newStatus.level;
-      if (newStatus.level >= this.currentSettings.fullChargeTarget) {
-        this.hasTriggeredFullAlarm = true;
-      }
+    if (!newStatus || typeof newStatus.level !== 'number' || isNaN(newStatus.level)) {
+      return;
     }
 
-    // Plug/unplug transition detection
-    if (this.lastChargingState !== null && this.lastChargingState !== newStatus.isCharging) {
+    // Ignore invalid readings (e.g. -1 unreadable error from Android BatteryManager)
+    if (newStatus.level < 0 || newStatus.level > 100) {
+      return;
+    }
+
+    this.hasReceivedReading = true;
+    this.currentStatus = { ...newStatus };
+
+    // Initial status on app startup: if already charging, preserve or initialize session tracking
+    if (this.lastChargingState === null) {
+      if (newStatus.isCharging) {
+        if (!this.sessionStartTime) {
+          this.sessionStartTime = Date.now();
+          this.sessionStartLevel = newStatus.level;
+          batteryRepository.startSession(newStatus.level, newStatus.chargingType).catch(() => {});
+        }
+        if (newStatus.level >= this.currentSettings.fullChargeTarget) {
+          this.hasTriggeredFullAlarm = true;
+        }
+      } else {
+        // App opened while not charging - finalize any dangling unclosed session
+        batteryRepository.finishActiveSession(newStatus.level).catch(() => {});
+      }
+    } else if (this.lastChargingState !== newStatus.isCharging) {
+      // Plug/unplug transition detection
       if (newStatus.isCharging) {
         // Charger plugged in: start session tracking in memory & SQLite
         this.sessionStartTime = Date.now();
         this.sessionStartLevel = newStatus.level;
         batteryRepository.startSession(newStatus.level, newStatus.chargingType).catch(() => {});
+
+        // Reset low battery alarms and silence alarm immediately if it was ringing
+        this.hasTriggeredLowAlarm = false;
+        this.hasTriggeredCritical5Alarm = false;
+        this.isAlarmDismissedForSession = false;
+        this.isLowBatteryDismissed = false;
+        this.isCritical5Dismissed = false;
+        this.isTempDismissed = false;
+        this.stopAlarm(false);
+
         if (newStatus.level >= this.currentSettings.fullChargeTarget) {
           this.hasTriggeredFullAlarm = true;
         } else {
@@ -398,9 +590,16 @@ class BatteryService {
         }
       } else {
         // Charger unplugged: reset alarms and finalize session in SQLite & cloud
+        this.hasTriggeredFullAlarm = false;
+        this.hasTriggered100Alarm = false;
         this.hasTriggeredLowAlarm = false;
         this.hasTriggeredCritical5Alarm = false;
-        this.hasTriggered100Alarm = false;
+        this.isAlarmDismissedForSession = false;
+        this.isLowBatteryDismissed = false;
+        this.isCritical5Dismissed = false;
+        this.isTempDismissed = false;
+        this.isAlarmDismissedForSession = false;
+        this.snoozeUntil = 0;
         this.sessionStartTime = null;
         this.sessionStartLevel = null;
         batteryRepository.finishActiveSession(newStatus.level).then((sess) => {
@@ -408,7 +607,7 @@ class BatteryService {
             batterySyncService.syncSessionToCloud(sess).catch(() => {});
           }
         }).catch(() => {});
-        this.stopAlarm();
+        this.stopAlarm(false);
         if (this.currentSettings.unpluggedAlertEnabled) {
           this.notifyPlugEvent('⚡ Charger Disconnected', `Device unplugged at ${newStatus.level}%`);
         }
@@ -438,7 +637,21 @@ class BatteryService {
   }
 
   private checkAlarmTriggers(status: BatteryStatus) {
-    if (!this.currentSettings.batteryGuardActive) return;
+    if (!this.hasReceivedReading || !this.currentSettings.batteryGuardActive || !status.present) {
+      return;
+    }
+
+    if (this.isDndActive) {
+      return;
+    }
+
+    if (Date.now() < this.snoozeUntil) {
+      return;
+    }
+
+    if (status.level <= 0 || status.level > 100) {
+      return;
+    }
 
     const now = Date.now();
 
@@ -448,27 +661,30 @@ class BatteryService {
       status.isCharging &&
       status.level >= this.currentSettings.fullChargeTarget
     ) {
-      if (!this.hasTriggeredFullAlarm) {
-        this.hasTriggeredFullAlarm = true;
-        this.lastAlarmTime = now;
-        this.triggerBatteryAlarm(
-          `⚡ Battery ${status.level}% Charged!`,
-          `Target reached (${this.currentSettings.fullChargeTarget}%). Unplug your charger to protect battery health and lifespan.`
-        );
-      } else if (
-        this.currentSettings.autoRepeatAlarm &&
-        now - this.lastAlarmTime > 180000 &&
-        status.level < 100
-      ) {
-        // Re-ring every 3 minutes if phone remains plugged in
-        this.lastAlarmTime = now;
-        this.triggerBatteryAlarm(
-          `⚡ Reminder: Battery at ${status.level}%!`,
-          `Target was reached. Unplug your device to avoid high-voltage stress.`
-        );
+      if (!this.isAlarmDismissedForSession) {
+        if (!this.hasTriggeredFullAlarm) {
+          this.hasTriggeredFullAlarm = true;
+          this.lastAlarmTime = now;
+          this.triggerBatteryAlarm(
+            `⚡ Battery ${status.level}% Charged!`,
+            `Target reached (${this.currentSettings.fullChargeTarget}%). Unplug your charger to protect battery health and lifespan.`
+          );
+        } else if (
+          this.currentSettings.autoRepeatAlarm &&
+          now - this.lastAlarmTime > 180000 &&
+          (!this.currentSettings.overchargeFailsafeEnabled || status.level < 100)
+        ) {
+          // Re-ring every 3 minutes if phone remains plugged in
+          this.lastAlarmTime = now;
+          this.triggerBatteryAlarm(
+            `⚡ Reminder: Battery at ${status.level}%!`,
+            `Target was reached. Unplug your device to avoid high-voltage stress.`
+          );
+        }
       }
     } else if (!status.isCharging || status.level < this.currentSettings.fullChargeTarget) {
       this.hasTriggeredFullAlarm = false;
+      this.isAlarmDismissedForSession = false;
     }
 
     // 2. Emergency 100% Overcharge Failsafe Alarm
@@ -478,12 +694,24 @@ class BatteryService {
       status.isCharging &&
       status.level >= 100
     ) {
-      if (!this.hasTriggered100Alarm) {
-        this.hasTriggered100Alarm = true;
-        this.triggerBatteryAlarm(
-          `🚨 CRITICAL OVERCHARGE: 100% Full!`,
-          `Battery is at 100%! Continuous trickle charge degrades lithium cells rapidly. Unplug immediately!`
-        );
+      if (!this.isAlarmDismissedForSession) {
+        if (!this.hasTriggered100Alarm) {
+          this.hasTriggered100Alarm = true;
+          this.lastAlarmTime = now;
+          this.triggerBatteryAlarm(
+            `🚨 CRITICAL OVERCHARGE: 100% Full!`,
+            `Battery is at 100%! Continuous trickle charge degrades lithium cells rapidly. Unplug immediately!`
+          );
+        } else if (
+          this.currentSettings.autoRepeatAlarm &&
+          now - this.lastAlarmTime > 180000
+        ) {
+          this.lastAlarmTime = now;
+          this.triggerBatteryAlarm(
+            `🚨 CRITICAL OVERCHARGE: Still 100%!`,
+            `Battery is still plugged in at 100%! Unplug immediately to protect your hardware.`
+          );
+        }
       }
     } else if (!status.isCharging || status.level < 100) {
       this.hasTriggered100Alarm = false;
@@ -493,17 +721,21 @@ class BatteryService {
     if (
       this.currentSettings.lowBatteryAlarmEnabled &&
       !status.isCharging &&
-      status.level <= this.currentSettings.lowBatteryTarget
+      status.level <= this.currentSettings.lowBatteryTarget &&
+      (!this.currentSettings.criticalLowAlarmEnabled || status.level > 5)
     ) {
-      if (!this.hasTriggeredLowAlarm) {
-        this.hasTriggeredLowAlarm = true;
-        this.triggerBatteryAlarm(
-          `🪫 Low Battery Alert (${status.level}%)`,
-          `Battery dropped to ${status.level}%. Please connect your charger to avoid power off.`
-        );
+      if (!this.isLowBatteryDismissed) {
+        if (!this.hasTriggeredLowAlarm) {
+          this.hasTriggeredLowAlarm = true;
+          this.triggerBatteryAlarm(
+            `🪫 Low Battery Alert (${status.level}%)`,
+            `Battery dropped to ${status.level}%. Please connect your charger to avoid power off.`
+          );
+        }
       }
     } else if (status.isCharging || status.level > this.currentSettings.lowBatteryTarget) {
       this.hasTriggeredLowAlarm = false;
+      this.isLowBatteryDismissed = false;
     }
 
     // 4. Critical 5% Discharge Alarm
@@ -512,31 +744,43 @@ class BatteryService {
       !status.isCharging &&
       status.level <= 5
     ) {
-      if (!this.hasTriggeredCritical5Alarm) {
-        this.hasTriggeredCritical5Alarm = true;
-        this.triggerBatteryAlarm(
-          `🪫 CRITICAL 5% BATTERY!`,
-          `Phone will shut down in seconds! Connect charger immediately.`
-        );
+      if (!this.isCritical5Dismissed) {
+        if (!this.hasTriggeredCritical5Alarm) {
+          this.hasTriggeredCritical5Alarm = true;
+          this.triggerBatteryAlarm(
+            `🪫 CRITICAL 5% BATTERY!`,
+            `Phone will shut down in seconds! Connect charger immediately.`
+          );
+        }
       }
     } else if (status.isCharging || status.level > 5) {
       this.hasTriggeredCritical5Alarm = false;
+      this.isCritical5Dismissed = false;
     }
 
     // 5. Overheat Alarm Check
     if (
       this.currentSettings.tempAlarmEnabled &&
+      typeof status.temperature === 'number' &&
+      Number.isFinite(status.temperature) &&
       status.temperature >= this.currentSettings.tempTarget
     ) {
-      if (!this.hasTriggeredTempAlarm) {
-        this.hasTriggeredTempAlarm = true;
-        this.triggerBatteryAlarm(
-          `🔥 High Battery Temperature (${status.temperature.toFixed(1)}°C)!`,
-          `Device battery is running hot. Unplug and allow it to cool down to protect hardware.`
-        );
+      if (!this.isTempDismissed) {
+        if (!this.hasTriggeredTempAlarm) {
+          this.hasTriggeredTempAlarm = true;
+          this.triggerBatteryAlarm(
+            `🔥 High Battery Temperature (${status.temperature.toFixed(1)}°C)!`,
+            `Device battery is running hot. Unplug and allow it to cool down to protect hardware.`
+          );
+        }
       }
-    } else if (status.temperature < this.currentSettings.tempTarget - 2) {
+    } else if (
+      typeof status.temperature === 'number' &&
+      Number.isFinite(status.temperature) &&
+      status.temperature < this.currentSettings.tempTarget - 2
+    ) {
       this.hasTriggeredTempAlarm = false;
+      this.isTempDismissed = false;
     }
   }
 
@@ -544,9 +788,10 @@ class BatteryService {
     if (!this.currentStatus.isCharging || !this.sessionStartTime || this.sessionStartLevel === null) {
       return null;
     }
-    const elapsedMinutes = Math.max(1, Math.round((Date.now() - this.sessionStartTime) / 60000));
+    const elapsedMinutes = Math.max(1, Math.round(Math.max(0, Date.now() - this.sessionStartTime) / 60000));
     const gained = Math.max(0, this.currentStatus.level - this.sessionStartLevel);
-    const speedPerHour = Math.round((gained / (elapsedMinutes / 60)) * 10) / 10;
+    const speed = elapsedMinutes > 0 ? (gained / (elapsedMinutes / 60)) : 0;
+    const speedPerHour = Number.isFinite(speed) ? Math.round(speed * 10) / 10 : 0;
     return {
       elapsedMinutes,
       gained,
@@ -558,6 +803,9 @@ class BatteryService {
    * Trigger the loud battery alarm using AlarmService
    */
   public async triggerBatteryAlarm(title: string, message: string): Promise<void> {
+    if (this.isDndActive) {
+      return;
+    }
     // Log event to backend cloud diagnostics
     const eventType = title.toLowerCase().includes('100%')
       ? 'overcharge_100'
@@ -568,6 +816,8 @@ class BatteryService {
       : title.toLowerCase().includes('low')
       ? 'low_battery'
       : 'full_charge';
+
+    this.currentActiveBatteryAlarm = eventType;
 
     batterySyncService.logAlertToCloud({
       eventType: eventType as any,
@@ -582,6 +832,10 @@ class BatteryService {
         id: 'active_battery_alarm',
         title: `⏰ ${title}`,
         body: message,
+        data: {
+          actionType: 'battery_alarm',
+          screen: 'BatteryAlarm',
+        },
         android: {
           channelId: 'battery_charge_channel',
           smallIcon: 'ic_notification',
@@ -618,10 +872,12 @@ class BatteryService {
           // One-shot chime / vibration alert (doesn't loop for 60s)
           if (AlarmRingtone) {
             AlarmRingtone.play(this.currentSettings.soundEnabled, this.currentSettings.vibrationEnabled);
-            setTimeout(() => {
+            if (this.chimeTimer) clearTimeout(this.chimeTimer);
+            this.chimeTimer = setTimeout(() => {
               try {
                 AlarmRingtone.stop();
               } catch {}
+              this.chimeTimer = null;
             }, 4000);
           } else if (this.currentSettings.vibrationEnabled) {
             Vibration.vibrate([0, 500, 200, 500]);
@@ -636,7 +892,7 @@ class BatteryService {
   /**
    * Test action triggered manually from UI
    */
-  public async testAlarm(type: 'full' | 'low' | 'temp'): Promise<void> {
+  public async testAlarm(type: 'full' | 'low' | 'temp' | 'critical' | 'overcharge'): Promise<void> {
     if (type === 'full') {
       await this.triggerBatteryAlarm(
         `⚡ Test: Battery ${this.currentSettings.fullChargeTarget}% Charged!`,
@@ -647,6 +903,16 @@ class BatteryService {
         `🪫 Test: Low Battery Alert (${this.currentSettings.lowBatteryTarget}%)`,
         'Battery is below threshold. Please connect charger.'
       );
+    } else if (type === 'overcharge') {
+      await this.triggerBatteryAlarm(
+        `🚨 Test: 100% Critical Overcharge Alert!`,
+        'Battery is 100% full. Unplug charger immediately.'
+      );
+    } else if (type === 'critical') {
+      await this.triggerBatteryAlarm(
+        `🪫 Test: Critical 5% Battery Alert!`,
+        'Battery is critically depleted. Connect charger immediately.'
+      );
     } else {
       await this.triggerBatteryAlarm(
         `🔥 Test: Battery Temperature Overheat (${this.currentSettings.tempTarget}°C)`,
@@ -656,27 +922,67 @@ class BatteryService {
   }
 
   /**
-   * Manual status override for simulator / testing
+   * Update battery status with new metrics and evaluate alarm conditions
    */
-  public setMockStatus(updates: Partial<BatteryStatus>): void {
+  public updateStatus(updates: Partial<BatteryStatus>): BatteryStatus {
     this.handleNewStatus({ ...this.currentStatus, ...updates });
+    return this.currentStatus;
   }
 
-  public async stopAlarm(): Promise<void> {
+  private isStoppingAlarm = false;
+
+  public async stopAlarm(dismissSession: boolean = true): Promise<void> {
+    if (this.isStoppingAlarm) return;
+    this.isStoppingAlarm = true;
+
     try {
-      await alarmService.stopRinging();
-    } catch {}
-    if (AlarmRingtone) {
+      if (dismissSession) {
+        if (this.currentActiveBatteryAlarm === 'full_charge' || this.currentActiveBatteryAlarm === 'overcharge_100') {
+          this.isAlarmDismissedForSession = true;
+        } else if (this.currentActiveBatteryAlarm === 'low_battery') {
+          this.isLowBatteryDismissed = true;
+        } else if (this.currentActiveBatteryAlarm === 'critical_low') {
+          this.isCritical5Dismissed = true;
+        } else if (this.currentActiveBatteryAlarm === 'overheat') {
+          this.isTempDismissed = true;
+        } else {
+          this.isAlarmDismissedForSession = true;
+          this.isLowBatteryDismissed = true;
+          this.isCritical5Dismissed = true;
+          this.isTempDismissed = true;
+        }
+      }
+      this.currentActiveBatteryAlarm = null;
       try {
-        AlarmRingtone.stop();
+        await alarmService.stopRinging();
       } catch {}
+      if (this.chimeTimer) {
+        clearTimeout(this.chimeTimer);
+        this.chimeTimer = null;
+      }
+      if (AlarmRingtone) {
+        try {
+          AlarmRingtone.stop();
+        } catch {}
+      }
+      try {
+        Vibration.cancel();
+      } catch {}
+      try {
+        await notifee.cancelNotification('active_battery_alarm');
+      } catch {}
+      try {
+        await notifee.cancelNotification('active_ringing_alarm');
+      } catch {}
+    } finally {
+      this.isStoppingAlarm = false;
     }
-    try {
-      Vibration.cancel();
-    } catch {}
-    try {
-      await notifee.cancelNotification('active_battery_alarm');
-    } catch {}
+  }
+
+  public async snoozeAlarm(minutes: number = 5): Promise<void> {
+    const validMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
+    this.snoozeUntil = Date.now() + validMinutes * 60 * 1000;
+    await this.stopAlarm(false);
   }
 
   private async updateOngoingMonitorNotification(status: BatteryStatus): Promise<void> {
@@ -718,11 +1024,46 @@ class BatteryService {
       clearInterval(this.pollerTimer);
       this.pollerTimer = null;
     }
+    if (this.chimeTimer) {
+      clearTimeout(this.chimeTimer);
+      this.chimeTimer = null;
+    }
+    if (this.notifeeUnsubscribe) {
+      try {
+        this.notifeeUnsubscribe();
+      } catch {}
+      this.notifeeUnsubscribe = null;
+    }
+    if (this.nativeSubscription) {
+      try {
+        this.nativeSubscription.remove();
+      } catch {}
+      this.nativeSubscription = null;
+    }
     if (DeviceBattery && typeof DeviceBattery.stopMonitoring === 'function') {
       try {
         DeviceBattery.stopMonitoring();
       } catch {}
     }
+    this.statusListeners.clear();
+    this.settingsListeners.clear();
+    this.initialized = false;
+    this.hasReceivedReading = false;
+    this.lastChargingState = null;
+    this.sessionStartTime = null;
+    this.sessionStartLevel = null;
+    this.snoozeUntil = 0;
+    this.hasTriggeredFullAlarm = false;
+    this.hasTriggered100Alarm = false;
+    this.hasTriggeredLowAlarm = false;
+    this.hasTriggeredCritical5Alarm = false;
+    this.hasTriggeredTempAlarm = false;
+    this.isAlarmDismissedForSession = false;
+    this.isLowBatteryDismissed = false;
+    this.isCritical5Dismissed = false;
+    this.isTempDismissed = false;
+    this.currentActiveBatteryAlarm = null;
+    this.isDndActive = false;
   }
 }
 

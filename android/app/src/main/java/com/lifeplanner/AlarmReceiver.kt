@@ -16,6 +16,12 @@ import androidx.core.app.NotificationManagerCompat
 class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        val prefs = context.getSharedPreferences(BatteryGuardService.PREFS_NAME, Context.MODE_PRIVATE)
+        val dndEnabled = prefs.getBoolean("app_dnd_enabled", false)
+        if (dndEnabled) {
+            return
+        }
+
         val alarmId = intent.getStringExtra("alarmId") ?: "alarm_${System.currentTimeMillis()}"
         val title = intent.getStringExtra("title") ?: "Alarm"
         val description = intent.getStringExtra("description") ?: "Scheduled time reached!"

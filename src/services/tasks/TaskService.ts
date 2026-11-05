@@ -77,7 +77,7 @@ export function sanitizeDateString(dateStr?: string | Date | number | null): str
  * True for tasks with a date, non-disabled reminder, and either a start time
  * or an untimed all-day reminder (> 0 minutes).
  */
-function shouldScheduleReminder(task?: Task | null): boolean {
+export function shouldScheduleReminder(task?: Task | null): boolean {
   if (!task || !task.date || task.reminderMinutes === -1) return false;
   if (task.status === 'completed' || task.status === 'cancelled') return false;
   return Boolean(task.startTime) || (task.reminderMinutes !== undefined && task.reminderMinutes > 0);

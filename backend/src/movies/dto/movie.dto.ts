@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsBoolean, IsArray } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsBoolean,
+  IsArray,
+} from 'class-validator';
 
 export class BookmarkMovieDto {
   @IsOptional()

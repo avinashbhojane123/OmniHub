@@ -9,8 +9,10 @@ import notifee, {
   TimestampTrigger,
   TriggerType,
 } from '@notifee/react-native';
-import { Task, SnoozeDurationOption, KeepNote } from '../../types';
+import { Task, SnoozeDurationOption, KeepNote, Habit } from '../../types';
 import { taskRepository } from '../../database/repositories/TaskRepository';
+import { keepNoteRepository } from '../../database/repositories/KeepNoteRepository';
+import { habitRepository } from '../../database/repositories/HabitRepository';
 import { settingsRepository } from '../../database/repositories/SettingsRepository';
 import { parseISO, addMinutes, isBefore, isValid } from 'date-fns';
 
@@ -65,8 +67,8 @@ export class NotificationService {
     return NotificationService.instance;
   }
 
-  public async initialize(): Promise<void> {
-    if (this.isInitialized) return;
+  public async initialize(force = false): Promise<void> {
+    if (this.isInitialized && !force) return;
 
     try {
       // 1. Create Android Notification Channels
@@ -93,7 +95,7 @@ export class NotificationService {
    * 3. Exact Alarm scheduling check (SCHEDULE_EXACT_ALARM on Android 12+)
    */
   public async requestDirectInstallPermissions(): Promise<void> {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS === 'ios') return;
 
     try {
       // 1. Post Notifications Permission dialog
@@ -124,7 +126,9 @@ export class NotificationService {
           const exactAlarmPrompted = await settingsRepository.get('EXACT_ALARM_PROMPTED_ON_INSTALL', 'false');
           if (exactAlarmPrompted !== 'true') {
             await settingsRepository.set('EXACT_ALARM_PROMPTED_ON_INSTALL', 'true');
-            await notifee.openAlarmPermissionSettings();
+            if (typeof notifee?.openAlarmPermissionSettings === 'function') {
+              await notifee.openAlarmPermissionSettings();
+            }
           }
         }
       } catch (alarmErr) {
@@ -198,6 +202,12 @@ export class NotificationService {
       const notifEnabled = (await settingsRepository.get('notificationsEnabled', 'true')) === 'true';
       if (!notifEnabled) return null;
 
+      // Completed or cancelled tasks should not schedule reminders
+      if (task.status === 'completed' || task.status === 'cancelled') {
+        await this.cancelTaskReminder(task.id);
+        return null;
+      }
+
       if (!task.date || task.reminderMinutes === -1) {
         if (task.reminderMinutes === -1) {
           await this.cancelTaskReminder(task.id);
@@ -212,19 +222,26 @@ export class NotificationService {
       }
 
       // Calculate scheduled trigger time robustly (handles 12h AM/PM or 24h formats; defaults all-day tasks to 09:00)
-      const effectiveTime = task.startTime || '09:00';
-      const match = effectiveTime.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
-      if (!match) return null;
-      let hours = parseInt(match[1], 10);
-      const minutes = parseInt(match[2], 10);
-      const period = match[3]?.toLowerCase();
+      const effectiveTime = task.startTime ? task.startTime.trim() : '09:00';
+      const timeMatch = effectiveTime.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+      if (!timeMatch) return null;
+      let hours = parseInt(timeMatch[1], 10);
+      const minutes = parseInt(timeMatch[2], 10);
+      const period = timeMatch[3]?.toLowerCase();
       if (period === 'pm' && hours < 12) hours += 12;
       if (period === 'am' && hours === 12) hours = 0;
 
-      const dateParts = task.date.split('-').map(Number);
+      if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+
+      // Extract date part cleanly (handles YYYY-MM-DD or ISO strings like 2026-10-31T00:00:00.000Z)
+      const cleanDate = task.date.trim().split('T')[0];
+      const dateParts = cleanDate.split('-').map(Number);
       if (dateParts.length !== 3 || dateParts.some(isNaN)) return null;
-      let targetDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], hours, minutes, 0, 0);
-      if (isNaN(targetDate.getTime())) return null;
+      const [year, month, day] = dateParts;
+      if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+      let targetDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+      if (!isValid(targetDate) || isNaN(targetDate.getTime())) return null;
 
       if (task.reminderMinutes && task.reminderMinutes > 0) {
         targetDate = addMinutes(targetDate, -task.reminderMinutes);
@@ -238,6 +255,8 @@ export class NotificationService {
 
       const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
       const vibrationEnabled = (await settingsRepository.get('notificationVibration', 'true')) === 'true';
+      const defaultSnoozeStr = await settingsRepository.get('defaultSnoozeMinutes', '10');
+      const defaultSnoozeMinutes = parseInt(defaultSnoozeStr, 10) || 10;
 
       const isLoudTask =
         task.priority === 'high' ||
@@ -321,13 +340,19 @@ export class NotificationService {
           },
           actions: [
             {
-              title: '🔕 STOP ALARM',
+              title: '🔕 DISMISS',
               pressAction: {
                 id: 'dismiss',
               },
             },
             {
-              title: '💤 SNOOZE (5m)',
+              title: '✅ COMPLETE',
+              pressAction: {
+                id: 'done',
+              },
+            },
+            {
+              title: `💤 SNOOZE (${defaultSnoozeMinutes}m)`,
               pressAction: {
                 id: 'snooze',
               },
@@ -366,6 +391,7 @@ export class NotificationService {
 
       const targetDate = parseISO(note.reminderTime);
       if (!isValid(targetDate) || isBefore(targetDate, new Date())) {
+        await this.cancelNoteReminder(note.id);
         return null;
       }
 
@@ -401,7 +427,7 @@ export class NotificationService {
           smallIcon: 'ic_notification',
           importance: CHANNELS.LIFE_PLANNER.importance,
           visibility: AndroidVisibility.PUBLIC,
-          category: 'reminder' as any,
+          category: AndroidCategory.REMINDER,
           sound: soundEnabled ? 'default' : undefined,
           vibrationPattern: vibrationEnabled ? [300, 500] : undefined,
           autoCancel: true,
@@ -436,6 +462,105 @@ export class NotificationService {
     }
   }
 
+  public async scheduleHabitReminder(habit: Habit): Promise<string | null> {
+    try {
+      const notifEnabled = (await settingsRepository.get('notificationsEnabled', 'true')) === 'true';
+      if (!notifEnabled) return null;
+
+      if (!habit.reminderTime || habit.archivedAt) {
+        await this.cancelHabitReminder(habit.id);
+        return null;
+      }
+
+      const timeMatch = habit.reminderTime.trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+      if (!timeMatch) return null;
+      let hours = parseInt(timeMatch[1], 10);
+      const minutes = parseInt(timeMatch[2], 10);
+      const period = timeMatch[3]?.toLowerCase();
+      if (period === 'pm' && hours < 12) hours += 12;
+      if (period === 'am' && hours === 12) hours = 0;
+      if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+
+      let allowedDays = [0, 1, 2, 3, 4, 5, 6];
+      if (habit.recurrenceRule?.daysOfWeek && habit.recurrenceRule.daysOfWeek.length > 0) {
+        allowedDays = habit.recurrenceRule.daysOfWeek;
+      } else if (habit.recurrenceRule?.type === 'weekdays') {
+        allowedDays = [1, 2, 3, 4, 5];
+      } else if (habit.recurrenceRule?.type === 'weekends') {
+        allowedDays = [0, 6];
+      }
+
+      const now = new Date();
+      let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
+      if (isBefore(targetDate, now) || !allowedDays.includes(targetDate.getDay())) {
+        for (let i = 1; i <= 7; i++) {
+          const nextDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, hours, minutes, 0, 0);
+          if (allowedDays.includes(nextDate.getDay())) {
+            targetDate = nextDate;
+            break;
+          }
+        }
+      }
+
+      const notificationId = `habit_${habit.id}`;
+      await notifee.cancelNotification(notificationId);
+
+      const trigger: TimestampTrigger = {
+        type: TriggerType.TIMESTAMP,
+        timestamp: targetDate.getTime(),
+        alarmManager: {
+          allowWhileIdle: true,
+        },
+      };
+
+      const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
+      const channelId = soundEnabled ? CHANNELS.HABITS.id : CHANNELS.SILENT.id;
+
+      const payload = {
+        id: notificationId,
+        title: habit.name,
+        subtitle: 'Habit Reminder',
+        body: habit.description || `Time for your daily ${habit.name}!`,
+        data: {
+          habitId: habit.id,
+          actionType: 'habit_reminder',
+        },
+        android: {
+          channelId,
+          smallIcon: 'ic_notification',
+          importance: AndroidImportance.DEFAULT,
+          visibility: AndroidVisibility.PUBLIC,
+          category: AndroidCategory.REMINDER,
+          autoCancel: true,
+          pressAction: { id: 'default' },
+        },
+      };
+
+      try {
+        await notifee.createTriggerNotification(payload, trigger);
+      } catch {
+        const fallbackTrigger: TimestampTrigger = {
+          type: TriggerType.TIMESTAMP,
+          timestamp: targetDate.getTime(),
+        };
+        await notifee.createTriggerNotification(payload, fallbackTrigger);
+      }
+
+      return notificationId;
+    } catch (e) {
+      console.warn('Failed to schedule habit reminder:', e);
+      return null;
+    }
+  }
+
+  public async cancelHabitReminder(habitId: string): Promise<void> {
+    try {
+      await notifee.cancelNotification(`habit_${habitId}`);
+    } catch (e) {
+      console.warn('cancelHabitReminder error:', e);
+    }
+  }
+
   public async cancelTaskReminder(taskId: string): Promise<void> {
     try {
       await notifee.cancelNotification(`task_${taskId}`);
@@ -456,6 +581,21 @@ export class NotificationService {
   public async cancelAllReminders(): Promise<void> {
     try {
       await notifee.cancelAllNotifications();
+      if (AlarmRingtone?.cancelAllAlarms) {
+        try {
+          await AlarmRingtone.cancelAllAlarms();
+        } catch {}
+      }
+      try {
+        const tasks = await taskRepository.findAll();
+        for (const t of tasks) {
+          if (AlarmRingtone?.cancelExactAlarm) {
+            try {
+              await AlarmRingtone.cancelExactAlarm(`alarm_task_${t.id}`);
+            } catch {}
+          }
+        }
+      } catch {}
     } catch (e) {
       console.warn('cancelAllReminders error:', e);
     }
@@ -469,8 +609,9 @@ export class NotificationService {
       const task = await taskRepository.findById(taskId);
       if (!task) return;
 
+      const safeMinutes = Math.max(1, Math.min(1440, Number(snoozeMinutes) || 10));
       const now = new Date();
-      const snoozeTarget = addMinutes(now, snoozeMinutes);
+      const snoozeTarget = addMinutes(now, safeMinutes);
       const snoozeIso = snoozeTarget.toISOString();
 
       // Persist snooze state in SQLite
@@ -480,6 +621,12 @@ export class NotificationService {
 
       const notificationId = `task_${taskId}`;
       await notifee.cancelNotification(notificationId);
+
+      if (AlarmRingtone?.cancelExactAlarm) {
+        try {
+          await AlarmRingtone.cancelExactAlarm(`alarm_task_${taskId}`);
+        } catch {}
+      }
 
       const soundEnabled = (await settingsRepository.get('notificationSound', 'true')) === 'true';
       const channelId = soundEnabled ? ALARM_CLOCK_CHANNEL_ID : CHANNELS.SILENT.id;
@@ -491,7 +638,7 @@ export class NotificationService {
             `alarm_task_${taskId}`,
             snoozeTarget.getTime(),
             `Task: ${task.title} (Snoozed)`,
-            `Snoozed reminder (${snoozeMinutes}m)`
+            `Snoozed reminder (${safeMinutes}m)`
           );
         } catch (e) {
           console.warn('Native exact snooze task alarm error:', e);
@@ -510,11 +657,11 @@ export class NotificationService {
         id: notificationId,
         title: task.title,
         subtitle: 'Life Planner (Snoozed)',
-        body: `Snoozed reminder (${snoozeMinutes}m)`,
+        body: `Snoozed reminder (${safeMinutes}m)`,
         data: {
           taskId: task.id,
           taskTitle: task.title,
-          description: `Snoozed reminder (${snoozeMinutes}m)`,
+          description: `Snoozed reminder (${safeMinutes}m)`,
           actionType: 'task_alarm',
         },
         android: {
@@ -528,11 +675,15 @@ export class NotificationService {
           pressAction: { id: 'default' },
           actions: [
             {
-              title: '🔕 STOP ALARM',
+              title: '🔕 DISMISS',
+              pressAction: { id: 'dismiss' },
+            },
+            {
+              title: '✅ COMPLETE',
               pressAction: { id: 'done' },
             },
             {
-              title: '💤 SNOOZE (5m)',
+              title: `💤 SNOOZE (${safeMinutes}m)`,
               pressAction: { id: 'snooze' },
             },
           ],
@@ -559,13 +710,16 @@ export class NotificationService {
     const taskId = detail?.notification?.data?.taskId as string;
     const notificationId = detail?.notification?.id;
 
-    if (!taskId) return;
-
-    if (type === EventType.PRESS) {
+    // 1. Tapping or swiping away a notification always dismisses it from drawer
+    if (type === EventType.PRESS || type === EventType.DISMISSED) {
       if (notificationId) {
         await notifee.cancelNotification(notificationId);
       }
-    } else if (type === EventType.ACTION_PRESS) {
+      return;
+    }
+
+    // 2. Action button presses
+    if (type === EventType.ACTION_PRESS) {
       if (actionId === 'dismiss' || actionId === 'stop_alarm') {
         try {
           if (AlarmRingtone?.stop) {
@@ -589,15 +743,17 @@ export class NotificationService {
           const { alarmService } = await import('../alarm/AlarmService');
           alarmService.stopRinging();
         } catch {}
-        try {
-          const { taskService } = await import('../tasks/TaskService');
-          await taskService.completeTask(taskId);
-        } catch {
-          const now = new Date().toISOString();
-          await taskRepository.update(taskId, {
-            status: 'completed',
-            completedAt: now,
-          });
+        if (taskId) {
+          try {
+            const { taskService } = await import('../tasks/TaskService');
+            await taskService.completeTask(taskId);
+          } catch {
+            const now = new Date().toISOString();
+            await taskRepository.update(taskId, {
+              status: 'completed',
+              completedAt: now,
+            });
+          }
         }
         if (notificationId) {
           await notifee.cancelNotification(notificationId);
@@ -612,9 +768,14 @@ export class NotificationService {
           const { alarmService } = await import('../alarm/AlarmService');
           alarmService.stopRinging();
         } catch {}
-        const defaultSnoozeStr = await settingsRepository.get('defaultSnoozeMinutes', '10');
-        const minutes = (parseInt(defaultSnoozeStr, 10) || 10) as SnoozeDurationOption;
-        await this.snoozeTaskReminder(taskId, minutes);
+        if (taskId) {
+          const defaultSnoozeStr = await settingsRepository.get('defaultSnoozeMinutes', '10');
+          const minutes = (parseInt(defaultSnoozeStr, 10) || 10) as SnoozeDurationOption;
+          await this.snoozeTaskReminder(taskId, minutes);
+        }
+        if (notificationId) {
+          await notifee.cancelNotification(notificationId);
+        }
       }
     }
   }
@@ -631,7 +792,7 @@ export class NotificationService {
 
         if (t.snoozeUntil) {
           const snoozeDate = parseISO(t.snoozeUntil);
-          if (!isBefore(snoozeDate, now)) {
+          if (isValid(snoozeDate) && !isBefore(snoozeDate, now)) {
             const remainingMinutes = Math.max(1, Math.round((snoozeDate.getTime() - now.getTime()) / 60000));
             await this.snoozeTaskReminder(t.id, remainingMinutes as SnoozeDurationOption);
             continue;
@@ -641,6 +802,33 @@ export class NotificationService {
         if (t.date && (t.startTime || (t.reminderMinutes !== undefined && t.reminderMinutes >= 0))) {
           await this.scheduleTaskReminder(t);
         }
+      }
+
+      // Restore active Keep Note reminders
+      try {
+        const notesWithReminders = await keepNoteRepository.findAll({ status: 'reminders' });
+        for (const note of notesWithReminders) {
+          if (note.reminderTime) {
+            const targetDate = parseISO(note.reminderTime);
+            if (isValid(targetDate) && !isBefore(targetDate, now)) {
+              await this.scheduleNoteReminder(note);
+            }
+          }
+        }
+      } catch (noteErr) {
+        console.warn('Failed to restore note reminders:', noteErr);
+      }
+
+      // Restore active Habit reminders
+      try {
+        const activeHabits = await habitRepository.findActive();
+        for (const habit of activeHabits) {
+          if (habit.reminderTime && !habit.archivedAt) {
+            await this.scheduleHabitReminder(habit);
+          }
+        }
+      } catch (habitErr) {
+        console.warn('Failed to restore habit reminders:', habitErr);
       }
     } catch (e) {
       console.error('restoreAllReminders error:', e);

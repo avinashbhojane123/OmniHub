@@ -1,8 +1,8 @@
 {
-  "version": 1793429567594,
-  "buildTime": "12:22:47 pm",
-  "sizeBytes": 2671342,
-  "sizeMb": "2.55",
+  "version": 1793699822400,
+  "buildTime": "03:27:02 pm",
+  "sizeBytes": 2760574,
+  "sizeMb": "2.63",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "TaskBackendSyncService foreign keys, ACID transactions, and enum sanitization"
+  "notes": "Fix React hook order violation and battery alarm stop with complete DND support"
 }

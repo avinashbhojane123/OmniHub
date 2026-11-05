@@ -12,29 +12,46 @@ describe('MovieService & MovieRepository (CineVerse Workspace)', () => {
       await movieRepository.delete(b.tmdbId);
     }
 
+    movieService.clearCache();
+
     // Mock global fetch for reliable test execution
     (globalThis as any).fetch = jest.fn((url: string) => {
       const u = String(url);
       if (u.includes('/trending')) {
+        const isTv = u.includes('isTv=true') || u.includes('/tv/');
         return Promise.resolve({
           ok: true,
           status: 200,
           json: () =>
             Promise.resolve({
-              results: [
-                {
-                  id: 693134,
-                  title: 'Dune: Part Two',
-                  overview: 'Paul Atreides unites with Chani and the Fremen.',
-                  poster_path: '/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg',
-                  vote_average: 8.6,
-                  vote_count: 5200,
-                  release_date: '2024-03-01',
-                  genre_ids: [878, 12],
-                  trailer_key: 'Way9Dexny3w',
-                  director: 'Denis Villeneuve',
-                },
-              ],
+              results: isTv
+                ? [
+                    {
+                      id: 95396,
+                      name: 'Severance',
+                      overview: 'Mark leads a team of office workers.',
+                      poster_path: '/jnvt50rNqZ9TsmI0eGZ24xKx36e.jpg',
+                      vote_average: 8.4,
+                      vote_count: 1400,
+                      first_air_date: '2022-02-18',
+                      genre_ids: [18, 9648, 878],
+                      is_tv: true,
+                    },
+                  ]
+                : [
+                    {
+                      id: 693134,
+                      title: 'Dune: Part Two',
+                      overview: 'Paul Atreides unites with Chani and the Fremen.',
+                      poster_path: '/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg',
+                      vote_average: 8.6,
+                      vote_count: 5200,
+                      release_date: '2024-03-01',
+                      genre_ids: [878, 12],
+                      trailer_key: 'Way9Dexny3w',
+                      director: 'Denis Villeneuve',
+                    },
+                  ],
             }),
         });
       }
@@ -219,5 +236,55 @@ describe('MovieService & MovieRepository (CineVerse Workspace)', () => {
 
     const embedUrl = getUniversalEmbedUrl('vidsrc_sh', 'tt0944947', true, 1, 1);
     expect(embedUrl).toContain('https://vidsrc.sh/embed/tv/tt0944947/1/1');
+  });
+
+  it('should support TV series trending and differentiate from movies', async () => {
+    const tvShows = await movieService.getTrending(1, true);
+    expect(tvShows.length).toBeGreaterThan(0);
+    expect(tvShows[0].id).toBe(95396);
+    expect(tvShows[0].is_tv).toBe(true);
+    expect(tvShows[0].title).toBe('Severance');
+  });
+
+  it('should safely handle invalid or non-positive media IDs without throwing', async () => {
+    expect(await movieService.isBookmarked(0)).toBe(false);
+    expect(await movieService.isBookmarked(-5)).toBe(false);
+    expect(await movieService.toggleWatched(0)).toBe(false);
+    await expect(movieService.removeFromWatchlist(0)).resolves.toBeUndefined();
+    await expect(movieService.getMovieDetails(0)).rejects.toThrow('Invalid media ID');
+  });
+
+  it('should safely normalize object-based or array-based network attributes to string', async () => {
+    (globalThis as any).fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            id: 1399,
+            name: 'Game of Thrones',
+            overview: 'Nine noble families fight for control over Westeros.',
+            networks: [{ id: 49, name: 'HBO' }],
+            external_ids: { imdb_id: 'tt0944947' },
+          }),
+      }),
+    );
+
+    const tvDetails = await movieService.getMovieDetails(1399, true);
+    expect(typeof tvDetails.network).toBe('string');
+    expect(tvDetails.network).toBe('HBO');
+    expect(tvDetails.imdb_id).toBe('tt0944947');
+  });
+
+  it('should utilize in-memory cache on consecutive calls', async () => {
+    movieService.clearCache();
+    const fetchSpy = jest.spyOn(globalThis as any, 'fetch');
+    const firstCall = await movieService.getTrending(1, false);
+    const initialFetchCount = fetchSpy.mock.calls.length;
+
+    // Second call should come from cache without new fetch calls
+    const secondCall = await movieService.getTrending(1, false);
+    expect(secondCall).toEqual(firstCall);
+    expect(fetchSpy.mock.calls.length).toBe(initialFetchCount);
   });
 });

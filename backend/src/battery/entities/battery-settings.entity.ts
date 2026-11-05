@@ -11,7 +11,7 @@ export class BatterySettings {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Index()
+  @Index({ unique: true })
   @Column({
     type: 'varchar',
     length: 100,

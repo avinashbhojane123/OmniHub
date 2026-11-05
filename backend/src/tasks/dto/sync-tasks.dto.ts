@@ -1,4 +1,9 @@
-import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateTaskDto } from './create-task.dto';
 
@@ -17,4 +22,8 @@ export class SyncTasksDto {
   @IsString()
   @IsOptional()
   since?: string; // ISO date timestamp
+
+  @IsString()
+  @IsOptional()
+  userId?: string;
 }

@@ -36,7 +36,10 @@ export class StatusService {
     data: CreateStatusDto,
   ) {
     const cleanPass = data.passcode.trim();
-    if (!session || session.passcode.trim().toLowerCase() !== cleanPass.toLowerCase()) {
+    if (
+      !session ||
+      session.passcode.trim().toLowerCase() !== cleanPass.toLowerCase()
+    ) {
       return { success: false, message: 'Unauthorized session' };
     }
 
@@ -103,15 +106,23 @@ export class StatusService {
       })
       .getCount();
 
-    if (activeCount >= 5) {
+    const maxActiveStatuses =
+      Number(process.env.STATUS_MAX_ACTIVE_PER_USER) || 5;
+
+    if (activeCount >= maxActiveStatuses) {
       client.emit('error', {
-        message:
-          'Maximum 5 active statuses allowed at a time. Please wait for an existing status to expire or delete one.',
+        message: `Maximum ${maxActiveStatuses} active statuses allowed at a time. Please wait for an existing status to expire or delete one.`,
       });
-      return { success: false, message: 'Status quota reached (max 5 active)' };
+      return {
+        success: false,
+        message: `Status quota reached (max ${maxActiveStatuses} active)`,
+      };
     }
 
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 Hours
+    const expirationMs = Number(
+      process.env.STATUS_EXPIRATION_MS || 24 * 60 * 60 * 1000,
+    );
+    const expiresAt = new Date(Date.now() + expirationMs);
 
     const status = this.statusRepo.create({
       nickname: session.nickname,
@@ -233,7 +244,8 @@ export class StatusService {
 
     if (
       status.mediaUrl &&
-      (status.mediaUrl.includes('/uploads/') || status.mediaUrl.includes('/api/uploads/'))
+      (status.mediaUrl.includes('/uploads/') ||
+        status.mediaUrl.includes('/api/uploads/'))
     ) {
       try {
         const uploadDirName = process.env.UPLOAD_DIR || 'uploads';
@@ -264,7 +276,9 @@ export class StatusService {
     try {
       const expired = await this.statusRepo
         .createQueryBuilder('status')
-        .where('status.expiresAt IS NOT NULL AND status.expiresAt <= :now', { now })
+        .where('status.expiresAt IS NOT NULL AND status.expiresAt <= :now', {
+          now,
+        })
         .getMany();
 
       if (expired.length > 0) {
@@ -272,7 +286,8 @@ export class StatusService {
         for (const st of expired) {
           if (
             st.mediaUrl &&
-            (st.mediaUrl.includes('/uploads/') || st.mediaUrl.includes('/api/uploads/'))
+            (st.mediaUrl.includes('/uploads/') ||
+              st.mediaUrl.includes('/api/uploads/'))
           ) {
             try {
               const filename = st.mediaUrl.split('/').pop()?.split('?')[0];

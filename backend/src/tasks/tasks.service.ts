@@ -1,16 +1,34 @@
 import {
   Injectable,
   NotFoundException,
+  BadRequestException,
   Logger,
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Like, LessThan } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { TaskEntity } from './task.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { SyncTasksDto } from './dto/sync-tasks.dto';
+
+export interface TaskFilterOptions {
+  status?: string;
+  date?: string;
+  quadrant?: string;
+  categoryId?: string;
+  userId?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SyncTasksResponse {
+  serverTasks: TaskEntity[];
+  serverDeletions: string[];
+  timestamp: string;
+}
 
 @Injectable()
 export class TasksService implements OnModuleInit, OnModuleDestroy {
@@ -23,17 +41,25 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    const startupDays =
+      Number(process.env.TASK_STARTUP_RECURRENCE_DAYS) || 3;
+    const intervalMs =
+      Number(process.env.TASK_RECURRENCE_CHECK_INTERVAL_MS) ||
+      6 * 60 * 60 * 1000;
+
     // Proactively generate upcoming recurring tasks on server startup
-    this.processServerRecurrences(3).catch((err) => {
+    this.processServerRecurrences(startupDays).catch((err) => {
       this.logger.warn(`Startup recurrence processing failed: ${err.message}`);
     });
 
-    // Schedule automated recurrence processing every 6 hours
+    // Schedule automated recurrence processing
     this.recurrenceIntervalTimer = setInterval(() => {
-      this.processServerRecurrences(3).catch((err) => {
-        this.logger.warn(`Scheduled recurrence processing failed: ${err.message}`);
+      this.processServerRecurrences(startupDays).catch((err) => {
+        this.logger.warn(
+          `Scheduled recurrence processing failed: ${err.message}`,
+        );
       });
-    }, 6 * 60 * 60 * 1000);
+    }, intervalMs);
   }
 
   onModuleDestroy() {
@@ -43,16 +69,131 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async findAll(filters?: {
-    status?: string;
-    date?: string;
-    quadrant?: string;
-    categoryId?: string;
-    userId?: string;
-    search?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<TaskEntity[]> {
+  /**
+   * Helper: Resets checklist bullets in raw text from [x]/[X] back to [ ]
+   */
+  private resetBullets(text?: string | null): string | null {
+    if (!text) return null;
+    return text.replace(/\[[xX]\]/g, '[ ]');
+  }
+
+  /**
+   * Helper: Formats a UTC Date to YYYY-MM-DD
+   */
+  private formatUtcDate(date: Date): string {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  /**
+   * Helper: Parses YYYY-MM-DD safely into a UTC Date at 12:00:00 UTC
+   * Setting midday prevents timezone boundary shifts and DST anomalies
+   */
+  private parseDateString(dateStr: string): Date | null {
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    const parts = dateStr.trim().split('-');
+    if (parts.length !== 3) return null;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+    const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
+   * Helper: Computes the next recurrence date based on the recurrence rule.
+   * Supports daily, weekdays, weekends, weekly (with daysOfWeek), monthly (with monthDay clamp), and yearly.
+   */
+  private advanceRecurrenceDate(
+    currentDate: Date,
+    rule: any,
+    baseDate: Date,
+  ): Date {
+    const d = new Date(currentDate.getTime());
+    const interval = rule.interval && rule.interval > 0 ? rule.interval : 1;
+
+    switch (rule.type) {
+      case 'daily': {
+        d.setUTCDate(d.getUTCDate() + interval);
+        return d;
+      }
+      case 'weekdays': {
+        for (let i = 0; i < interval; i++) {
+          d.setUTCDate(d.getUTCDate() + 1);
+          while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+            d.setUTCDate(d.getUTCDate() + 1);
+          }
+        }
+        return d;
+      }
+      case 'weekends': {
+        for (let i = 0; i < interval; i++) {
+          d.setUTCDate(d.getUTCDate() + 1);
+          while (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) {
+            d.setUTCDate(d.getUTCDate() + 1);
+          }
+        }
+        return d;
+      }
+      case 'weekly':
+      case 'custom': {
+        if (Array.isArray(rule.daysOfWeek) && rule.daysOfWeek.length > 0) {
+          // Map to ISO day index: 1 = Monday ... 7 = Sunday
+          const toIsoDay = (day: number) => (day === 0 ? 7 : day);
+          const sortedDays = [...rule.daysOfWeek]
+            .map(toIsoDay)
+            .sort((a: number, b: number) => a - b);
+          const currentIsoDay = toIsoDay(d.getUTCDay());
+          const nextDayThisWeek = sortedDays.find((day) => day > currentIsoDay);
+          if (nextDayThisWeek !== undefined) {
+            d.setUTCDate(d.getUTCDate() + (nextDayThisWeek - currentIsoDay));
+            return d;
+          }
+          const firstDayNextWeek = sortedDays[0];
+          const daysToNextWeekStart = 8 - currentIsoDay;
+          const daysToAdd =
+            daysToNextWeekStart + (interval - 1) * 7 + (firstDayNextWeek - 1);
+          d.setUTCDate(d.getUTCDate() + daysToAdd);
+          return d;
+        }
+        d.setUTCDate(d.getUTCDate() + interval * 7);
+        return d;
+      }
+      case 'monthly': {
+        const originalDay = rule.monthDay || baseDate.getUTCDate();
+        const currentYear = d.getUTCFullYear();
+        const currentMonth = d.getUTCMonth();
+        const targetTotalMonth = currentMonth + interval;
+        const targetYear = currentYear + Math.floor(targetTotalMonth / 12);
+        const targetMonth = ((targetTotalMonth % 12) + 12) % 12;
+        // Last day of target month (using day 0 of month + 1)
+        const maxDaysInTargetMonth = new Date(
+          Date.UTC(targetYear, targetMonth + 1, 0),
+        ).getUTCDate();
+        const safeDay = Math.min(originalDay, maxDaysInTargetMonth);
+        return new Date(Date.UTC(targetYear, targetMonth, safeDay, 12, 0, 0));
+      }
+      case 'yearly': {
+        const originalDay = rule.monthDay || baseDate.getUTCDate();
+        const targetYear = d.getUTCFullYear() + interval;
+        const targetMonth = d.getUTCMonth();
+        const maxDaysInTargetMonth = new Date(
+          Date.UTC(targetYear, targetMonth + 1, 0),
+        ).getUTCDate();
+        const safeDay = Math.min(originalDay, maxDaysInTargetMonth);
+        return new Date(Date.UTC(targetYear, targetMonth, safeDay, 12, 0, 0));
+      }
+      default: {
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d;
+      }
+    }
+  }
+
+  async findAll(filters?: TaskFilterOptions): Promise<TaskEntity[]> {
     const qb = this.taskRepo.createQueryBuilder('task');
 
     if (filters?.userId) {
@@ -76,24 +217,33 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       });
     }
     if (filters?.search?.trim()) {
-      const q = `%${filters.search.trim().toLowerCase()}%`;
+      // Escape SQL LIKE wildcard characters to prevent pattern probing
+      const sanitized = filters.search
+        .trim()
+        .replace(/[%_\\]/g, '\\$&')
+        .toLowerCase();
+      const q = `%${sanitized}%`;
       qb.andWhere(
         '(LOWER(task.title) LIKE :q OR LOWER(task.description) LIKE :q OR LOWER(task.notes) LIKE :q)',
         { q },
       );
     }
 
-    qb.orderBy('task.date', 'ASC')
-      .addOrderBy(
-        'CASE WHEN task.startTime IS NULL THEN 1 ELSE 0 END',
-        'ASC',
-      )
+    // Cross-database NULL-safe ordering (PostgreSQL, SQLite, MySQL)
+    qb.orderBy('CASE WHEN task.date IS NULL THEN 1 ELSE 0 END', 'ASC')
+      .addOrderBy('task.date', 'ASC')
+      .addOrderBy('CASE WHEN task.startTime IS NULL THEN 1 ELSE 0 END', 'ASC')
       .addOrderBy('task.startTime', 'ASC')
       .addOrderBy('task.createdAt', 'DESC');
 
-    if (filters?.limit && filters.limit > 0) {
-      qb.take(filters.limit);
-    }
+    const defaultQueryLimit =
+      Number(process.env.TASK_QUERY_DEFAULT_LIMIT) || 1000;
+    const maxQueryLimit = Number(process.env.TASK_QUERY_MAX_LIMIT) || 1000;
+    const safeLimit =
+      filters?.limit && filters.limit > 0
+        ? Math.min(filters.limit, maxQueryLimit)
+        : defaultQueryLimit;
+    qb.take(safeLimit);
     if (filters?.offset && filters.offset >= 0) {
       qb.skip(filters.offset);
     }
@@ -102,24 +252,42 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findById(id: string): Promise<TaskEntity> {
-    const task = await this.taskRepo.findOne({ where: { id } });
+    if (!id || typeof id !== 'string' || !id.trim()) {
+      throw new BadRequestException('Task ID is required');
+    }
+    const cleanId = id.trim();
+    const task = await this.taskRepo.findOne({ where: { id: cleanId } });
     if (!task) {
-      throw new NotFoundException(`Task with ID ${id} not found.`);
+      throw new NotFoundException(`Task with ID ${cleanId} not found.`);
     }
     return task;
   }
 
   async create(dto: CreateTaskDto): Promise<TaskEntity> {
+    if (!dto || typeof dto !== 'object') {
+      throw new BadRequestException('Task payload is required');
+    }
+
+    const cleanTitle = (dto.title || '').trim();
+    if (!cleanTitle) {
+      throw new BadRequestException('Task title cannot be empty');
+    }
+
+    const id =
+      dto.id && typeof dto.id === 'string' && dto.id.trim()
+        ? dto.id.trim()
+        : `task_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
     const recurrenceStr =
       typeof dto.recurrenceRule === 'object'
         ? JSON.stringify(dto.recurrenceRule)
         : dto.recurrenceRule || null;
 
     const task = this.taskRepo.create({
-      id: dto.id,
+      id,
       seriesId: dto.seriesId ?? null,
       userId: dto.userId ?? null,
-      title: dto.title.trim(),
+      title: cleanTitle,
       description: dto.description?.trim() ?? null,
       date: dto.date ?? null,
       startTime: dto.startTime ?? null,
@@ -136,14 +304,31 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       eisenhowerQuadrant: dto.eisenhowerQuadrant ?? null,
       accentColor: dto.accentColor ?? null,
       estimatedMinutes: dto.estimatedMinutes ?? null,
-      completedAt: dto.completedAt ?? null,
+      completedAt:
+        dto.status === 'completed'
+          ? (dto.completedAt ?? new Date().toISOString())
+          : (dto.completedAt ?? null),
     });
 
     return await this.taskRepo.save(task);
   }
 
   async update(id: string, dto: UpdateTaskDto): Promise<TaskEntity> {
+    if (!id || typeof id !== 'string' || !id.trim()) {
+      throw new BadRequestException('Task ID is required');
+    }
+    if (!dto || typeof dto !== 'object') {
+      throw new BadRequestException('Update payload is required');
+    }
+
     const existing = await this.findById(id);
+
+    if (dto.title !== undefined) {
+      const cleanTitle = dto.title.trim();
+      if (!cleanTitle) {
+        throw new BadRequestException('Task title cannot be empty');
+      }
+    }
 
     const recurrenceStr =
       dto.recurrenceRule !== undefined
@@ -151,6 +336,17 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
           ? JSON.stringify(dto.recurrenceRule)
           : dto.recurrenceRule
         : existing.recurrenceRule;
+
+    let completedAt = existing.completedAt;
+    if (dto.completedAt !== undefined) {
+      completedAt = dto.completedAt;
+    } else if (dto.status !== undefined) {
+      if (dto.status === 'completed' && !existing.completedAt) {
+        completedAt = new Date().toISOString();
+      } else if (dto.status !== 'completed' && existing.completedAt) {
+        completedAt = null;
+      }
+    }
 
     const updated = this.taskRepo.merge(existing, {
       seriesId: dto.seriesId !== undefined ? dto.seriesId : existing.seriesId,
@@ -192,48 +388,65 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         dto.estimatedMinutes !== undefined
           ? dto.estimatedMinutes
           : existing.estimatedMinutes,
-      completedAt:
-        dto.completedAt !== undefined ? dto.completedAt : existing.completedAt,
+      completedAt,
     });
 
     return await this.taskRepo.save(updated);
   }
 
   async delete(id: string): Promise<boolean> {
-    const res = await this.taskRepo.delete(id);
+    if (!id || typeof id !== 'string' || !id.trim()) {
+      return false;
+    }
+    const res = await this.taskRepo.delete(id.trim());
     return (res.affected ?? 0) > 0;
   }
 
-  async clearCompleted(): Promise<{ deletedCount: number }> {
-    const res = await this.taskRepo.delete({ status: 'completed' });
+  async clearCompleted(userId?: string): Promise<{ deletedCount: number }> {
+    const where: any = { status: 'completed' };
+    if (userId && typeof userId === 'string' && userId.trim()) {
+      where.userId = userId.trim();
+    }
+    const res = await this.taskRepo.delete(where);
     const count = res.affected ?? 0;
-    this.logger.log(`Cleared ${count} completed tasks from backend database.`);
+    this.logger.log(
+      `Cleared ${count} completed tasks from backend database${userId ? ` for user ${userId}` : ''}.`,
+    );
     return { deletedCount: count };
   }
 
   /**
    * Two-Way Delta Sync for Mobile Client
    */
-  async sync(dto: SyncTasksDto): Promise<{
-    serverTasks: TaskEntity[];
-    serverDeletions: string[];
-    timestamp: string;
-  }> {
-    // 1. Process client deletions
-    if (dto.deletedIds && dto.deletedIds.length > 0) {
-      await this.taskRepo.delete({ id: In(dto.deletedIds) });
+  async sync(dto: SyncTasksDto): Promise<SyncTasksResponse> {
+    if (!dto) {
+      throw new BadRequestException('Sync payload is required');
     }
 
-    // 2. Process client upserts
-    if (dto.upserts && dto.upserts.length > 0) {
+    // 1. Process client deletions
+    if (Array.isArray(dto.deletedIds) && dto.deletedIds.length > 0) {
+      const validDeletions = dto.deletedIds.filter(
+        (id) => typeof id === 'string' && id.trim().length > 0,
+      );
+      if (validDeletions.length > 0) {
+        await this.taskRepo.delete({ id: In(validDeletions) });
+      }
+    }
+
+    // 2. Process client upserts in a single batch save
+    if (Array.isArray(dto.upserts) && dto.upserts.length > 0) {
+      const entitiesToSave: TaskEntity[] = [];
+
       for (const item of dto.upserts) {
+        if (!item || !item.id || !item.title) continue;
+
         const recurrenceStr =
           typeof item.recurrenceRule === 'object'
             ? JSON.stringify(item.recurrenceRule)
             : item.recurrenceRule || null;
 
-        await this.taskRepo.save({
-          id: item.id,
+        const entity = this.taskRepo.create({
+          id: item.id.trim(),
           seriesId: item.seriesId ?? null,
           userId: item.userId ?? null,
           title: item.title.trim(),
@@ -257,11 +470,37 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
           createdAt: item.createdAt ? new Date(item.createdAt) : undefined,
           updatedAt: item.updatedAt ? new Date(item.updatedAt) : undefined,
         });
+
+        entitiesToSave.push(entity);
+      }
+
+      if (entitiesToSave.length > 0) {
+        await this.taskRepo.save(entitiesToSave);
       }
     }
 
-    // 3. Query all current server tasks to return to client
-    const serverTasks = await this.taskRepo.find();
+    // 3. Query server tasks with delta sync support via `since` and user scoping
+    const qb = this.taskRepo.createQueryBuilder('task');
+
+    if (
+      dto.since &&
+      typeof dto.since === 'string' &&
+      !isNaN(Date.parse(dto.since))
+    ) {
+      qb.where('task.updatedAt >= :since', { since: new Date(dto.since) });
+    }
+
+    const syncUserId =
+      dto.userId ||
+      dto.upserts?.find(
+        (u) => u && typeof u.userId === 'string' && u.userId.trim(),
+      )?.userId;
+
+    if (syncUserId && typeof syncUserId === 'string' && syncUserId.trim()) {
+      qb.andWhere('task.userId = :userId', { userId: syncUserId.trim() });
+    }
+
+    const serverTasks = await qb.getMany();
 
     return {
       serverTasks,
@@ -272,84 +511,156 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Server-Side Recurrence Generator
-   * Background task generating recurring task instances 7 days in advance.
+   * Background task generating recurring task instances up to `daysAhead` days in advance.
+   * Prevents exponential duplication by grouping by seriesId and advancing only from the latest occurrence.
    */
-  async processServerRecurrences(daysAhead = 7): Promise<{ spawnedCount: number }> {
+  async processServerRecurrences(
+    daysAhead = Number(process.env.TASK_RECURRENCE_DAYS_AHEAD) || 7,
+  ): Promise<{ spawnedCount: number }> {
     const recurringTasks = await this.taskRepo
       .createQueryBuilder('task')
-      .where("task.recurrenceRule IS NOT NULL AND task.recurrenceRule != 'null'")
+      .where(
+        "task.recurrenceRule IS NOT NULL AND task.recurrenceRule != 'null' AND task.recurrenceRule != ''",
+      )
       .andWhere("task.status != 'cancelled'")
       .getMany();
 
+    if (recurringTasks.length === 0) {
+      return { spawnedCount: 0 };
+    }
+
     let spawnedCount = 0;
     const now = new Date();
-    const targetDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-    const targetDateStr = targetDate.toISOString().slice(0, 10);
-    const todayStr = now.toISOString().slice(0, 10);
+    const horizonDays = Math.max(daysAhead, 1);
+    const targetDate = new Date(
+      now.getTime() + horizonDays * 24 * 60 * 60 * 1000,
+    );
+    const targetDateStr = this.formatUtcDate(targetDate);
+    const todayStr = this.formatUtcDate(now);
 
-    for (const task of recurringTasks) {
+    // Group tasks by seriesId (or task.id if no seriesId) to prevent duplicate runs per series
+    const seriesMap = new Map<string, TaskEntity[]>();
+    for (const t of recurringTasks) {
+      const key = t.seriesId || t.id;
+      if (!seriesMap.has(key)) {
+        seriesMap.set(key, []);
+      }
+      seriesMap.get(key)!.push(t);
+    }
+
+    for (const [seriesKey, instances] of seriesMap.entries()) {
       try {
-        const rule = JSON.parse(task.recurrenceRule || '{}');
-        if (!rule || rule.type === 'none' || !task.date) continue;
+        // Sort instances by date ascending
+        instances.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        const latest = instances[instances.length - 1];
+        if (!latest || !latest.date) continue;
 
-        let curDate = new Date(task.date);
-        let safety = 0;
-
-        while (safety < 30) {
-          safety++;
-          // Step date forward
-          if (rule.type === 'daily') {
-            curDate.setDate(curDate.getDate() + (rule.interval || 1));
-          } else if (rule.type === 'weekly') {
-            curDate.setDate(curDate.getDate() + (rule.interval || 1) * 7);
-          } else if (rule.type === 'monthly') {
-            curDate.setMonth(curDate.getMonth() + (rule.interval || 1));
+        let rule: any;
+        try {
+          rule =
+            typeof latest.recurrenceRule === 'object'
+              ? latest.recurrenceRule
+              : JSON.parse(latest.recurrenceRule || '{}');
+        } catch {
+          if (
+            typeof latest.recurrenceRule === 'string' &&
+            [
+              'daily',
+              'weekly',
+              'monthly',
+              'yearly',
+              'weekdays',
+              'weekends',
+            ].includes(latest.recurrenceRule.toLowerCase())
+          ) {
+            rule = { type: latest.recurrenceRule.toLowerCase() };
           } else {
-            curDate.setDate(curDate.getDate() + 1);
+            continue;
           }
+        }
 
-          const nextDateStr = curDate.toISOString().slice(0, 10);
+        if (!rule || rule.type === 'none') continue;
+
+        const baseDate = this.parseDateString(latest.date);
+        if (!baseDate) continue;
+
+        // Ensure parent task has seriesId saved back to database if missing
+        const seriesId = latest.seriesId || seriesKey;
+        if (!latest.seriesId) {
+          latest.seriesId = seriesId;
+          await this.taskRepo.update(latest.id, { seriesId }).catch(() => {});
+        }
+
+        let curDate = new Date(baseDate.getTime());
+        let safety = 0;
+        const maxIterations = Math.min(Math.max(horizonDays * 2, 30), 100);
+
+        while (safety < maxIterations) {
+          safety++;
+          curDate = this.advanceRecurrenceDate(curDate, rule, baseDate);
+          const nextDateStr = this.formatUtcDate(curDate);
+
+          if (rule.endDate && nextDateStr > rule.endDate) break;
           if (nextDateStr > targetDateStr) break;
           if (nextDateStr < todayStr) continue;
 
-          // Check if instance already exists
+          // Check if instance already exists on this date for this series or by title
           const existing = await this.taskRepo.findOne({
-            where: {
-              seriesId: task.seriesId || task.id,
-              date: nextDateStr,
-            },
+            where: latest.userId
+              ? [
+                  { seriesId, date: nextDateStr },
+                  {
+                    title: latest.title,
+                    date: nextDateStr,
+                    userId: latest.userId,
+                  },
+                ]
+              : [
+                  { seriesId, date: nextDateStr },
+                  { title: latest.title, date: nextDateStr },
+                ],
           });
 
           if (!existing) {
             const newId = `srv_task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const cleanDescription = this.resetBullets(latest.description);
+            const cleanNotes = this.resetBullets(latest.notes);
+
             await this.taskRepo.save({
               id: newId,
-              seriesId: task.seriesId || task.id,
-              title: task.title,
-              description: task.description,
+              seriesId,
+              userId: latest.userId,
+              title: latest.title,
+              description: cleanDescription,
               date: nextDateStr,
-              startTime: task.startTime,
-              endTime: task.endTime,
-              priority: task.priority,
-              categoryId: task.categoryId,
+              startTime: latest.startTime,
+              endTime: latest.endTime,
+              priority: latest.priority,
+              categoryId: latest.categoryId,
               status: 'pending',
-              recurrenceRule: task.recurrenceRule,
-              reminderMinutes: task.reminderMinutes,
-              isLoudAlarm: task.isLoudAlarm,
-              isOvernight: task.isOvernight,
-              eisenhowerQuadrant: task.eisenhowerQuadrant,
-              accentColor: task.accentColor,
-              estimatedMinutes: task.estimatedMinutes,
+              recurrenceRule: latest.recurrenceRule,
+              reminderMinutes: latest.reminderMinutes,
+              isLoudAlarm: latest.isLoudAlarm,
+              isOvernight: latest.isOvernight,
+              eisenhowerQuadrant: latest.eisenhowerQuadrant,
+              accentColor: latest.accentColor,
+              estimatedMinutes: latest.estimatedMinutes,
+              notes: cleanNotes,
+              completedAt: null,
             });
             spawnedCount++;
           }
         }
-      } catch (e) {
-        this.logger.warn(`Failed recurrence processing for task ${task.id}:`, e);
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed recurrence processing for series ${seriesKey}: ${err?.message}`,
+        );
       }
     }
 
-    this.logger.log(`Server recurrence expansion created ${spawnedCount} occurrences.`);
+    this.logger.log(
+      `Server recurrence expansion created ${spawnedCount} occurrences.`,
+    );
     return { spawnedCount };
   }
 }

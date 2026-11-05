@@ -7,7 +7,8 @@ import { categoryRepository } from '../../database/repositories/CategoryReposito
 import { Task, TaskPriority, TaskStatus, EisenhowerQuadrant } from '../../types';
 import { syncEventBus } from '../backup/SyncEventBus';
 import { normalizeTimeTo24H } from '../../utils/time';
-import { sanitizeDateString } from './TaskService';
+import { sanitizeDateString, shouldScheduleReminder } from './TaskService';
+import { notificationService } from '../notifications/NotificationService';
 
 export interface TaskSyncResult {
   success: boolean;
@@ -25,6 +26,63 @@ export interface ConnectionTestResult {
 const VALID_PRIORITIES = new Set<TaskPriority>(['low', 'medium', 'high']);
 const VALID_STATUSES = new Set<TaskStatus>(['pending', 'in_progress', 'completed', 'overdue', 'cancelled']);
 const VALID_QUADRANTS = new Set<EisenhowerQuadrant>(['q1', 'q2', 'q3', 'q4']);
+
+function normalizePriority(val: any): TaskPriority {
+  if (typeof val === 'string') {
+    const lower = val.trim().toLowerCase() as TaskPriority;
+    if (VALID_PRIORITIES.has(lower)) return lower;
+  }
+  return 'medium';
+}
+
+function normalizeStatus(val: any): TaskStatus {
+  if (typeof val === 'string') {
+    const lower = val.trim().toLowerCase() as TaskStatus;
+    if (VALID_STATUSES.has(lower)) return lower;
+  }
+  return 'pending';
+}
+
+function normalizeQuadrant(val: any): EisenhowerQuadrant | null {
+  if (typeof val === 'string') {
+    const lower = val.trim().toLowerCase() as EisenhowerQuadrant;
+    if (VALID_QUADRANTS.has(lower)) return lower;
+  }
+  return null;
+}
+
+function sanitizeReminderMinutes(val: any): number {
+  if (val === undefined || val === null) return 0;
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  const intVal = Math.floor(num);
+  return intVal >= -1 ? intVal : 0;
+}
+
+function sanitizeEstimatedMinutes(val: any): number | null {
+  if (val === undefined || val === null) return null;
+  const num = Number(val);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return Math.floor(num);
+}
+
+function safeIsoDate(raw: any, fallback: string): string {
+  if (!raw) return fallback;
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? fallback : d.toISOString();
+}
+
+function safeTimestamp(dateVal: any, fallbackVal?: any): number {
+  if (dateVal) {
+    const t = new Date(dateVal).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  if (fallbackVal) {
+    const t2 = new Date(fallbackVal).getTime();
+    if (Number.isFinite(t2)) return t2;
+  }
+  return 0;
+}
 
 export class TaskBackendSyncService {
   private static instance: TaskBackendSyncService;
@@ -87,7 +145,9 @@ export class TaskBackendSyncService {
     const statusChanged = this.isConnected !== connected;
     this.isConnected = connected;
     if (statusChanged) {
-      this.listeners.forEach((fn) => {
+      // Snapshot listeners array to prevent skipped calls if a listener unsubscribes during broadcast
+      const snapshot = Array.from(this.listeners);
+      snapshot.forEach((fn) => {
         try {
           fn(connected);
         } catch (e) {
@@ -102,11 +162,18 @@ export class TaskBackendSyncService {
       clearTimeout(this.syncTimer);
       this.syncTimer = null;
     }
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     this.syncTimer = setTimeout(() => {
       this.syncWithBackend().catch((err) => {
         console.warn('[TaskBackendSyncService] Sync failed (offline):', err?.message);
       });
     }, delayMs);
+    if (this.syncTimer && typeof this.syncTimer.unref === 'function') {
+      this.syncTimer.unref();
+    }
   }
 
   public cancelScheduledSync(): void {
@@ -118,6 +185,7 @@ export class TaskBackendSyncService {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
+    this.hasPendingSync = false;
   }
 
   public async getBackendUrl(): Promise<string> {
@@ -209,9 +277,12 @@ export class TaskBackendSyncService {
       }
     } catch (e: any) {
       this.notifyStatus(false);
+      const isTimeout = e?.name === 'AbortError';
       return {
         success: false,
-        message: e?.message || 'Could not connect to backend server.',
+        message: isTimeout
+          ? 'Connection timed out while contacting backend server.'
+          : e?.message || 'Could not connect to backend server.',
       };
     }
   }
@@ -230,36 +301,65 @@ export class TaskBackendSyncService {
     try {
       const allLocalTasks = await taskRepository.findAll();
       const allTombstones = await tombstoneRepository.getAll();
-      const deletedTaskIds = allTombstones
-        .filter((t) => t.entityType === 'task')
-        .map((t) => t.id);
+      const deletedTaskIds = Array.from(
+        new Set(
+          allTombstones
+            .filter((t) => t.entityType === 'task')
+            .map((t) => t.id)
+        )
+      );
+      const deletedIdSet = new Set(deletedTaskIds);
+      const activeLocalTasks = allLocalTasks.filter((t) => !deletedIdSet.has(t.id));
 
       // Clean outgoing payload ensuring no unwhitelisted join properties cause HTTP 400
-      const sanitizedUpserts = allLocalTasks.map((t) => ({
-        id: t.id,
-        seriesId: t.seriesId ?? undefined,
-        title: t.title,
-        description: t.description ?? undefined,
-        date: t.date ?? '',
-        startTime: t.startTime ?? undefined,
-        endTime: t.endTime ?? undefined,
-        priority: t.priority ?? 'medium',
-        categoryId: t.categoryId ? t.categoryId.trim() : undefined,
-        status: t.status ?? 'pending',
-        recurrenceRule: t.recurrenceRule ?? undefined,
-        reminderMinutes: typeof t.reminderMinutes === 'number' && t.reminderMinutes >= 0 ? t.reminderMinutes : 0,
-        snoozeUntil: t.snoozeUntil ?? undefined,
-        notes: t.notes ?? undefined,
-        isLoudAlarm: Boolean(t.isLoudAlarm),
-        isOvernight: Boolean(t.isOvernight),
-        eisenhowerQuadrant: t.eisenhowerQuadrant ?? undefined,
-        accentColor: t.accentColor ?? undefined,
-        estimatedMinutes: typeof t.estimatedMinutes === 'number' && t.estimatedMinutes > 0 ? t.estimatedMinutes : undefined,
-        completedAt: t.completedAt ?? undefined,
-      }));
+      const sanitizedUpserts = activeLocalTasks.map((t) => {
+        const cleanDate = t.date ? sanitizeDateString(t.date) : '';
+        const cleanTitle = t.title ? t.title.trim() : '';
+        const finalTitle = cleanTitle || 'Untitled Task';
+        const cleanDesc = t.description?.trim();
+        const cleanNotes = t.notes?.trim();
+        const cleanSeries = t.seriesId?.trim();
+        const cleanCategory = t.categoryId?.trim();
+        const cleanAccent = t.accentColor?.trim();
+
+        // Clear times if task has no date (backlog)
+        const rawStart = cleanDate && t.startTime ? normalizeTimeTo24H(t.startTime) ?? undefined : undefined;
+        const rawEnd = cleanDate && t.endTime ? normalizeTimeTo24H(t.endTime) ?? undefined : undefined;
+        const cleanEst = sanitizeEstimatedMinutes(t.estimatedMinutes);
+
+        const nowIso = new Date().toISOString();
+        const createdAtIso = t.createdAt ? safeIsoDate(t.createdAt, nowIso) : nowIso;
+        const updatedAtIso = t.updatedAt ? safeIsoDate(t.updatedAt, createdAtIso) : createdAtIso;
+
+        return {
+          id: t.id,
+          seriesId: cleanSeries || undefined,
+          title: finalTitle,
+          description: cleanDesc || undefined,
+          date: cleanDate,
+          startTime: rawStart,
+          endTime: rawEnd,
+          priority: normalizePriority(t.priority),
+          categoryId: cleanCategory || undefined,
+          status: normalizeStatus(t.status),
+          recurrenceRule: t.recurrenceRule ?? undefined,
+          reminderMinutes: sanitizeReminderMinutes(t.reminderMinutes),
+          snoozeUntil: t.snoozeUntil ? safeIsoDate(t.snoozeUntil, '') || undefined : undefined,
+          notes: cleanNotes || undefined,
+          isLoudAlarm: Boolean(t.isLoudAlarm),
+          isOvernight: Boolean(t.isOvernight),
+          eisenhowerQuadrant: normalizeQuadrant(t.eisenhowerQuadrant) || undefined,
+          accentColor: cleanAccent || undefined,
+          estimatedMinutes: cleanEst !== null ? cleanEst : undefined,
+          completedAt: t.completedAt ? safeIsoDate(t.completedAt, '') || undefined : undefined,
+          createdAt: createdAtIso,
+          updatedAt: updatedAtIso,
+        };
+      });
 
       const activeUrl = await this.getBackendUrl();
-      const sinceTimestamp = await this.getLastSyncTimestamp();
+      const rawSince = await this.getLastSyncTimestamp();
+      const sinceTimestamp = rawSince ? safeIsoDate(rawSince, '') || undefined : undefined;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -275,7 +375,7 @@ export class TaskBackendSyncService {
           body: JSON.stringify({
             upserts: sanitizedUpserts,
             deletedIds: deletedTaskIds,
-            since: sinceTimestamp || undefined,
+            since: sinceTimestamp,
           }),
           signal: controller.signal,
         });
@@ -289,11 +389,7 @@ export class TaskBackendSyncService {
       }
 
       const result = await response.json();
-      const newTimestamp = result.timestamp || new Date().toISOString();
-      this.lastSyncTimestamp = newTimestamp;
-      try {
-        await settingsRepository.set(TaskBackendSyncService.SETTINGS_KEY_LAST_SYNC, newTimestamp);
-      } catch {}
+      const newTimestamp = safeIsoDate(result.timestamp, new Date().toISOString());
 
       this.notifyStatus(true);
 
@@ -307,76 +403,115 @@ export class TaskBackendSyncService {
         await tombstoneRepository.deleteByIds(deletedTaskIds);
       }
 
-      // Build a set of recently deleted task IDs to prevent resurrecting deleted tasks
-      const deletedIdSet = new Set(deletedTaskIds);
+      // Re-fetch tombstones to protect tasks deleted locally while fetch was in-flight
+      const freshTombstones = await tombstoneRepository.getAll();
+      const allKnownDeletedIds = new Set([
+        ...deletedTaskIds,
+        ...freshTombstones.filter((t) => t.entityType === 'task').map((t) => t.id),
+      ]);
+
+      // Pre-fetch all local categories to enable O(1) in-memory foreign key validation
+      const localCategories = await categoryRepository.findAll();
+      const validCategoryIds = new Set(localCategories.map((c) => c.id));
+
+      // Build an in-memory map of existing local tasks to eliminate redundant SELECT queries
+      const localTaskMap = new Map<string, Task>(allLocalTasks.map((t) => [t.id, t]));
+
+      const deletedTaskIdsForNotification: string[] = [];
+      const upsertedTasksForNotification: Task[] = [];
 
       // Perform all ingestion inside an atomic transaction for speed & ACID integrity
       await db.transaction(async (tx) => {
         // 2. Ingest server deletions into local SQLite without recording new tombstones
+        const processedServerDeletions = new Set<string>();
         if (result.serverDeletions && Array.isArray(result.serverDeletions) && result.serverDeletions.length > 0) {
           for (const delId of result.serverDeletions) {
-            if (!delId) continue;
+            if (!delId || processedServerDeletions.has(delId)) continue;
+            processedServerDeletions.add(delId);
+
             await tx.execute('DELETE FROM tasks WHERE id = ?', [delId]);
-            await tombstoneRepository.deleteByIds([delId]);
-            changedCount++;
+            await tx.execute('DELETE FROM sync_tombstones WHERE id = ?', [delId]);
+            if (localTaskMap.has(delId)) {
+              localTaskMap.delete(delId);
+              deletedTaskIdsForNotification.push(delId);
+              changedCount++;
+            }
             serverDeleteCount++;
           }
         }
 
         // 3. Ingest server tasks into local SQLite (Two-Way Delta Merge with Last-Write-Wins)
+        const processedServerTasks = new Set<string>();
         if (result.serverTasks && Array.isArray(result.serverTasks) && result.serverTasks.length > 0) {
           for (const st of result.serverTasks) {
-            if (!st || !st.id || deletedIdSet.has(st.id)) {
+            if (!st || !st.id || processedServerTasks.has(st.id) || allKnownDeletedIds.has(st.id)) {
               continue;
             }
+            processedServerTasks.add(st.id);
 
             let recurrenceJson: string | null = null;
+            let parsedRule: any = null;
             if (st.recurrenceRule) {
               if (typeof st.recurrenceRule === 'object') {
-                recurrenceJson = JSON.stringify(st.recurrenceRule);
-              } else if (typeof st.recurrenceRule === 'string') {
+                parsedRule = st.recurrenceRule;
                 try {
-                  JSON.parse(st.recurrenceRule);
-                  recurrenceJson = st.recurrenceRule;
+                  recurrenceJson = JSON.stringify(st.recurrenceRule);
+                } catch {
+                  recurrenceJson = null;
+                }
+              } else if (typeof st.recurrenceRule === 'string' && st.recurrenceRule.trim().length > 0) {
+                try {
+                  const parsed = JSON.parse(st.recurrenceRule.trim());
+                  if (parsed && typeof parsed === 'object') {
+                    parsedRule = parsed;
+                    recurrenceJson = JSON.stringify(parsed);
+                  }
                 } catch {
                   recurrenceJson = null;
                 }
               }
             }
 
-            const existing = await taskRepository.findById(st.id);
-            const serverUpdated = st.updatedAt ? new Date(st.updatedAt).getTime() : 0;
-            const localUpdated = existing?.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+            const existing = localTaskMap.get(st.id);
+            const serverUpdated = safeTimestamp(st.updatedAt, st.createdAt);
+            const localUpdated = safeTimestamp(existing?.updatedAt, existing?.createdAt);
 
             // If task does not exist locally or server has newer/equal modification timestamp:
             if (!existing || serverUpdated >= localUpdated) {
-              const isLoudAlarmVal = st.isLoudAlarm ? 1 : 0;
-              const isOvernightVal = st.isOvernight ? 1 : 0;
+              const isLoudAlarmVal = (st.isLoudAlarm !== undefined && st.isLoudAlarm !== null)
+                ? (st.isLoudAlarm ? 1 : 0)
+                : (parsedRule?.isLoudAlarm ? 1 : 0);
+              const isOvernightVal = (st.isOvernight !== undefined && st.isOvernight !== null)
+                ? (st.isOvernight ? 1 : 0)
+                : (parsedRule?.isOvernight ? 1 : 0);
+
               const normDate = st.date ? sanitizeDateString(st.date) : '';
-              const normStart = st.startTime ? (normalizeTimeTo24H(st.startTime) ?? null) : null;
-              const normEnd = st.endTime ? (normalizeTimeTo24H(st.endTime) ?? null) : null;
+              // Clear times if task date is empty (backlog task)
+              const normStart = normDate && st.startTime ? (normalizeTimeTo24H(st.startTime) ?? null) : null;
+              const normEnd = normDate && st.endTime ? (normalizeTimeTo24H(st.endTime) ?? null) : null;
               const nowIso = new Date().toISOString();
 
-              // Foreign key safety for categories
+              // Safe Title: Never allow empty or whitespace-only titles
+              const rawTitle = st.title ? String(st.title).trim() : '';
+              const finalTitle = rawTitle || 'Untitled Task';
+
+              // Foreign key safety for categories via in-memory lookup
               let validCategoryId: string | null = null;
               if (st.categoryId && typeof st.categoryId === 'string') {
                 const cleanCat = st.categoryId.trim();
-                if (cleanCat.length > 0) {
-                  const catExists = await categoryRepository.findById(cleanCat);
-                  if (catExists) {
-                    validCategoryId = cleanCat;
-                  }
+                if (cleanCat.length > 0 && validCategoryIds.has(cleanCat)) {
+                  validCategoryId = cleanCat;
                 }
               }
 
-              // Validate enums
-              const validPriority = VALID_PRIORITIES.has(st.priority) ? st.priority : 'medium';
-              const validStatus = VALID_STATUSES.has(st.status) ? st.status : 'pending';
-              const validQuadrant = VALID_QUADRANTS.has(st.eisenhowerQuadrant) ? st.eisenhowerQuadrant : null;
+              // Validate enums (case-insensitive)
+              const validPriority = normalizePriority(st.priority);
+              const validStatus = normalizeStatus(st.status);
+              const validQuadrant = normalizeQuadrant(st.eisenhowerQuadrant);
 
               // Ensure completedAt consistency
               const resolvedCompletedAt = validStatus === 'completed'
-                ? (st.completedAt ? new Date(st.completedAt).toISOString() : nowIso)
+                ? (st.completedAt ? safeIsoDate(st.completedAt, nowIso) : nowIso)
                 : null;
 
               // Sanitize snoozeUntil
@@ -388,6 +523,18 @@ export class TaskBackendSyncService {
                 }
               }
 
+              // Sanitize integers (supports -1 for disabled reminder)
+              const cleanRemMin = sanitizeReminderMinutes(st.reminderMinutes);
+              const cleanEstMin = sanitizeEstimatedMinutes(st.estimatedMinutes);
+
+              const cleanSeriesId = st.seriesId ? String(st.seriesId).trim() || null : null;
+              const cleanDesc = st.description ? String(st.description).trim() || null : null;
+              const cleanNotes = st.notes ? String(st.notes).trim() || null : null;
+              const cleanAccent = st.accentColor ? String(st.accentColor).trim() || null : null;
+
+              const createdAtIso = safeIsoDate(st.createdAt, nowIso);
+              const updatedAtIso = safeIsoDate(st.updatedAt, nowIso);
+
               await tx.execute(
                 `INSERT OR REPLACE INTO tasks (
                   id, seriesId, title, description, date, startTime, endTime,
@@ -398,9 +545,9 @@ export class TaskBackendSyncService {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                   st.id,
-                  st.seriesId ?? null,
-                  st.title ? String(st.title).trim() : 'Untitled Task',
-                  st.description ?? null,
+                  cleanSeriesId,
+                  finalTitle,
+                  cleanDesc,
                   normDate,
                   normStart,
                   normEnd,
@@ -408,19 +555,48 @@ export class TaskBackendSyncService {
                   validCategoryId,
                   validStatus,
                   recurrenceJson,
-                  typeof st.reminderMinutes === 'number' && st.reminderMinutes >= 0 ? st.reminderMinutes : 0,
+                  cleanRemMin,
                   validSnooze,
-                  st.notes ?? null,
+                  cleanNotes,
                   isLoudAlarmVal,
                   isOvernightVal,
                   validQuadrant,
-                  st.accentColor ?? null,
-                  typeof st.estimatedMinutes === 'number' && st.estimatedMinutes > 0 ? st.estimatedMinutes : null,
-                  st.createdAt ? new Date(st.createdAt).toISOString() : nowIso,
-                  st.updatedAt ? new Date(st.updatedAt).toISOString() : nowIso,
+                  cleanAccent,
+                  cleanEstMin,
+                  createdAtIso,
+                  updatedAtIso,
                   resolvedCompletedAt,
                 ]
               );
+
+              const updatedLocalTask: Task = {
+                id: st.id,
+                seriesId: cleanSeriesId ?? undefined,
+                title: finalTitle,
+                description: cleanDesc ?? undefined,
+                date: normDate,
+                startTime: normStart ?? undefined,
+                endTime: normEnd ?? undefined,
+                priority: validPriority,
+                categoryId: validCategoryId ?? undefined,
+                status: validStatus,
+                recurrenceRule: parsedRule ?? undefined,
+                reminderMinutes: cleanRemMin,
+                snoozeUntil: validSnooze ?? undefined,
+                notes: cleanNotes ?? undefined,
+                isLoudAlarm: Boolean(isLoudAlarmVal),
+                isOvernight: Boolean(isOvernightVal),
+                eisenhowerQuadrant: validQuadrant ?? undefined,
+                accentColor: cleanAccent ?? undefined,
+                estimatedMinutes: cleanEstMin ?? undefined,
+                createdAt: createdAtIso,
+                updatedAt: updatedAtIso,
+                completedAt: resolvedCompletedAt ?? undefined,
+              };
+
+              localTaskMap.set(st.id, updatedLocalTask);
+              upsertedTasksForNotification.push(updatedLocalTask);
+
               changedCount++;
               serverUpsertCount++;
             }
@@ -428,7 +604,37 @@ export class TaskBackendSyncService {
         }
       });
 
-      // Notify UI screens that local SQLite task store has been updated from the cloud
+      // Update and persist sync timestamp only AFTER local transaction has succeeded
+      this.lastSyncTimestamp = newTimestamp;
+      try {
+        await settingsRepository.set(TaskBackendSyncService.SETTINGS_KEY_LAST_SYNC, newTimestamp);
+      } catch (e) {
+        console.warn('[TaskBackendSyncService] Failed to persist last sync timestamp:', e);
+      }
+
+      // 4. Reconcile notifications for remotely deleted tasks outside transaction
+      for (const delId of deletedTaskIdsForNotification) {
+        try {
+          await notificationService.cancelTaskReminder(delId);
+        } catch (e) {
+          console.warn('[TaskBackendSyncService] Failed to cancel reminder for deleted task:', delId, e);
+        }
+      }
+
+      // 5. Reconcile notifications for remotely upserted tasks outside transaction
+      for (const task of upsertedTasksForNotification) {
+        try {
+          if (shouldScheduleReminder(task)) {
+            await notificationService.scheduleTaskReminder(task);
+          } else {
+            await notificationService.cancelTaskReminder(task.id);
+          }
+        } catch (e) {
+          console.warn('[TaskBackendSyncService] Failed to update reminder for upserted task:', task.id, e);
+        }
+      }
+
+      // 6. Notify UI screens that local SQLite task store has been updated from the cloud
       if (changedCount > 0) {
         syncEventBus.notifyDataRestored();
       }
@@ -448,11 +654,17 @@ export class TaskBackendSyncService {
       this.retryTimer = setTimeout(() => {
         this.syncWithBackend().catch(() => {});
       }, 15000);
+      if (this.retryTimer && typeof this.retryTimer.unref === 'function') {
+        this.retryTimer.unref();
+      }
 
+      const isTimeout = err?.name === 'AbortError';
       return {
         success: false,
         syncedCount: 0,
-        message: err?.message || 'Network error during backend sync.',
+        message: isTimeout
+          ? 'Connection timed out while syncing with backend.'
+          : err?.message || 'Network error during backend sync.',
       };
     } finally {
       this.isSyncing = false;

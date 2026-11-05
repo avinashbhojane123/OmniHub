@@ -216,7 +216,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
   // OTA Updates State
   const [otaStatus, setOtaStatus] = useState<OTAStatus | null>(null);
   const [otaChecking, setOtaChecking] = useState(false);
-  const [otaServerHost, setOtaServerHost] = useState('10.105.247.73:8888');
+  const [otaServerHost, setOtaServerHost] = useState('10.34.159.73:8888');
   const [isOtaModalVisible, setIsOtaModalVisible] = useState(false);
   const isOtaModalVisibleRef = useRef(false);
   useEffect(() => {
@@ -1277,7 +1277,7 @@ export const WorkspaceSelectScreen: React.FC = () => {
                       ]}
                       value={otaServerHost}
                       onChangeText={setOtaServerHost}
-                      placeholder="10.105.247.73:8888"
+                      placeholder="10.34.159.73:8888"
                       placeholderTextColor={colors.textMuted}
                       autoCapitalize="none"
                       autoCorrect={false}

@@ -22,7 +22,7 @@ export interface UpdateCheckResult {
 
 const SETTINGS_KEY_SERVER = 'ota_server_url';
 const SETTINGS_KEY_VERSION = 'local_ota_version';
-const DEFAULT_SERVER = 'http://10.34.159.73:8888';
+const DEFAULT_SERVER = 'http://10.165.246.73:8888';
 
 export class OTAService {
   private static instance: OTAService;

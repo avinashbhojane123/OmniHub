@@ -129,7 +129,6 @@ export class MoviesController {
     return this.moviesService.toggleWatched(id, body?.isWatched, userId, isTv);
   }
 
-
   // --- TVmaze API (Free TV Series, Schedules, Episodes) ---
   @Get('tvmaze/shows')
   getTVMazeShows(
@@ -140,7 +139,10 @@ export class MoviesController {
   }
 
   @Get('tvmaze/schedule')
-  getTVMazeSchedule(@Query('country') country?: string, @Query('date') date?: string) {
+  getTVMazeSchedule(
+    @Query('country') country?: string,
+    @Query('date') date?: string,
+  ) {
     return this.moviesService.getTVMazeSchedule(country || 'US', date);
   }
 
@@ -179,7 +181,6 @@ export class MoviesController {
 
   @Get(':id')
   getMovieDetails(@Param('id') id: string) {
-
     return this.moviesService.getMovieDetails(id);
   }
 

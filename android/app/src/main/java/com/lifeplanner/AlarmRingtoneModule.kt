@@ -19,6 +19,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -410,6 +411,7 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
                 fallbackRingtone = null
                 isPlaying = false
 
+                val alarmIdToCancel = activeAlarmId
                 if (clearMetadata) {
                     activeAlarmId = null
                     activeTitle = null
@@ -429,6 +431,17 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
                         ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
                     }
                     vibrator?.cancel()
+
+                    // Cancel native ongoing notification posted by AlarmReceiver
+                    try {
+                        val nm = NotificationManagerCompat.from(ctx)
+                        if (alarmIdToCancel != null) {
+                            val notifId = Math.abs(alarmIdToCancel.hashCode()) % 90000 + 10000
+                            nm.cancel(notifId)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
 
                 if (notifyJs) {

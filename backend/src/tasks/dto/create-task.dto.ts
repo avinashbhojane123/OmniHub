@@ -9,8 +9,8 @@ import {
 
 export class CreateTaskDto {
   @IsString()
-  @IsNotEmpty()
-  id!: string;
+  @IsOptional()
+  id?: string;
 
   @IsString()
   @IsOptional()

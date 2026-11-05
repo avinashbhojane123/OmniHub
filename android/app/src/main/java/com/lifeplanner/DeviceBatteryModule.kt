@@ -278,6 +278,9 @@ class DeviceBatteryModule(private val reactContext: ReactApplicationContext) :
             if (settings.hasKey("vibrationEnabled")) {
                 editor.putBoolean("battery_vibration", settings.getBoolean("vibrationEnabled"))
             }
+            if (settings.hasKey("dndEnabled")) {
+                editor.putBoolean("app_dnd_enabled", settings.getBoolean("dndEnabled"))
+            }
             editor.apply()
 
             // If guard active, ensure native background service is running

@@ -27,7 +27,7 @@ export class WatchPartyService implements OnModuleDestroy {
 
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
-  ) { }
+  ) {}
 
   onModuleDestroy() {
     for (const timer of this.watchPartyCleanupTimers.values()) {
@@ -61,6 +61,18 @@ export class WatchPartyService implements OnModuleDestroy {
       clearTimeout(timer);
       this.watchPartyDisconnectTimers.delete(key);
     }
+  }
+
+  getLeadTimeMs(): number {
+    const raw = process.env.WATCH_PARTY_LEAD_TIME_MS;
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    return !isNaN(parsed) && parsed >= 0 ? parsed : 300;
+  }
+
+  getSyncToleranceMs(): number {
+    const raw = process.env.WATCH_PARTY_SYNC_TOLERANCE_MS;
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    return !isNaN(parsed) && parsed >= 0 ? parsed : 500;
   }
 
   getCalculatedWatchPartyPosition(state: WatchPartyState): number {
@@ -205,7 +217,7 @@ export class WatchPartyService implements OnModuleDestroy {
             : data.currentTime !== undefined
               ? data.currentTime
               : state.currentTime || 0;
-        const acceptScheduledStart = now + 350;
+        const acceptScheduledStart = now + this.getLeadTimeMs() + 50;
         state.lastUpdatedTimestamp = acceptScheduledStart;
         state.scheduledStartServerTime = acceptScheduledStart;
         state.lastActorNickname = session.nickname;
@@ -232,11 +244,12 @@ export class WatchPartyService implements OnModuleDestroy {
         if (
           state.isPlaying &&
           state.scheduledStartServerTime &&
-          Math.abs(now - state.scheduledStartServerTime) < 500
+          Math.abs(now - state.scheduledStartServerTime) <
+            this.getSyncToleranceMs()
         ) {
           return { success: true };
         }
-        const playScheduledStart = now + 300;
+        const playScheduledStart = now + this.getLeadTimeMs();
         state.isPlaying = true;
         state.currentTime =
           data.currentTime !== undefined ? data.currentTime : currentPos;
@@ -274,7 +287,7 @@ export class WatchPartyService implements OnModuleDestroy {
           state.isPlaying = data.isPlaying;
         }
         if (state.isPlaying) {
-          const seekScheduledStart = now + 300;
+          const seekScheduledStart = now + this.getLeadTimeMs();
           state.lastUpdatedTimestamp = seekScheduledStart;
           state.scheduledStartServerTime = seekScheduledStart;
         } else {
@@ -330,6 +343,8 @@ export class WatchPartyService implements OnModuleDestroy {
         state.version = (state.version || 0) + 1;
 
         this.clearWatchPartyBufferTimer(targetPasscode);
+        const bufferTimeoutMs =
+          Number(process.env.WATCH_PARTY_BUFFER_TIMEOUT_MS) || 10000;
         const bufWatchdog = setTimeout(() => {
           this.watchPartyBufferTimers.delete(targetPasscode);
           const st = this.watchPartyRooms.get(targetPasscode);
@@ -355,7 +370,7 @@ export class WatchPartyService implements OnModuleDestroy {
               serverTime: Date.now(),
             });
           }
-        }, 10000);
+        }, bufferTimeoutMs);
         this.watchPartyBufferTimers.set(targetPasscode, bufWatchdog);
         break;
       }
@@ -368,7 +383,7 @@ export class WatchPartyService implements OnModuleDestroy {
         if (state.bufferingUsers.length === 0) {
           state.isBuffering = false;
           if (state.isPlaying) {
-            const readyScheduledStart = now + 300;
+            const readyScheduledStart = now + this.getLeadTimeMs();
             state.lastUpdatedTimestamp = readyScheduledStart;
             state.scheduledStartServerTime = readyScheduledStart;
           } else {
@@ -395,12 +410,9 @@ export class WatchPartyService implements OnModuleDestroy {
         state.isPlaying = false;
         this.clearWatchPartyBufferTimer(normPasscode);
         this.watchPartyRooms.delete(normPasscode);
-        server
-          .to(targetPasscode)
-          .to(normPasscode)
-          .emit('watchPartyClosed', {
-            closedBy: session.nickname,
-          });
+        server.to(targetPasscode).to(normPasscode).emit('watchPartyClosed', {
+          closedBy: session.nickname,
+        });
         return { success: true };
       }
 
@@ -505,7 +517,11 @@ export class WatchPartyService implements OnModuleDestroy {
     data: WatchPartyReactionDto,
   ) {
     const targetPasscode = (data?.passcode || session?.passcode || '').trim();
-    if (!session || !targetPasscode || session.passcode.toLowerCase() !== targetPasscode.toLowerCase()) {
+    if (
+      !session ||
+      !targetPasscode ||
+      session.passcode.toLowerCase() !== targetPasscode.toLowerCase()
+    ) {
       return;
     }
 
@@ -526,7 +542,11 @@ export class WatchPartyService implements OnModuleDestroy {
     data: WatchPartyCommentDto,
   ) {
     const targetPasscode = (data?.passcode || session?.passcode || '').trim();
-    if (!session || !targetPasscode || session.passcode.toLowerCase() !== targetPasscode.toLowerCase()) {
+    if (
+      !session ||
+      !targetPasscode ||
+      session.passcode.toLowerCase() !== targetPasscode.toLowerCase()
+    ) {
       return;
     }
 
@@ -536,8 +556,8 @@ export class WatchPartyService implements OnModuleDestroy {
       });
       const user = room
         ? await this.userRepo.findOne({
-          where: { nickname: session.nickname, roomId: room.id },
-        })
+            where: { nickname: session.nickname, roomId: room.id },
+          })
         : null;
       if (user?.mutedUntil && new Date(user.mutedUntil) <= new Date()) {
         user.isMuted = false;
@@ -614,8 +634,10 @@ export class WatchPartyService implements OnModuleDestroy {
       });
     }
 
-    // Auto-pause Watch Party if a user leaves/disconnects during active movie playback (with 5-second grace period)
+    // Auto-pause Watch Party if a user leaves/disconnects during active movie playback
     if (wpState && wpState.isActive && wpState.isPlaying) {
+      const disconnectGraceMs =
+        Number(process.env.WATCH_PARTY_DISCONNECT_GRACE_PERIOD_MS) || 5000;
       this.clearWatchPartyDisconnectTimer(passcode);
       const timer = setTimeout(() => {
         this.watchPartyDisconnectTimers.delete(passcode);
@@ -644,12 +666,14 @@ export class WatchPartyService implements OnModuleDestroy {
             serverTime: Date.now(),
           });
         }
-      }, 5000);
+      }, disconnectGraceMs);
       this.watchPartyDisconnectTimers.set(passcode, timer);
     }
 
-    // Clean up in-memory Watch Party state with a 60-second grace period if no users remain
+    // Clean up in-memory Watch Party state with a grace period if no users remain
     if (!anyUserInRoom) {
+      const cleanupGraceMs =
+        Number(process.env.WATCH_PARTY_ROOM_CLEANUP_MS) || 60000;
       const existingTimer = this.watchPartyCleanupTimers.get(passcode);
       if (existingTimer) clearTimeout(existingTimer);
       const timer = setTimeout(() => {
@@ -657,7 +681,7 @@ export class WatchPartyService implements OnModuleDestroy {
         if (!anyUserInRoom) {
           this.watchPartyRooms.delete(passcode);
         }
-      }, 60000);
+      }, cleanupGraceMs);
       this.watchPartyCleanupTimers.set(passcode, timer);
     }
   }

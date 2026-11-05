@@ -26,12 +26,14 @@ import { Status } from '../status/status.entity';
     ChatGateway,
   ],
   exports: [
+    TypeOrmModule,
     CallingService,
     WatchPartyService,
     StatusService,
     MessageService,
     RoomModerationService,
     WallpaperService,
+    ChatGateway,
   ],
 })
 export class ChatModule {}

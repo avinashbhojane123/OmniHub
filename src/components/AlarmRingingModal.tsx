@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { alarmService, AlarmState } from '../services/alarm/AlarmService';
 import { settingsRepository } from '../database/repositories';
 import { taskService } from '../services/tasks/TaskService';
+import { batteryService } from '../services/battery/BatteryService';
 
 export const AlarmRingingModal: React.FC = () => {
   const insetsContext = React.useContext(SafeAreaInsetsContext);
@@ -95,16 +96,6 @@ export const AlarmRingingModal: React.FC = () => {
     }
   }, [alarmState.isRinging]);
 
-  // Safety Fix: Hardware back button safely SNOOZES the alarm to prevent accidental wake-up cancellations
-  useEffect(() => {
-    if (!alarmState.isRinging) return;
-    const backSub = BackHandler.addEventListener('hardwareBackPress', () => {
-      triggerHaptic(60);
-      alarmService.snoozeAlarm(snoozeMinutes);
-      return true;
-    });
-    return () => backSub.remove();
-  }, [alarmState.isRinging, snoozeMinutes]);
 
   // Harmonized organic cosmic pulse loop synchronized with rhythmic breathing
   useEffect(() => {
@@ -149,10 +140,6 @@ export const AlarmRingingModal: React.FC = () => {
     }
   }, [alarmState.isRinging, pulseAnim, glowOpacityAnim]);
 
-  if (!alarmState.isRinging) {
-    return null;
-  }
-
   const triggerHaptic = (duration = 35) => {
     try {
       Vibration.vibrate(duration);
@@ -169,6 +156,12 @@ export const AlarmRingingModal: React.FC = () => {
   // Live updated date (e.g. "Mon, Jan 8")
   const formattedDate = format(currentTime, 'EEE, MMM d');
 
+  const isBatteryAlarm =
+    alarmState.alarmType === 'battery' ||
+    alarmState.timeString === 'Battery Alarm' ||
+    alarmState.title?.toLowerCase().includes('battery') ||
+    alarmState.title?.toLowerCase().includes('overcharge');
+
   const handleDecreaseSnooze = () => {
     triggerHaptic(25);
     setSnoozeMinutes(prev => (prev > 1 ? prev - 1 : 1));
@@ -184,14 +177,34 @@ export const AlarmRingingModal: React.FC = () => {
     setIsSnoozing(true);
     triggerHaptic(60);
     alarmService.snoozeAlarm(snoozeMinutes);
+    if (isBatteryAlarm) {
+      try {
+        batteryService.snoozeAlarm(snoozeMinutes);
+      } catch {}
+    }
   };
 
-  const handleDismiss = () => {
+  const handleDismiss = React.useCallback(() => {
     if (isDismissing || isSnoozing) return;
     setIsDismissing(true);
     triggerHaptic(80);
     alarmService.stopRinging();
-  };
+    if (isBatteryAlarm) {
+      try {
+        batteryService.stopAlarm();
+      } catch {}
+    }
+  }, [isDismissing, isSnoozing, isBatteryAlarm]);
+
+  // Hardware back button safely dismisses / stops the ringing alarm (unconditional hook)
+  useEffect(() => {
+    if (!alarmState.isRinging) return;
+    const backSub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleDismiss();
+      return true;
+    });
+    return () => backSub.remove();
+  }, [alarmState.isRinging, handleDismiss]);
 
   const handleCompleteTask = async () => {
     if (!alarmState.taskId || isDismissing || isSnoozing) return;
@@ -205,11 +218,9 @@ export const AlarmRingingModal: React.FC = () => {
     }
   };
 
-  const isBatteryAlarm =
-    alarmState.alarmType === 'battery' ||
-    alarmState.timeString === 'Battery Alarm' ||
-    alarmState.title?.toLowerCase().includes('battery') ||
-    alarmState.title?.toLowerCase().includes('overcharge');
+  if (!alarmState.isRinging) {
+    return null;
+  }
 
   return (
     <Animated.View style={styles.fullScreenContainer}>

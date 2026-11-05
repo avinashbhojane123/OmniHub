@@ -33,7 +33,7 @@ export class JoinRoomDto {
   @IsString()
   @IsOptional()
   @MaxLength(100)
-  browser?: string;
+  appVersion?: string;
 
   @IsString()
   @IsOptional()

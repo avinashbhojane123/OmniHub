@@ -76,14 +76,13 @@ import { WallpaperService } from './services/wallpaper.service';
 
 @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
 @WebSocketGateway({
-  cors: {
-    origin: process.env.ALLOWED_ORIGINS
-      ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-      : '*',
-  },
-  pingInterval: Number(process.env.SOCKET_PING_INTERVAL || 10000),
-  pingTimeout: Number(process.env.SOCKET_PING_TIMEOUT || 20000),
-  maxHttpBufferSize: 1e7,
+  pingInterval: Number(
+    process.env.SOCKET_PING_INTERVAL || process.env.WS_PING_INTERVAL || 10000,
+  ),
+  pingTimeout: Number(
+    process.env.SOCKET_PING_TIMEOUT || process.env.WS_PING_TIMEOUT || 20000,
+  ),
+  maxHttpBufferSize: Number(process.env.SOCKET_MAX_HTTP_BUFFER_SIZE || 1e7),
 })
 export class ChatGateway
   implements
@@ -126,20 +125,32 @@ export class ChatGateway
     await this.roomModerationService.resetUsersOnlineStatusOnBootstrap();
 
     const cleanupInterval = Number(
-      process.env.MESSAGE_CLEANUP_INTERVAL || 30000,
+      process.env.MESSAGE_CLEANUP_INTERVAL ||
+        process.env.SELF_DESTRUCT_CLEANUP_INTERVAL_MS ||
+        30000,
     );
     this.cleanupTimer = setInterval(() => {
-      void this.messageService.cleanupExpiredMessages(this.server);
-      void this.statusService.cleanupExpiredStatuses();
+      this.messageService.cleanupExpiredMessages(this.server).catch((err) => {
+        console.warn('cleanupExpiredMessages error:', err);
+      });
+      this.statusService.cleanupExpiredStatuses().catch((err) => {
+        console.warn('cleanupExpiredStatuses error:', err);
+      });
     }, cleanupInterval);
 
-    const userCleanupInterval = 60 * 60 * 1000;
+    const userCleanupInterval = Number(
+      process.env.USER_CLEANUP_INTERVAL_MS || 60 * 60 * 1000,
+    );
     this.userCleanupTimer = setInterval(() => {
-      void this.roomModerationService.cleanupStaleUsers();
+      this.roomModerationService.cleanupStaleUsers().catch((err) => {
+        console.warn('cleanupStaleUsers error:', err);
+      });
     }, userCleanupInterval);
 
     await this.wallpaperService.cleanupDeadWallpapers();
-    void this.messageService.cleanupOrphanUploadFiles();
+    this.messageService.cleanupOrphanUploadFiles().catch((err) => {
+      console.warn('cleanupOrphanUploadFiles error:', err);
+    });
   }
 
   onModuleDestroy() {
@@ -149,6 +160,7 @@ export class ChatGateway
       clearTimeout(timer);
     }
     this.userDisconnectDebounceTimers.clear();
+    this.socketMessageTimes.clear();
     this.users.clear();
   }
 
@@ -162,8 +174,8 @@ export class ChatGateway
 
   private checkRateLimit(
     client: Socket,
-    maxLimit = 15,
-    windowMs = 3000,
+    maxLimit = Number(process.env.WS_RATE_LIMIT_MAX_HITS) || 15,
+    windowMs = Number(process.env.WS_RATE_LIMIT_WINDOW_MS) || 3000,
   ): boolean {
     const now = Date.now();
     const timestamps = (this.socketMessageTimes.get(client.id) || []).filter(
@@ -208,7 +220,8 @@ export class ChatGateway
     nickname?: string,
     excludeSocketId?: string,
   ): { socketId: string; nickname: string } | undefined {
-    const cleanPass = passcode.trim().toLowerCase();
+    const cleanPass = (passcode || '').trim().toLowerCase();
+    if (!cleanPass) return undefined;
     for (const [id, user] of this.users.entries()) {
       if (
         (user.passcode || '').trim().toLowerCase() === cleanPass &&
@@ -216,7 +229,7 @@ export class ChatGateway
       ) {
         if (
           !nickname ||
-          user.nickname.trim().toLowerCase() === nickname.trim().toLowerCase()
+          (user.nickname || '').trim().toLowerCase() === (nickname || '').trim().toLowerCase()
         ) {
           return { socketId: id, nickname: user.nickname };
         }
@@ -230,7 +243,8 @@ export class ChatGateway
     nickname?: string,
     excludeSocketId?: string,
   ): Array<{ socketId: string; nickname: string }> {
-    const cleanPass = passcode.trim().toLowerCase();
+    const cleanPass = (passcode || '').trim().toLowerCase();
+    if (!cleanPass) return [];
     const result: Array<{ socketId: string; nickname: string }> = [];
     for (const [id, user] of this.users.entries()) {
       if (
@@ -239,7 +253,7 @@ export class ChatGateway
       ) {
         if (
           !nickname ||
-          user.nickname.trim().toLowerCase() === nickname.trim().toLowerCase()
+          (user.nickname || '').trim().toLowerCase() === (nickname || '').trim().toLowerCase()
         ) {
           result.push({ socketId: id, nickname: user.nickname });
         }
@@ -273,25 +287,20 @@ export class ChatGateway
 
     if (isStillConnected) return;
 
-    this.server
-      .to(userInfo.passcode)
-      .to(cleanPass)
-      .emit('userStoppedTyping', {
-        nickname: userInfo.nickname,
-      });
-    this.server
-      .to(userInfo.passcode)
-      .to(cleanPass)
-      .emit('userStopTyping', {
-        nickname: userInfo.nickname,
-      });
+    this.server.to(userInfo.passcode).to(cleanPass).emit('userStoppedTyping', {
+      nickname: userInfo.nickname,
+    });
+    this.server.to(userInfo.passcode).to(cleanPass).emit('userStopTyping', {
+      nickname: userInfo.nickname,
+    });
 
     const userKey = `${cleanPass}:${cleanNick}`;
     this.clearUserDisconnectDebounceTimer(userKey);
 
     const debounceTimer = setTimeout(() => {
-      void (async () => {
-        this.userDisconnectDebounceTimers.delete(userKey);
+      (async () => {
+        try {
+          this.userDisconnectDebounceTimers.delete(userKey);
 
         const isReconnected = Array.from(this.users.values()).some(
           (info) =>
@@ -408,21 +417,20 @@ export class ChatGateway
           );
         }
 
-        this.server
-          .to(userInfo.passcode)
-          .to(cleanPass)
-          .emit('userOffline', {
-            nickname: userInfo.nickname,
-            lastSeen: new Date(),
-          });
-        this.server
-          .to(userInfo.passcode)
-          .to(cleanPass)
-          .emit('userLeft', {
-            nickname: userInfo.nickname,
-          });
-      })();
-    }, 12000);
+        this.server.to(userInfo.passcode).to(cleanPass).emit('userOffline', {
+          nickname: userInfo.nickname,
+          lastSeen: new Date(),
+        });
+        this.server.to(userInfo.passcode).to(cleanPass).emit('userLeft', {
+          nickname: userInfo.nickname,
+        });
+      } catch (err) {
+        console.warn('Error during user disconnect debounce execution:', err);
+      }
+    })().catch((err) => {
+      console.warn('Unhandled rejection in disconnect debounce:', err);
+    });
+  }, Number(process.env.USER_DISCONNECT_DEBOUNCE_MS) || 12000);
 
     this.userDisconnectDebounceTimers.set(userKey, debounceTimer);
 
@@ -443,6 +451,7 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data?: { passcode?: string },
   ) {
+    if (!this.checkRateLimit(client, 10, 3000)) return { success: false };
     const session = this.users.get(client.id);
     if (!session) return { success: false };
 
@@ -458,7 +467,8 @@ export class ChatGateway
 
     if (room) {
       this.users.delete(client.id);
-      void client.leave(roomPasscode);
+      client.leave(roomPasscode);
+      client.leave(roomPasscode.toLowerCase());
 
       const remainingSockets = this.findSocketsInRoom(
         roomPasscode,
@@ -577,20 +587,31 @@ export class ChatGateway
     @ConnectedSocket()
     client: Socket,
   ) {
-    this.watchPartyService.clearWatchPartyDisconnectTimer(data.passcode);
-    const userKey = `${data.passcode.trim().toLowerCase()}:${data.nickname.trim().toLowerCase()}`;
+    if (!data || !data.passcode || !data.nickname) {
+      return { success: false, message: 'Passcode and nickname are required' };
+    }
+    const cleanReqPasscode = data.passcode.trim();
+    const cleanRawNick = data.nickname.trim();
+    if (!cleanReqPasscode || !cleanRawNick) {
+      return { success: false, message: 'Passcode and nickname cannot be empty' };
+    }
+    if (!this.checkRateLimit(client, 6, 3000)) {
+      return { success: false, message: 'Too many join attempts. Please slow down.' };
+    }
+
+    this.watchPartyService.clearWatchPartyDisconnectTimer(cleanReqPasscode);
+    const userKey = `${cleanReqPasscode.toLowerCase()}:${cleanRawNick.toLowerCase()}`;
     this.clearUserDisconnectDebounceTimer(userKey);
 
     console.log(
       'JOIN ROOM:',
-      data.nickname,
+      cleanRawNick,
       data.deviceType || '',
       data.deviceModel || '',
-      data.browser || '',
+      data.appVersion || '',
       data.os || '',
     );
 
-    const cleanReqPasscode = (data.passcode || '').trim();
     let room = await this.roomRepo
       .createQueryBuilder('room')
       .where('LOWER(room.passcode) = LOWER(:passcode)', {
@@ -606,7 +627,11 @@ export class ChatGateway
         });
         room = await this.roomRepo.save(room);
       } catch (err: any) {
-        if (err.code === '23505') {
+        if (
+          err.code === '23505' ||
+          err.code === 'SQLITE_CONSTRAINT' ||
+          String(err).includes('UNIQUE')
+        ) {
           room = await this.roomRepo
             .createQueryBuilder('room')
             .where('LOWER(room.passcode) = LOWER(:passcode)', {
@@ -695,7 +720,8 @@ export class ChatGateway
             message: 'Your session has been resumed in another connection.',
           });
           try {
-            void oldSocket.leave(cleanPass);
+            oldSocket.leave(cleanPass);
+            oldSocket.leave(cleanPass.toLowerCase());
             oldSocket.disconnect(true);
           } catch {
             // Ignore disconnect cleanup errors
@@ -729,7 +755,7 @@ export class ChatGateway
         isOnline: true,
         deviceType: data.deviceType,
         deviceModel: data.deviceModel,
-        browser: data.browser,
+        appVersion: data.appVersion,
         os: data.os,
         avatarUrl: sanitizedAvatar,
         networkLabel: data.networkLabel,
@@ -747,7 +773,7 @@ export class ChatGateway
       }
       user.deviceType = data.deviceType || user.deviceType;
       user.deviceModel = data.deviceModel || user.deviceModel;
-      user.browser = data.browser || user.browser;
+      user.appVersion = data.appVersion || user.appVersion;
       user.os = data.os || user.os;
       if (data.networkLabel) user.networkLabel = data.networkLabel;
       if (data.batteryLabel) user.batteryLabel = data.batteryLabel;
@@ -760,7 +786,11 @@ export class ChatGateway
     try {
       await this.userRepo.save(user);
     } catch (err: any) {
-      if (err.code === '23505') {
+      if (
+        err.code === '23505' ||
+        err.code === 'SQLITE_CONSTRAINT' ||
+        String(err).includes('UNIQUE')
+      ) {
         user =
           (await this.userRepo.findOne({
             where: { nickname: cleanNick, roomId: room.id },
@@ -817,7 +847,7 @@ export class ChatGateway
         now: new Date(),
       })
       .orderBy('m.createdAt', 'DESC')
-      .take(50)
+      .take(Number(process.env.CHAT_MESSAGES_DEFAULT_LIMIT) || 50)
       .getMany();
 
     client.emit('chatHistory', messages.reverse());
@@ -872,7 +902,7 @@ export class ChatGateway
         avatarUrl: user.avatarUrl,
         deviceType: user.deviceType,
         deviceModel: user.deviceModel,
-        browser: user.browser,
+        appVersion: user.appVersion,
         os: user.os,
         networkLabel: user.networkLabel,
         batteryLabel: user.batteryLabel,
@@ -979,6 +1009,9 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: GetRoomDto,
   ) {
+    if (!this.checkRateLimit(client, 10, 3000)) {
+      return { success: false, message: 'Rate limit exceeded. Please slow down.' };
+    }
     const session = this.users.get(client.id);
     return this.messageService.getMessages(
       client,
@@ -1063,12 +1096,14 @@ export class ChatGateway
   // --- Typing Handlers ---
 
   @SubscribeMessage('typing')
-  typing(@ConnectedSocket() client: Socket, @MessageBody() data: TypingDto) {
+  typing(@ConnectedSocket() client: Socket, @MessageBody() data?: TypingDto) {
     if (!this.checkRateLimit(client, 6, 2000)) return;
     const session = this.users.get(client.id);
     if (!session || session.isMuted) return;
 
-    const trimmedPasscode = (data.passcode || session.passcode).trim();
+    const rawPasscode = data?.passcode || session.passcode;
+    if (!rawPasscode) return;
+    const trimmedPasscode = rawPasscode.trim();
     client
       .to(trimmedPasscode)
       .to(trimmedPasscode.toLowerCase())
@@ -1080,12 +1115,14 @@ export class ChatGateway
   @SubscribeMessage('stopTyping')
   stopTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: TypingDto,
+    @MessageBody() data?: TypingDto,
   ) {
     const session = this.users.get(client.id);
     if (!session || session.isMuted) return;
 
-    const trimmedPasscode = (data.passcode || session.passcode).trim();
+    const rawPasscode = data?.passcode || session.passcode;
+    if (!rawPasscode) return;
+    const trimmedPasscode = rawPasscode.trim();
     client
       .to(trimmedPasscode)
       .to(trimmedPasscode.toLowerCase())
@@ -1107,6 +1144,9 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: GetRoomDto,
   ) {
+    if (!this.checkRateLimit(client, 10, 3000)) {
+      return { success: false, message: 'Rate limit exceeded. Please slow down.' };
+    }
     return this.roomModerationService.getUsers(client, data, this.users);
   }
 
@@ -1281,6 +1321,11 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: CallUserDto,
   ) {
+    const callMaxHits =
+      Number(process.env.WS_RATE_LIMIT_CALL_MAX_HITS) || 5;
+    if (!this.checkRateLimit(client, callMaxHits, 3000)) {
+      return { success: false, message: 'Too many call attempts. Please slow down.' };
+    }
     const session = this.users.get(client.id);
     return this.callingService.callUser(
       this.server,
@@ -1352,6 +1397,9 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: WebrtcCandidateDto,
   ) {
+    const webrtcMaxHits =
+      Number(process.env.WS_RATE_LIMIT_WEBRTC_MAX_HITS) || 100;
+    if (!this.checkRateLimit(client, webrtcMaxHits, 3000)) return;
     const session = this.users.get(client.id);
     this.callingService.webrtcCandidate(
       this.server,
@@ -1389,7 +1437,13 @@ export class ChatGateway
     @MessageBody() data: ScreenShareStatusDto,
   ) {
     const session = this.users.get(client.id);
-    this.callingService.screenShareStatus(client, session, data);
+    this.callingService.screenShareStatus(
+      client,
+      session,
+      data,
+      this.server,
+      this.users,
+    );
   }
 
   @SubscribeMessage('webrtcMediaState')
@@ -1414,7 +1468,9 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: CreateStatusDto,
   ) {
-    if (!this.checkRateLimit(client, 5, 5000)) {
+    const statusMaxHits =
+      Number(process.env.WS_RATE_LIMIT_STATUS_MAX_HITS) || 5;
+    if (!this.checkRateLimit(client, statusMaxHits, 5000)) {
       return { success: false, message: 'Rate limit exceeded' };
     }
     const session = this.users.get(client.id);
@@ -1474,8 +1530,13 @@ export class ChatGateway
   }
 
   @SubscribeMessage('clientPing')
-  handleClientPing(@MessageBody() data?: any) {
-    return { success: true, serverTime: Date.now(), ...(data || {}) };
+  handleClientPing(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data?: any,
+  ) {
+    const response = { success: true, serverTime: Date.now(), ...(data || {}) };
+    client.emit('clientPong', response);
+    return response;
   }
 
   @SubscribeMessage('getWatchPartyState')
@@ -1522,6 +1583,7 @@ export class ChatGateway
       this.server,
       session,
       data,
+      client,
     );
   }
 }

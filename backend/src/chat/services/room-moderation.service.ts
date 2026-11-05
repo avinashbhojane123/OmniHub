@@ -43,7 +43,11 @@ export class RoomModerationService {
 
   async cleanupStaleUsers(): Promise<void> {
     try {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const staleDays =
+        Number(process.env.STALE_USER_CLEANUP_DAYS) || 30;
+      const thirtyDaysAgo = new Date(
+        Date.now() - staleDays * 24 * 60 * 60 * 1000,
+      );
       await this.userRepo
         .createQueryBuilder()
         .delete()
@@ -98,7 +102,13 @@ export class RoomModerationService {
       activeSockets.map((s) => (s.nickname || '').trim().toLowerCase()),
     );
 
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const lookbackDays =
+      Number(process.env.ROOM_ACTIVE_USERS_LOOKBACK_DAYS) || 7;
+    const maxUsersLimit =
+      Number(process.env.ROOM_ACTIVE_USERS_MAX_LIMIT) || 300;
+    const sevenDaysAgo = new Date(
+      Date.now() - lookbackDays * 24 * 60 * 60 * 1000,
+    );
     const activeNicksList = Array.from(activeNicknames);
 
     const query = this.userRepo
@@ -120,7 +130,7 @@ export class RoomModerationService {
     const roomUsers = await query
       .orderBy('user.isOnline', 'DESC')
       .addOrderBy('user.lastSeen', 'DESC')
-      .take(300)
+      .take(maxUsersLimit)
       .getMany();
 
     const relevant = roomUsers.filter((u) => {
@@ -154,7 +164,7 @@ export class RoomModerationService {
         lastSeen: u.lastSeen,
         deviceType: u.deviceType,
         deviceModel: u.deviceModel,
-        browser: u.browser,
+        appVersion: u.appVersion,
         os: u.os,
         avatarUrl: u.avatarUrl,
         networkLabel: u.networkLabel,
@@ -903,7 +913,12 @@ export class RoomModerationService {
       };
     }
 
-    const days = Math.max(1, Math.min(365, Number(data.daysInactive || 7)));
+    const defaultInactiveDays =
+      Number(process.env.INACTIVE_MEMBER_CLEANUP_DAYS) || 7;
+    const days = Math.max(
+      1,
+      Math.min(365, Number(data.daysInactive || defaultInactiveDays)),
+    );
     const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     // Safeguard: NEVER delete host, admins, or banned participants as "inactive"

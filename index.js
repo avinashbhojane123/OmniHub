@@ -39,6 +39,14 @@ notifee.onBackgroundEvent(async (event) => {
       pressId === 'snooze';
 
     if (isAlarmAction) {
+      if (pressId === 'stop_alarm' || pressId === 'dismiss') {
+        try {
+          await alarmService.stopRinging(true);
+        } catch {}
+        try {
+          await batteryService.stopAlarm(true);
+        } catch {}
+      }
       await alarmService.handleNotificationAction(event);
     } else {
       await notificationService.handleNotificationEvent(event);

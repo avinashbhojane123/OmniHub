@@ -71,6 +71,10 @@ export class DeclineCallDto {
 
   @IsOptional()
   @IsString()
+  callId?: string;
+
+  @IsOptional()
+  @IsString()
   reason?: string;
 }
 
@@ -98,6 +102,10 @@ export class WebrtcOfferDto {
   @IsOptional()
   @IsString()
   targetNickname?: string;
+
+  @IsOptional()
+  @IsString()
+  callId?: string;
 }
 
 export class WebrtcAnswerDto {
@@ -120,6 +128,10 @@ export class WebrtcAnswerDto {
   @IsOptional()
   @IsString()
   targetSocketId?: string;
+
+  @IsOptional()
+  @IsString()
+  callId?: string;
 }
 
 export class WebrtcCandidateDto {
@@ -138,6 +150,10 @@ export class WebrtcCandidateDto {
   @IsOptional()
   @IsString()
   targetSocketId?: string;
+
+  @IsOptional()
+  @IsString()
+  callId?: string;
 }
 
 export class EndCallDto {
@@ -149,6 +165,10 @@ export class EndCallDto {
   @IsOptional()
   @IsString()
   targetSocketId?: string;
+
+  @IsOptional()
+  @IsString()
+  callId?: string;
 
   @IsOptional()
   @IsString()
@@ -177,6 +197,10 @@ export class ScreenShareStatusDto {
   @IsOptional()
   @IsString()
   targetSocketId?: string;
+
+  @IsOptional()
+  @IsString()
+  callId?: string;
 }
 
 export class WebrtcMediaStateDto {

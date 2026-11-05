@@ -66,14 +66,18 @@ export class Status {
   fontStyle!: string | null;
 
   @Column({
-    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'simple-json' : 'jsonb') as any,
+    type: (process.env.DB_TYPE === 'better-sqlite3'
+      ? 'simple-json'
+      : 'jsonb') as any,
     nullable: true,
     default: null,
   })
   stickers!: Array<{ id: number; emoji: string }> | null;
 
   @Column({
-    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'simple-json' : 'jsonb') as any,
+    type: (process.env.DB_TYPE === 'better-sqlite3'
+      ? 'simple-json'
+      : 'jsonb') as any,
     nullable: true,
     default: '[]',
   })
@@ -83,7 +87,9 @@ export class Status {
   createdAt!: Date;
 
   @Column({
-    type: (process.env.DB_TYPE === 'better-sqlite3' ? 'datetime' : 'timestamptz') as any,
+    type: (process.env.DB_TYPE === 'better-sqlite3'
+      ? 'datetime'
+      : 'timestamptz') as any,
     nullable: true,
   })
   expiresAt!: Date | null;

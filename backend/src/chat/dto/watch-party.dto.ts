@@ -7,6 +7,7 @@ import {
   IsIn,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import type { WatchPartyActionType, WatchPartyVideoSource } from '../chat.types';
 
 export class WatchPartyActionDto {
   @IsString()
@@ -33,7 +34,7 @@ export class WatchPartyActionDto {
     'sync_tick',
     'heartbeat',
   ])
-  action!: string;
+  action!: WatchPartyActionType;
 
   @IsNumber()
   @IsOptional()
@@ -56,14 +57,7 @@ export class WatchPartyActionDto {
   clientSendTime?: number;
 
   @IsOptional()
-  videoSource?: {
-    url: string;
-    title: string;
-    type?: 'direct' | 'youtube' | 'embed';
-    duration?: number;
-    provider?: string;
-    originalUrl?: string;
-  };
+  videoSource?: WatchPartyVideoSource;
 
   @IsBoolean()
   @IsOptional()
@@ -104,6 +98,7 @@ export class WatchPartyReactionDto {
 
   @IsString()
   @IsNotEmpty()
+  @IsIn(['', 'heart', 'laugh', 'fire', 'cry', 'applause', 'thumbsup', 'surprised'])
   reaction!: string;
 }
 

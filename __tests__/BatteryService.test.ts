@@ -10,6 +10,10 @@ describe('BatteryService & Charge Alarm Suite', () => {
     await batteryService.initialize();
   });
 
+  beforeEach(() => {
+    batteryService.setDndActive(false);
+  });
+
   afterEach(() => {
     alarmService.stopRinging();
     jest.clearAllMocks();
@@ -33,7 +37,7 @@ describe('BatteryService & Charge Alarm Suite', () => {
       notifiedStatus = st;
     });
 
-    batteryService.setMockStatus({
+    batteryService.updateStatus({
       level: 75,
       isCharging: true,
       chargingType: 'USB',
@@ -69,7 +73,7 @@ describe('BatteryService & Charge Alarm Suite', () => {
     });
 
     // Reset baseline below threshold
-    batteryService.setMockStatus({
+    batteryService.updateStatus({
       level: 70,
       isCharging: true,
     });
@@ -77,7 +81,7 @@ describe('BatteryService & Charge Alarm Suite', () => {
     startRingingSpy.mockClear();
 
     // Device reaches 80% while charging
-    batteryService.setMockStatus({
+    batteryService.updateStatus({
       level: 80,
       isCharging: true,
     });
@@ -102,7 +106,7 @@ describe('BatteryService & Charge Alarm Suite', () => {
     });
 
     // Reset baseline above threshold
-    batteryService.setMockStatus({
+    batteryService.updateStatus({
       level: 50,
       isCharging: false,
     });
@@ -110,7 +114,7 @@ describe('BatteryService & Charge Alarm Suite', () => {
     startRingingSpy.mockClear();
 
     // Device drops to 19% while discharging
-    batteryService.setMockStatus({
+    batteryService.updateStatus({
       level: 19,
       isCharging: false,
     });
@@ -135,13 +139,13 @@ describe('BatteryService & Charge Alarm Suite', () => {
     });
 
     // Reset baseline temp below threshold
-    batteryService.setMockStatus({
+    batteryService.updateStatus({
       temperature: 30,
     });
     await waitMicrotasks();
     startRingingSpy.mockClear();
 
-    batteryService.setMockStatus({
+    batteryService.updateStatus({
       temperature: 43.5,
     });
     await waitMicrotasks();
@@ -163,5 +167,162 @@ describe('BatteryService & Charge Alarm Suite', () => {
     expect(startRingingSpy).toHaveBeenCalled();
 
     startRingingSpy.mockRestore();
+  });
+
+  it('8. should update status and not trigger false alarms for invalid or corrupted readings', async () => {
+    const startRingingSpy = jest.spyOn(alarmService, 'startRinging');
+
+    // Passing invalid / unreadable reading (-1) should be ignored and not alarm
+    batteryService.updateStatus({
+      level: -1,
+      isCharging: false,
+    });
+    await waitMicrotasks();
+    expect(startRingingSpy).not.toHaveBeenCalled();
+
+    // Valid update via updateStatus
+    const updated = batteryService.updateStatus({
+      level: 90,
+      isCharging: false,
+      temperature: 28,
+    });
+    expect(updated.level).toBe(90);
+
+    startRingingSpy.mockRestore();
+  });
+
+  it('9. should handle listener exceptions gracefully without aborting notifications', () => {
+    let secondListenerCalled = false;
+
+    const unsub1 = batteryService.subscribeStatus(() => {
+      throw new Error('Component crashed during status update');
+    });
+
+    const unsub2 = batteryService.subscribeStatus(() => {
+      secondListenerCalled = true;
+    });
+
+    batteryService.updateStatus({ level: 88 });
+    expect(secondListenerCalled).toBe(true);
+
+    unsub1();
+    unsub2();
+  });
+
+  it('10. should calculate active charging session stats correctly', () => {
+    // Unplugged returns null
+    batteryService.updateStatus({ isCharging: false });
+    expect(batteryService.getSessionStats()).toBeNull();
+
+    // Plug in at 50%
+    batteryService.updateStatus({
+      level: 50,
+      isCharging: true,
+      chargingType: 'AC',
+    });
+
+    // Advance level to 65%
+    batteryService.updateStatus({
+      level: 65,
+      isCharging: true,
+    });
+
+    const stats = batteryService.getSessionStats();
+    expect(stats).not.toBeNull();
+    expect(stats?.gained).toBe(15);
+    expect(stats?.elapsedMinutes).toBeGreaterThanOrEqual(1);
+    expect(stats?.speedPerHour).toBeGreaterThanOrEqual(0);
+  });
+
+  it('11. should not re-trigger battery alarm after stopAlarm is called during the same charging session', async () => {
+    await batteryService.updateSettings({
+      fullChargeAlarmEnabled: true,
+      fullChargeTarget: 80,
+      autoRepeatAlarm: true,
+    });
+
+    // Plug in below target
+    batteryService.updateStatus({
+      level: 75,
+      isCharging: true,
+      present: true,
+    });
+
+    // Cross target: alarm triggers
+    batteryService.updateStatus({
+      level: 80,
+      isCharging: true,
+      present: true,
+    });
+
+    // User stops alarm
+    await batteryService.stopAlarm(true);
+
+    // Further status updates at or above target should NOT re-trigger alarm while still plugged in
+    const triggerSpy = jest.spyOn(batteryService, 'triggerBatteryAlarm');
+    batteryService.updateStatus({
+      level: 81,
+      isCharging: true,
+      present: true,
+    });
+    expect(triggerSpy).not.toHaveBeenCalled();
+    triggerSpy.mockRestore();
+  });
+
+  it('12. should silence critical 5% alarm and not re-trigger after stopAlarm is called', async () => {
+    batteryService.setDndActive(false);
+    batteryService.updateStatus({
+      level: 10,
+      isCharging: false,
+      present: true,
+    });
+
+    const triggerSpy = jest.spyOn(batteryService, 'triggerBatteryAlarm');
+
+    // Drops to 5% critical
+    batteryService.updateStatus({
+      level: 5,
+      isCharging: false,
+      present: true,
+    });
+    expect(triggerSpy).toHaveBeenCalledTimes(1);
+
+    // User stops the alarm
+    await batteryService.stopAlarm(true);
+
+    // Subsequent readings at 4% or 3% should NOT re-trigger while remaining in the same critical state
+    batteryService.updateStatus({
+      level: 3,
+      isCharging: false,
+      present: true,
+    });
+    expect(triggerSpy).toHaveBeenCalledTimes(1);
+    triggerSpy.mockRestore();
+  });
+
+  it('13. should suppress all battery alarms when Complete DND is enabled', async () => {
+    batteryService.setDndActive(true);
+    expect(batteryService.getDndActive()).toBe(true);
+
+    const triggerSpy = jest.spyOn(batteryService, 'triggerBatteryAlarm');
+
+    // Try full charge
+    batteryService.updateStatus({
+      level: 100,
+      isCharging: true,
+      present: true,
+    });
+    expect(triggerSpy).not.toHaveBeenCalled();
+
+    // Try critical low
+    batteryService.updateStatus({
+      level: 4,
+      isCharging: false,
+      present: true,
+    });
+    expect(triggerSpy).not.toHaveBeenCalled();
+
+    triggerSpy.mockRestore();
+    batteryService.setDndActive(false);
   });
 });

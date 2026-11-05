@@ -12,8 +12,27 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import type { Request, Response } from 'express';
-import { extname, join } from 'path';
+import { extname, join, isAbsolute } from 'path';
 import { StreamService } from './stream.service';
+
+export function getMaxVideoFileSize(): number {
+  if (process.env.MAX_VIDEO_FILE_SIZE_BYTES) {
+    const bytes = Number(process.env.MAX_VIDEO_FILE_SIZE_BYTES);
+    if (!isNaN(bytes) && bytes > 0) return bytes;
+  }
+  const mb = Number(process.env.MAX_VIDEO_FILE_SIZE_MB || '2048');
+  return (!isNaN(mb) && mb > 0 ? mb : 2048) * 1024 * 1024;
+}
+
+export function getAllowedVideoExtensions(): string[] {
+  if (process.env.ALLOWED_VIDEO_EXTENSIONS) {
+    return process.env.ALLOWED_VIDEO_EXTENSIONS.split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.length > 0)
+      .map((e) => (e.startsWith('.') ? e : `.${e}`));
+  }
+  return ['.mp4', '.mkv', '.webm', '.mov', '.avi'];
+}
 
 @Controller('movies/stream')
 export class StreamController {
@@ -37,20 +56,26 @@ export class StreamController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
-        destination: (req, file, cb) => {
-          const vDir = join(process.cwd(), 'videos');
+        destination: (_req, _file, cb) => {
+          const customDir = process.env.VIDEOS_DIR || 'videos';
+          const vDir = isAbsolute(customDir)
+            ? customDir
+            : join(process.cwd(), customDir);
           cb(null, vDir);
         },
-        filename: (req, file, cb) => {
-          const originalName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        filename: (_req, file, cb) => {
+          const originalName = file.originalname.replace(
+            /[^a-zA-Z0-9.-]/g,
+            '_',
+          );
           cb(null, `${Date.now()}_${originalName}`);
         },
       }),
       limits: {
-        fileSize: 1024 * 1024 * 1024 * 2, // 2 GB max
+        fileSize: getMaxVideoFileSize(),
       },
-      fileFilter: (req, file, cb) => {
-        const allowedExts = ['.mp4', '.mkv', '.webm', '.mov', '.avi'];
+      fileFilter: (_req, file, cb) => {
+        const allowedExts = getAllowedVideoExtensions();
         const ext = extname(file.originalname).toLowerCase();
         if (!allowedExts.includes(ext)) {
           return cb(
