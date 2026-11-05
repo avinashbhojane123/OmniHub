@@ -8,6 +8,8 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  PanResponder,
+  Animated,
 } from 'react-native';
 import { ChatMessage } from '../../types/chat';
 import { styles } from './chatStyles';
@@ -279,6 +281,7 @@ export interface ChatMessageBubbleProps {
   searchQuery: string;
   isPlayingVoice: boolean;
   onToggleVoicePlay: (id: string) => void;
+  onReply?: (msg: ChatMessage) => void;
   onLongPress: (msg: ChatMessage) => void;
   onOpenImage: (uri: string) => void;
   onScrollToMessageId: (id: string | number) => void;
@@ -543,6 +546,7 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
   searchQuery,
   isPlayingVoice,
   onToggleVoicePlay,
+  onReply,
   onLongPress,
   onOpenImage,
   onScrollToMessageId,
@@ -557,6 +561,71 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
   const isDirectWhisper = Boolean(item.isDirect || item.targetNickname);
   const hasReactions = Boolean(item.reactions && Object.keys(item.reactions).length > 0);
   const memberColor = getMemberNicknameColor(item.nickname);
+
+  // Swipe-to-reply & Double-tap Heart animation
+  const pan = useRef(new Animated.Value(0)).current;
+  const lastTapRef = useRef(0);
+  const heartScale = useRef(new Animated.Value(0)).current;
+  const heartOpacity = useRef(new Animated.Value(0)).current;
+
+  const triggerHeartAnimation = () => {
+    heartScale.setValue(0.3);
+    heartOpacity.setValue(1);
+    Animated.parallel([
+      Animated.spring(heartScale, {
+        toValue: 1.3,
+        friction: 4,
+        useNativeDriver: true,
+      }),
+      Animated.timing(heartOpacity, {
+        toValue: 0,
+        duration: 750,
+        delay: 250,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Boolean(onReply) && gestureState.dx > 15 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dx > 0) {
+          pan.setValue(Math.min(65, gestureState.dx * 0.75));
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx >= 40 && onReply) {
+          onReply(item);
+        }
+        Animated.spring(pan, {
+          toValue: 0,
+          friction: 6,
+          tension: 70,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(pan, {
+          toValue: 0,
+          friction: 6,
+          tension: 70,
+          useNativeDriver: true,
+        }).start();
+      },
+    })
+  ).current;
+
+  const handleBubblePress = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 320) {
+      onReact(item.id, '❤️');
+      triggerHeartAnimation();
+    }
+    lastTapRef.current = now;
+  };
 
   // Grouping dynamics
   const isLastInGroup = !isSameSenderAsNext;
@@ -638,6 +707,32 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
           { marginTop: isSameSenderAsPrev ? 1.5 : 7 },
         ]}
       >
+        {/* Animated Swipe Reply Indicator Icon */}
+        <Animated.View
+          style={[
+            styles.swipeReplyIconBox,
+            {
+              opacity: pan.interpolate({
+                inputRange: [0, 15, 40],
+                outputRange: [0, 0.5, 1],
+                extrapolate: 'clamp',
+              }),
+              transform: [
+                {
+                  scale: pan.interpolate({
+                    inputRange: [0, 40],
+                    outputRange: [0.5, 1.15],
+                    extrapolate: 'clamp',
+                  }),
+                },
+              ],
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <Text style={styles.swipeReplyIconText}>↩️</Text>
+        </Animated.View>
+
         {/* Left Avatar for other members in group */}
         {!isMe && (
           <View style={styles.avatarGutter}>
@@ -657,19 +752,40 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
           </View>
         )}
 
-        <TouchableOpacity
+        <Animated.View
           style={[
-            styles.bubble,
-            isMe ? styles.bubbleMe : styles.bubbleOther,
-            isMe
-              ? (isLastInGroup ? styles.bubbleMeTail : styles.bubbleMeGrouped)
-              : (isLastInGroup ? styles.bubbleOtherTail : styles.bubbleOtherGrouped),
-            isDirectWhisper && styles.bubbleWhisper,
-            isHighlighted && styles.bubbleHighlighted,
+            styles.bubbleWrapperAnim,
+            { transform: [{ translateX: pan }] },
           ]}
-          onLongPress={() => onLongPress(item)}
-          activeOpacity={0.92}
+          {...panResponder.panHandlers}
         >
+          <TouchableOpacity
+            style={[
+              styles.bubble,
+              isMe ? styles.bubbleMe : styles.bubbleOther,
+              isMe
+                ? (isLastInGroup ? styles.bubbleMeTail : styles.bubbleMeGrouped)
+                : (isLastInGroup ? styles.bubbleOtherTail : styles.bubbleOtherGrouped),
+              isDirectWhisper && styles.bubbleWhisper,
+              isHighlighted && styles.bubbleHighlighted,
+            ]}
+            onPress={handleBubblePress}
+            onLongPress={() => onLongPress(item)}
+            activeOpacity={0.92}
+          >
+            {/* Double Tap Floating Heart Burst Animation */}
+            <Animated.View
+              style={[
+                styles.heartBurstContainer,
+                {
+                  opacity: heartOpacity,
+                  transform: [{ scale: heartScale }],
+                },
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={styles.heartBurstText}>❤️</Text>
+            </Animated.View>
           {/* Sender Nickname with Quick Whisper/Call Option for others, and Whisper indication for sender */}
           {!isMe && !isSameSenderAsPrev ? (
             <TouchableOpacity
@@ -903,6 +1019,7 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
             </View>
           )}
         </TouchableOpacity>
+        </Animated.View>
       </View>
     </View>
   );

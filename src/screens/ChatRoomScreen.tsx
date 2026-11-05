@@ -306,6 +306,66 @@ export const ChatRoomScreen: React.FC = () => {
     }
   }, [replyingTo, directTarget, disappearingSecs]);
 
+  const handleShareLocation = useCallback(() => {
+    Alert.alert(
+      '📍 Share Location',
+      'Choose a location to share with participants:',
+      [
+        {
+          text: '📌 Current Location (Live Pin)',
+          onPress: () => {
+            const replyRef = replyingTo ? {
+              id: replyingTo.id,
+              nickname: replyingTo.nickname,
+              message: replyingTo.message,
+            } : undefined;
+            const payload = {
+              locationData: {
+                lat: 18.5204,
+                lng: 73.8567,
+                address: 'Current Location • Live Pin',
+              },
+              expiresIn: disappearingSecs,
+              replyTo: replyRef,
+            };
+            if (directTarget) {
+              chatSocketService.sendDirectMessage(directTarget, '📍 Shared Live Location', payload);
+            } else {
+              chatSocketService.sendMessage('📍 Shared Live Location', replyRef, payload);
+            }
+            if (replyingTo) setReplyingTo(null);
+          },
+        },
+        {
+          text: '🏢 Meeting Point / Central Hub',
+          onPress: () => {
+            const replyRef = replyingTo ? {
+              id: replyingTo.id,
+              nickname: replyingTo.nickname,
+              message: replyingTo.message,
+            } : undefined;
+            const payload = {
+              locationData: {
+                lat: 18.5284,
+                lng: 73.8739,
+                address: 'Meeting Point • Central Station Hub',
+              },
+              expiresIn: disappearingSecs,
+              replyTo: replyRef,
+            };
+            if (directTarget) {
+              chatSocketService.sendDirectMessage(directTarget, '📍 Meeting Point Location', payload);
+            } else {
+              chatSocketService.sendMessage('📍 Meeting Point Location', replyRef, payload);
+            }
+            if (replyingTo) setReplyingTo(null);
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  }, [replyingTo, directTarget, disappearingSecs]);
+
   // 9. Coordinated voice note playback (ensures only 1 plays at a time)
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [isCallMinimized, setIsCallMinimized] = useState(false);
@@ -631,9 +691,9 @@ export const ChatRoomScreen: React.FC = () => {
   // Room Options Overflow Menu
   const handleOpenRoomMenu = useCallback(() => {
     Keyboard.dismiss();
-    Alert.alert('Room Options', undefined, [
+    const options: any[] = [
       {
-        text: '👥 Room Participants',
+        text: '👥 Participants & Moderation',
         onPress: () => setModalVisible('roster', true),
       },
       {
@@ -641,12 +701,45 @@ export const ChatRoomScreen: React.FC = () => {
         onPress: () => setModalVisible('watchParty', true),
       },
       {
-        text: '🎨 Room Wallpaper',
+        text: '🎨 Chat Wallpaper & Theme',
         onPress: () => setModalVisible('wallpaper', true),
       },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [setModalVisible]);
+      {
+        text: '📋 Copy Room Passcode',
+        onPress: () => {
+          const roomCode = chatSocketService.passcode || passcode || 'Room';
+          copyToClipboard(roomCode);
+          Alert.alert('Copied', `Room passcode "${roomCode}" copied to clipboard.`);
+        },
+      },
+    ];
+
+    if (chatSocketService.isHost || chatSocketService.isAdmin) {
+      options.push({
+        text: '🧹 Clear Chat History',
+        onPress: () => {
+          Alert.alert(
+            'Clear Room History',
+            'Are you sure you want to delete all messages in this room? This action cannot be undone.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Clear All', style: 'destructive', onPress: () => chatSocketService.clearHistory() },
+            ]
+          );
+        },
+      });
+    }
+
+    options.push({
+      text: '🚪 Leave Room',
+      style: 'destructive',
+      onPress: handleLeaveRoom,
+    });
+
+    options.push({ text: 'Cancel', style: 'cancel' });
+
+    Alert.alert('Room Options', undefined, options);
+  }, [setModalVisible, passcode, handleLeaveRoom]);
 
   // Master Back Handler
   const handleGoBack = useCallback(() => {
@@ -1083,6 +1176,14 @@ export const ChatRoomScreen: React.FC = () => {
   }, [insets.top, roomState.connectionStatus, searchState.isSearching, roomState.pinnedMsg]);
 
   // Message item handlers for memoized ChatMessageBubble
+  const handleReply = useCallback((msg: ChatMessage) => {
+    setReplyingTo(msg);
+    setEditingMessage(null);
+    setTimeout(() => {
+      composerInputRef.current?.focus();
+    }, 50);
+  }, []);
+
   const handleMessageLongPress = useCallback((msg: ChatMessage) => {
     Keyboard.dismiss();
     setActionSheetMsg(msg);
@@ -1199,6 +1300,7 @@ export const ChatRoomScreen: React.FC = () => {
         searchQuery={debouncedSearchQuery}
         isPlayingVoice={playingVoiceId === String(item.id)}
         onToggleVoicePlay={handleToggleVoicePlay}
+        onReply={handleReply}
         onLongPress={handleMessageLongPress}
         onOpenImage={handleOpenLightbox}
         onScrollToMessageId={scrollToMessageId}
@@ -1218,6 +1320,7 @@ export const ChatRoomScreen: React.FC = () => {
     playingVoiceId,
     highlightedMessageId,
     handleToggleVoicePlay,
+    handleReply,
     handleMessageLongPress,
     handleOpenLightbox,
     scrollToMessageId,
@@ -1299,8 +1402,8 @@ export const ChatRoomScreen: React.FC = () => {
       ) : (
         /* Joined Room: Active Room Experience */
         <View style={[styles.activeRoomContainer, { paddingTop: Math.max(insets.top, 0) }]}>
-          {/* Custom Image Wallpaper Support with Legibility Scrim */}
-          {roomState.wallpaper?.theme === 'custom' && Boolean(roomState.wallpaper?.customWallpaper) && (
+          {/* Custom Image Wallpaper Support with Legibility Scrim or Authentic Subtle WhatsApp Doodle Watermark */}
+          {roomState.wallpaper?.theme === 'custom' && Boolean(roomState.wallpaper?.customWallpaper) ? (
             <View style={StyleSheet.absoluteFill}>
               <ImageBackground
                 source={{ uri: roomState.wallpaper.customWallpaper! }}
@@ -1308,6 +1411,16 @@ export const ChatRoomScreen: React.FC = () => {
                 resizeMode="cover"
               />
               <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(11, 20, 26, 0.72)' }]} />
+            </View>
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { opacity: 0.04 }]} pointerEvents="none">
+              <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', padding: 18, rowGap: 44 }}>
+                {Array.from({ length: 48 }).map((_, i) => (
+                  <Text key={i} style={{ fontSize: 22, color: '#FFFFFF', transform: [{ rotate: `${(i * 37) % 360}deg` }] }}>
+                    {['💬', '✨', '☕', '🎵', '❤️', '🌟', '📱', '✈️', '🎮', '🎧', '⚡', '💡'][i % 12]}
+                  </Text>
+                ))}
+              </View>
             </View>
           )}
 
@@ -2003,86 +2116,140 @@ export const ChatRoomScreen: React.FC = () => {
                 onPress={() => setModalVisible('attach', false)}
               />
               <View style={[styles.attachPopup, { bottom: attachBottomOffset }]}>
-                {/* Photo / Image */}
-                <TouchableOpacity
-                  style={styles.attachPopupItem}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setModalVisible('attach', false);
-                    setUploadModal({ visible: true, tab: 'file' });
-                  }}
-                >
-                  <Text style={styles.attachItemIcon}>📷</Text>
-                  <Text style={styles.attachItemText}>Photo / Image</Text>
-                </TouchableOpacity>
+                <View style={styles.attachGrid}>
+                  {/* 1. Camera */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setModalVisible('attach', false);
+                      setUploadModal({ visible: true, tab: 'file' });
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#E11D48' }]}>
+                      <Text style={styles.attachCircleText}>📷</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>Camera</Text>
+                  </TouchableOpacity>
 
-                {/* Voice Note */}
-                <TouchableOpacity
-                  style={styles.attachPopupItem}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setModalVisible('attach', false);
-                    setUploadModal({ visible: true, tab: 'voice' });
-                  }}
-                >
-                  <Text style={styles.attachItemIcon}>🎙️</Text>
-                  <Text style={styles.attachItemText}>Record Voice Note</Text>
-                </TouchableOpacity>
+                  {/* 2. Gallery */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setModalVisible('attach', false);
+                      setUploadModal({ visible: true, tab: 'file' });
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#8E24AA' }]}>
+                      <Text style={styles.attachCircleText}>🖼️</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>Gallery</Text>
+                  </TouchableOpacity>
 
-                {/* Document / File */}
-                <TouchableOpacity
-                  style={styles.attachPopupItem}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setModalVisible('attach', false);
-                    setUploadModal({ visible: true, tab: 'file' });
-                  }}
-                >
-                  <Text style={styles.attachItemIcon}>📄</Text>
-                  <Text style={styles.attachItemText}>Document / File</Text>
-                </TouchableOpacity>
+                  {/* 3. Document */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setModalVisible('attach', false);
+                      setUploadModal({ visible: true, tab: 'file' });
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#5E35B1' }]}>
+                      <Text style={styles.attachCircleText}>📄</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>Document</Text>
+                  </TouchableOpacity>
 
-                {/* Create Poll */}
-                <TouchableOpacity
-                  style={styles.attachPopupItem}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setModalVisible('attach', false);
-                    if (editingMessage) {
-                      setEditingMessage(null);
-                      setInputText(draftBeforeEditRef.current || '');
-                      draftBeforeEditRef.current = '';
-                    }
-                    setModalVisible('poll', true);
-                  }}
-                >
-                  <Text style={styles.attachItemIcon}>📊</Text>
-                  <Text style={styles.attachItemText}>Create Poll</Text>
-                </TouchableOpacity>
+                  {/* 4. Poll */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setModalVisible('attach', false);
+                      if (editingMessage) {
+                        setEditingMessage(null);
+                        setInputText(draftBeforeEditRef.current || '');
+                        draftBeforeEditRef.current = '';
+                      }
+                      setModalVisible('poll', true);
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#00897B' }]}>
+                      <Text style={styles.attachCircleText}>📊</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>Poll</Text>
+                  </TouchableOpacity>
 
-                {/* Disappearing Messages */}
-                <TouchableOpacity
-                  style={styles.attachPopupItem}
-                  onPress={() => {
-                    setModalVisible('attach', false);
-                    Alert.alert(
-                      'Disappearing Messages',
-                      'Set auto-delete duration for messages:\n(Messages self-destruct after selected duration)',
-                      [
-                        { text: 'Off', onPress: () => setDisappearingSecs(undefined) },
-                        { text: '30 Seconds', onPress: () => setDisappearingSecs(30) },
-                        { text: '5 Minutes', onPress: () => setDisappearingSecs(300) },
-                        { text: '1 Hour', onPress: () => setDisappearingSecs(3600) },
-                        { text: '24 Hours', onPress: () => setDisappearingSecs(86400) },
-                      ]
-                    );
-                  }}
-                >
-                  <Text style={styles.attachItemIcon}>⏳</Text>
-                  <Text style={styles.attachItemText}>
-                    {disappearingSecs ? `Timer: ${formatDurationLabel(disappearingSecs)}` : 'Disappearing'}
-                  </Text>
-                </TouchableOpacity>
+                  {/* 5. Location */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      setModalVisible('attach', false);
+                      handleShareLocation();
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#2E7D32' }]}>
+                      <Text style={styles.attachCircleText}>📍</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>Location</Text>
+                  </TouchableOpacity>
+
+                  {/* 6. Watch Party */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      setModalVisible('attach', false);
+                      setModalVisible('watchParty', true);
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#E65100' }]}>
+                      <Text style={styles.attachCircleText}>🍿</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>Watch Party</Text>
+                  </TouchableOpacity>
+
+                  {/* 7. Wallpaper */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      setModalVisible('attach', false);
+                      setModalVisible('wallpaper', true);
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#0288D1' }]}>
+                      <Text style={styles.attachCircleText}>🎨</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>Theme</Text>
+                  </TouchableOpacity>
+
+                  {/* 8. Disappearing */}
+                  <TouchableOpacity
+                    style={styles.attachGridItem}
+                    onPress={() => {
+                      setModalVisible('attach', false);
+                      Alert.alert(
+                        'Disappearing Messages',
+                        'Set self-destruct timer for messages:',
+                        [
+                          { text: 'Off', onPress: () => setDisappearingSecs(undefined) },
+                          { text: '30 Seconds', onPress: () => setDisappearingSecs(30) },
+                          { text: '5 Minutes', onPress: () => setDisappearingSecs(300) },
+                          { text: '1 Hour', onPress: () => setDisappearingSecs(3600) },
+                          { text: '24 Hours', onPress: () => setDisappearingSecs(86400) },
+                        ]
+                      );
+                    }}
+                  >
+                    <View style={[styles.attachCircleBtn, { backgroundColor: '#546E7A' }]}>
+                      <Text style={styles.attachCircleText}>⏳</Text>
+                    </View>
+                    <Text style={styles.attachItemLabel}>
+                      {disappearingSecs ? `${formatDurationLabel(disappearingSecs)}` : 'Disappear'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </>
           )}
@@ -2114,22 +2281,36 @@ export const ChatRoomScreen: React.FC = () => {
                       activeOpacity={1}
                       onPress={(e) => e.stopPropagation?.()}
                     >
+                      {/* Floating Quick Reaction Bar */}
+                      {!actionSheetMsg.isDeleted && (
+                        <View style={styles.sheetReactionRow}>
+                          {['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'].map((emoji) => (
+                            <TouchableOpacity
+                              key={emoji}
+                              style={styles.sheetReactionBtn}
+                              onPress={() => {
+                                handleReact(actionSheetMsg.id, emoji);
+                                setActionSheetMsg(null);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={styles.sheetReactionEmoji}>{emoji}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
 
                       {/* Actions */}
                       {!actionSheetMsg.isDeleted && (
                         <TouchableOpacity
                           style={styles.sheetItem}
                           onPress={() => {
-                            setReplyingTo(actionSheetMsg);
-                            setEditingMessage(null);
+                            handleReply(actionSheetMsg);
                             setActionSheetMsg(null);
-                            setModalVisible('moreReactions', false);
-                            setTimeout(() => {
-                              composerInputRef.current?.focus();
-                            }, 50);
                           }}
                         >
-                          <Text style={styles.sheetItemText}>💬 Reply</Text>
+                          <Text style={styles.sheetItemIcon}>💬</Text>
+                          <Text style={styles.sheetItemText}>Reply</Text>
                         </TouchableOpacity>
                       )}
 
@@ -2147,13 +2328,13 @@ export const ChatRoomScreen: React.FC = () => {
                             setInputText(actionSheetMsg.message || '');
                             setReplyingTo(null);
                             setActionSheetMsg(null);
-                            setModalVisible('moreReactions', false);
                             setTimeout(() => {
                               composerInputRef.current?.focus();
                             }, 50);
                           }}
                         >
-                          <Text style={styles.sheetItemText}>✏️ Edit Message</Text>
+                          <Text style={styles.sheetItemIcon}>✏️</Text>
+                          <Text style={styles.sheetItemText}>Edit Message</Text>
                         </TouchableOpacity>
                       )}
 
@@ -2168,7 +2349,8 @@ export const ChatRoomScreen: React.FC = () => {
                             setActionSheetMsg(null);
                           }}
                         >
-                          <Text style={styles.sheetItemText}>📋 Copy Text</Text>
+                          <Text style={styles.sheetItemIcon}>📋</Text>
+                          <Text style={styles.sheetItemText}>Copy Text</Text>
                         </TouchableOpacity>
                       )}
 
@@ -2184,8 +2366,9 @@ export const ChatRoomScreen: React.FC = () => {
                             setActionSheetMsg(null);
                           }}
                         >
+                          <Text style={styles.sheetItemIcon}>📌</Text>
                           <Text style={styles.sheetItemText}>
-                            {roomState.pinnedMsg?.id === actionSheetMsg.id ? '📌 Unpin from Room' : '📌 Pin to Room'}
+                            {roomState.pinnedMsg?.id === actionSheetMsg.id ? 'Unpin from Room' : 'Pin to Room'}
                           </Text>
                         </TouchableOpacity>
                       )}
@@ -2201,8 +2384,9 @@ export const ChatRoomScreen: React.FC = () => {
                             setActionSheetMsg(null);
                           }}
                         >
+                          <Text style={[styles.sheetItemIcon, { color: '#EF4444' }]}>🗑️</Text>
                           <Text style={[styles.sheetItemText, { color: '#EF4444' }]}>
-                            {isPendingMsg ? '🗑️ Discard Pending Message' : '🗑️ Delete Message'}
+                            {isPendingMsg ? 'Discard Pending Message' : 'Delete Message'}
                           </Text>
                         </TouchableOpacity>
                       )}

@@ -361,15 +361,15 @@ export const SettingsScreen: React.FC = () => {
           </Text>
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {/* Complete Do Not Disturb (DND) */}
-            <View style={[styles.settingRow, dndEnabled && { backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: radius.medium, paddingHorizontal: 8 }]}>
+            <View style={[styles.settingRow, dndEnabled && { backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: radius.md, paddingHorizontal: 8 }]}>
               <View style={styles.settingTextCol}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={[styles.settingLabel, typography.title, { color: dndEnabled ? colors.error : colors.text }]}>
+                  <Text style={[styles.settingLabel, typography.title, { color: dndEnabled ? colors.danger : colors.text }]}>
                     🌙 Complete Do Not Disturb
                   </Text>
                   {dndEnabled && (
-                    <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.error + '20', borderWidth: 1, borderColor: colors.error }}>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: colors.error }}>MUTED</Text>
+                    <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.danger + '20', borderWidth: 1, borderColor: colors.danger }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: colors.danger }}>MUTED</Text>
                     </View>
                   )}
                 </View>
@@ -382,7 +382,7 @@ export const SettingsScreen: React.FC = () => {
               <Switch
                 value={dndEnabled}
                 onValueChange={toggleDnd}
-                trackColor={{ false: colors.border, true: colors.error }}
+                trackColor={{ false: colors.border, true: colors.danger }}
                 thumbColor={Platform.OS === 'android' ? (dndEnabled ? '#EF4444' : '#f4f3f4') : undefined}
               />
             </View>

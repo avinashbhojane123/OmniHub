@@ -287,8 +287,8 @@ export const CallOverlayModal: React.FC<CallOverlayModalProps> = ({
   };
 
   const displayName = (isIncoming
-    ? call.callerNickname
-    : call.calleeNickname || 'Room Participant') || 'Participant';
+    ? call?.callerNickname
+    : call?.calleeNickname || 'Room Participant') || 'Participant';
 
   const handleToggleMute = () => {
     const nextMute = !isMuted;
