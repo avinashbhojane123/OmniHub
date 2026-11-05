@@ -145,27 +145,6 @@ export const ChatGatewayView: React.FC<ChatGatewayViewProps> = React.memo(({
                 autoCorrect={false}
               />
 
-              {/* Preset Room Quick Chips */}
-              {presetRooms.length > 0 && (
-                <View style={styles.presetRoomsRow}>
-                  {presetRooms.map((room) => {
-                    const isSelected = passcode.trim().toLowerCase() === room.toLowerCase();
-                    return (
-                      <TouchableOpacity
-                        key={room}
-                        style={[styles.presetChip, isSelected && styles.presetChipActive]}
-                        onPress={() => setPasscode(room)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[styles.presetChipText, isSelected && styles.presetChipTextActive]}>
-                          #{room}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-
               {/* Recent Rooms */}
               {recentRooms.length > 0 && (
                 <View style={styles.recentRoomsSection}>
@@ -194,62 +173,6 @@ export const ChatGatewayView: React.FC<ChatGatewayViewProps> = React.memo(({
                       );
                     })}
                   </View>
-                </View>
-              )}
-            </View>
-
-            {/* Server Connection Settings */}
-            <View style={styles.fieldSection}>
-              <View style={styles.serverRowHeader}>
-                <Text style={styles.label}>Server Target</Text>
-                {setShowServerCustom && (
-                  <TouchableOpacity
-                    onPress={() => setShowServerCustom(!showServerCustom)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={styles.toggleCustomText}>
-                      {showServerCustom ? 'Hide Custom' : 'Custom Server'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Server Presets */}
-              {serverPresets.length > 0 && (
-                <View style={styles.serverPresetsRow}>
-                  {serverPresets.map((preset) => {
-                    const isSelected = (serverUrl || '').trim() === preset.url.trim();
-                    return (
-                      <TouchableOpacity
-                        key={preset.url}
-                        style={[styles.serverChip, isSelected && styles.serverChipActive]}
-                        onPress={() => {
-                          setServerUrl?.(preset.url);
-                          setShowServerCustom?.(false);
-                        }}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={[styles.serverChipText, isSelected && styles.serverChipTextActive]}>
-                          {preset.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-
-              {/* Custom Server URL Input */}
-              {showServerCustom && (
-                <View style={{ marginTop: 10 }}>
-                  <TextInput
-                    style={styles.gatewayInput}
-                    placeholder="https://your-server.com or http://IP:10000"
-                    placeholderTextColor="#64748B"
-                    value={serverUrl}
-                    onChangeText={(val) => setServerUrl?.(val)}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
                 </View>
               )}
             </View>

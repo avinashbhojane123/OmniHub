@@ -134,18 +134,7 @@ const AUDIO_BRIDGE_HTML = `
 </html>
 `;
 
-const DEFAULT_INTERNET_SERVER = 'https://omnihub-1x3r.onrender.com';
-const HOTSPOT_SERVER = 'http://10.16.64.73:10000';
-const SERVER_PRESETS = [
-  { label: '🌐 Render Cloud (Live Internet)', url: 'https://omnihub-1x3r.onrender.com' },
-  { label: '📡 Local Hotspot (10.16.64.73:10000)', url: 'http://10.16.64.73:10000' },
-  { label: '📱 Android Hotspot (192.168.43.1:10000)', url: 'http://192.168.43.1:10000' },
-  { label: '🏠 Local Wi-Fi (192.168.1.100:10000)', url: 'http://192.168.1.100:10000' },
-  { label: '💻 Emulator Host (10.0.2.2:10000)', url: 'http://10.0.2.2:10000' },
-];
-const PRESET_ROOMS = ['Lounge', 'DevRoom', 'General', 'Gaming', 'Music'];
-const QUICK_EMOJIS = ['👍', '❤️', '🔥', '😂', '🎉', '🚀'];
-const MORE_EMOJIS = ['😀', '😍', '👏', '🙌', '👀', '💯', '✨', '⚡', '💡', '😎', '🥳', '🤔', '🤝', '💪', '🎯'];
+const DEFAULT_SERVER_URL = 'https://omnihub-1x3r.onrender.com';
 
 const formatDurationLabel = (secs?: number): string => {
   if (!secs) return '';
@@ -168,7 +157,7 @@ export const ChatRoomScreen: React.FC = () => {
   // 1. Connection / Gateway State (Inputs start blank for manual entry)
   const [passcode, setPasscode] = useState('');
   const [nickname, setNickname] = useState('');
-  const [serverUrl, setServerUrl] = useState(DEFAULT_INTERNET_SERVER);
+  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [showServerCustom, setShowServerCustom] = useState(false);
   const [recentRooms, setRecentRooms] = useState<string[]>([]);
 
@@ -403,10 +392,6 @@ export const ChatRoomScreen: React.FC = () => {
         const savedServerUrl = await settingsRepository.get('chat_saved_server_url');
         if (savedServerUrl) {
           setServerUrl(savedServerUrl);
-          const isKnownPreset = SERVER_PRESETS.some((p) => p.url === savedServerUrl);
-          if (!isKnownPreset) {
-            setShowServerCustom(true);
-          }
         }
       } catch {
         // non-critical
@@ -1289,10 +1274,8 @@ export const ChatRoomScreen: React.FC = () => {
           setServerUrl={setServerUrl}
           showServerCustom={showServerCustom}
           setShowServerCustom={setShowServerCustom}
-          presetRooms={PRESET_ROOMS}
           recentRooms={recentRooms}
           onClearRecentRooms={handleClearRecentRooms}
-          serverPresets={SERVER_PRESETS}
         />
       ) : (
         /* Joined Room: Active Room Experience */
