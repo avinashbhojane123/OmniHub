@@ -32,7 +32,11 @@ export function isSslRequired(
 
   if (dbUrl) {
     if (dbUrl.includes('sslmode=disable')) return false;
-    if (dbUrl.includes('sslmode=require')) return true;
+    if (
+      dbUrl.includes('sslmode=require') ||
+      dbUrl.includes('sslmode=no-verify')
+    )
+      return true;
     if (dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')) return false;
     return true; // Remote cloud database URL
   }
@@ -92,6 +96,26 @@ export function getTypeOrmOptions(
   // PostgreSQL / Cloud database configuration
   const isSslEnabled = isSslRequired(dbUrl, dbSsl, isProduction);
 
+  // If SSL is enabled and strict CA validation is NOT requested,
+  // sanitize sslmode in DATABASE_URL from 'require' to 'no-verify' so pg-connection-string
+  // does not override rejectUnauthorized with true, preventing self-signed cert chain errors.
+  let normalizedDbUrl = dbUrl;
+  if (normalizedDbUrl && isSslEnabled && dbSslRejectUnauthorized !== 'true') {
+    try {
+      const parsedUrl = new URL(normalizedDbUrl);
+      const sslMode = parsedUrl.searchParams.get('sslmode');
+      if (sslMode && sslMode !== 'no-verify' && sslMode !== 'disable') {
+        parsedUrl.searchParams.set('sslmode', 'no-verify');
+        normalizedDbUrl = parsedUrl.toString();
+      }
+    } catch {
+      normalizedDbUrl = normalizedDbUrl.replace(
+        /([?&])sslmode=(?!no-verify|disable)[^&]+/i,
+        '$1sslmode=no-verify',
+      );
+    }
+  }
+
   const poolMax = parseInt(
     get('DB_POOL_MAX') || get('DB_MAX_CONNECTIONS') || '',
     10,
@@ -106,6 +130,12 @@ export function getTypeOrmOptions(
     idleTimeoutMillis:
       !isNaN(idleTimeoutMs) && idleTimeoutMs > 0 ? idleTimeoutMs : 30000,
   };
+
+  if (isSslEnabled) {
+    extra.ssl = {
+      rejectUnauthorized: dbSslRejectUnauthorized === 'true',
+    };
+  }
 
   const rawPort = get('DB_PORT');
   let parsedPort: number | undefined;
@@ -122,8 +152,8 @@ export function getTypeOrmOptions(
   return {
     type: dbType,
 
-    ...(dbUrl
-      ? { url: dbUrl }
+    ...(normalizedDbUrl
+      ? { url: normalizedDbUrl }
       : {
           host: get('DB_HOST')?.trim() || 'localhost',
           port: parsedPort ?? defaultPort,

@@ -110,6 +110,21 @@ describe('AppModule', () => {
       expect(options.extra.max).toBe(25);
       expect(options.extra.connectionTimeoutMillis).toBe(5000);
       expect(options.extra.idleTimeoutMillis).toBe(15000);
+      expect(options.extra.ssl).toEqual({ rejectUnauthorized: false });
+      expect(options.ssl).toEqual({ rejectUnauthorized: false });
+    });
+
+    it('should sanitize sslmode in DATABASE_URL from require to no-verify for cloud self-signed certs', () => {
+      process.env.DB_TYPE = 'postgres';
+      process.env.DATABASE_URL =
+        'postgresql://user:pass@pooler.supabase.com:6543/postgres?sslmode=require';
+      delete process.env.DB_SSL_REJECT_UNAUTHORIZED;
+
+      const options = getTypeOrmOptions() as any;
+      expect(options.url).toBe(
+        'postgresql://user:pass@pooler.supabase.com:6543/postgres?sslmode=no-verify',
+      );
+      expect(options.extra.ssl).toEqual({ rejectUnauthorized: false });
       expect(options.ssl).toEqual({ rejectUnauthorized: false });
     });
 
