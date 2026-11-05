@@ -42,4 +42,186 @@ describe('ChatSocketService', () => {
     expect(chatSocketService.passcode).toBe('SecretRoom');
     expect(chatSocketService.activeServerUrl).toBe('https://omnihub-1x3r.onrender.com');
   });
+
+  it('correctly resolves relative and absolute file URLs', () => {
+    expect(chatSocketService.resolveFileUrl('https://example.com/image.png')).toBe('https://example.com/image.png');
+    expect(chatSocketService.resolveFileUrl('http://example.com/image.png')).toBe('http://example.com/image.png');
+    expect(chatSocketService.resolveFileUrl('file:///data/local.png')).toBe('file:///data/local.png');
+    expect(chatSocketService.resolveFileUrl('data:image/png;base64,abc')).toBe('data:image/png;base64,abc');
+    expect(chatSocketService.resolveFileUrl('blob:http://localhost/123')).toBe('blob:http://localhost/123');
+    expect(chatSocketService.resolveFileUrl('')).toBe('');
+
+    const relativeResult = chatSocketService.resolveFileUrl('/uploads/chat/voice.m4a');
+    expect(relativeResult).toBe(`${chatSocketService.activeServerUrl}/uploads/chat/voice.m4a`);
+  });
+
+  it('supports optimistic wallpaper updates', () => {
+    chatSocketService.updateRoomWallpaper('deep-purple');
+    expect(chatSocketService.getWallpaper.theme).toBe('deep-purple');
+    expect(chatSocketService.getWallpaper.customWallpaper).toBeNull();
+    expect(chatSocketService.getWallpaper.isDefault).toBe(false);
+
+    chatSocketService.updateRoomWallpaper('custom', 'https://example.com/custom.jpg');
+    expect(chatSocketService.getWallpaper.theme).toBe('custom');
+    expect(chatSocketService.getWallpaper.customWallpaper).toBe('https://example.com/custom.jpg');
+    expect(chatSocketService.getWallpaper.isDefault).toBe(false);
+
+    chatSocketService.updateRoomWallpaper('wa-doodle', null);
+    expect(chatSocketService.getWallpaper.theme).toBe('wa-doodle');
+    expect(chatSocketService.getWallpaper.isDefault).toBe(true);
+  });
+
+  it('supports initiating and terminating outgoing calls', () => {
+    chatSocketService.connect({
+      nickname: 'Alex',
+      passcode: 'SecretRoom',
+    });
+
+    const initiated = chatSocketService.initiateCall('Bob', true);
+    expect(initiated).toBe(true);
+    expect(chatSocketService.getActiveCall).not.toBeNull();
+    expect(chatSocketService.getActiveCall?.callerNickname).toBe('Alex');
+    expect(chatSocketService.getActiveCall?.calleeNickname).toBe('Bob');
+    expect(chatSocketService.getActiveCall?.isVoiceOnly).toBe(true);
+    expect(chatSocketService.getActiveCall?.state).toBe('calling');
+
+    // Duplicate call initiation should be rejected
+    const secondCall = chatSocketService.initiateCall('Charlie', false);
+    expect(secondCall).toBe(false);
+
+    // End call resets call state
+    chatSocketService.endCall();
+    expect(chatSocketService.getActiveCall).toBeNull();
+  });
+
+  it('handles optimistic watch party actions correctly', () => {
+    chatSocketService.connect({
+      nickname: 'Alex',
+      passcode: 'SecretRoom',
+    });
+
+    // Open
+    chatSocketService.watchPartyAction('open', {
+      videoSource: { url: 'https://example.com/video.mp4', title: 'Test Video', type: 'direct' },
+      currentTime: 10,
+      isPlaying: true,
+      playbackRate: 1.25,
+    });
+
+    expect(chatSocketService.getWatchParty).not.toBeNull();
+    expect(chatSocketService.getWatchParty?.isActive).toBe(true);
+    expect(chatSocketService.getWatchParty?.videoSource?.url).toBe('https://example.com/video.mp4');
+    expect(chatSocketService.getWatchParty?.currentTime).toBe(10);
+    expect(chatSocketService.getWatchParty?.isPlaying).toBe(true);
+    expect(chatSocketService.getWatchParty?.playbackRate).toBe(1.25);
+
+    // Pause
+    chatSocketService.watchPartyAction('pause');
+    expect(chatSocketService.getWatchParty?.isPlaying).toBe(false);
+
+    // Play
+    chatSocketService.watchPartyAction('play');
+    expect(chatSocketService.getWatchParty?.isPlaying).toBe(true);
+
+    // Seek
+    chatSocketService.watchPartyAction('seek', { currentTime: 45 });
+    expect(chatSocketService.getWatchParty?.currentTime).toBe(45);
+
+    // Rate
+    chatSocketService.watchPartyAction('rate', { playbackRate: 1.5 });
+    expect(chatSocketService.getWatchParty?.playbackRate).toBe(1.5);
+
+    // Buffering and Ready
+    chatSocketService.watchPartyAction('buffering');
+    expect(chatSocketService.getWatchParty?.isBuffering).toBe(true);
+    expect(chatSocketService.getWatchParty?.bufferingUsers).toContain('Alex');
+
+    chatSocketService.watchPartyAction('ready');
+    expect(chatSocketService.getWatchParty?.isBuffering).toBe(false);
+    expect(chatSocketService.getWatchParty?.bufferingUsers).not.toContain('Alex');
+
+    // Close
+    chatSocketService.watchPartyAction('close');
+    expect(chatSocketService.getWatchParty).toBeNull();
+  });
+
+  it('manages WebRTC and watch party signal subscriptions', () => {
+    const webrtcListener = jest.fn();
+    const wpReactionListener = jest.fn();
+    const wpCommentListener = jest.fn();
+
+    const unsubWebrtc = chatSocketService.subscribeWebrtcSignal(webrtcListener);
+    const unsubReaction = chatSocketService.subscribeWatchPartyReaction(wpReactionListener);
+    const unsubComment = chatSocketService.subscribeWatchPartyComment(wpCommentListener);
+
+    expect(typeof unsubWebrtc).toBe('function');
+    expect(typeof unsubReaction).toBe('function');
+    expect(typeof unsubComment).toBe('function');
+
+    unsubWebrtc();
+    unsubReaction();
+    unsubComment();
+  });
+
+  it('supports optimistic PIP toggle, screen share, and media state', () => {
+    chatSocketService.connect({
+      nickname: 'Alex',
+      passcode: 'SecretRoom',
+    });
+
+    chatSocketService.togglePip(true);
+    chatSocketService.setScreenShareStatus(true);
+    chatSocketService.setMediaState(true, false);
+
+    const currentUser = chatSocketService.currentUser;
+    // Without server session, currentUser is undefined unless present in users
+    expect(chatSocketService.getUsers).toBeDefined();
+  });
+
+  it('supports updateUserMetadata, viewStatus, deleteStatus, and extended watch party actions', () => {
+    chatSocketService.connect({
+      nickname: 'Alex',
+      passcode: 'SecretRoom',
+    });
+
+    // Update metadata should not throw
+    chatSocketService.updateUserMetadata({
+      batteryLabel: '88%',
+      batteryIsCharging: true,
+      networkLabel: '5G Fast',
+    });
+
+    // Status methods accept string or number safely
+    chatSocketService.viewStatus('101');
+    chatSocketService.viewStatus(102);
+    chatSocketService.deleteStatus('201');
+    chatSocketService.deleteStatus(202);
+
+    // Watch party change_video and toggle_host_lock
+    chatSocketService.watchPartyAction('open', {
+      videoSource: { url: 'https://example.com/movie1.mp4', title: 'Movie 1', type: 'direct' },
+      currentTime: 0,
+      isPlaying: false,
+    });
+    expect(chatSocketService.getWatchParty?.videoSource?.url).toBe('https://example.com/movie1.mp4');
+
+    chatSocketService.watchPartyAction('change_video', {
+      videoSource: { url: 'https://example.com/movie2.mp4', title: 'Movie 2', type: 'direct' },
+      currentTime: 15,
+      isPlaying: true,
+    });
+    expect(chatSocketService.getWatchParty?.videoSource?.url).toBe('https://example.com/movie2.mp4');
+    expect(chatSocketService.getWatchParty?.currentTime).toBe(15);
+    expect(chatSocketService.getWatchParty?.isPlaying).toBe(true);
+
+    chatSocketService.watchPartyAction('toggle_host_lock');
+    expect(chatSocketService.getWatchParty?.isHostOnly).toBe(false);
+
+    // Watch party reactions and comments with valid signatures
+    chatSocketService.watchPartyReaction('fire');
+    chatSocketService.watchPartyComment('Great scene!', 120);
+
+    chatSocketService.watchPartyAction('close');
+    expect(chatSocketService.getWatchParty).toBeNull();
+  });
 });

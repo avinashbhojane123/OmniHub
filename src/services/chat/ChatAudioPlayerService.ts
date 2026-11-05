@@ -1,25 +1,11 @@
-export interface AudioPlayerState {
-  activeId: string | number | null;
-  url: string | null;
-  isPlaying: boolean;
-  currentTime: number;
-  duration: number;
-  isLoading: boolean;
-  playbackRate: number;
-}
+import { AudioPlayerState, createDefaultAudioPlayerState } from '../../types/chat';
+
+export type { AudioPlayerState };
 
 type AudioPlayerListener = (state: AudioPlayerState) => void;
 
 class ChatAudioPlayerManager {
-  private state: AudioPlayerState = {
-    activeId: null,
-    url: null,
-    isPlaying: false,
-    currentTime: 0,
-    duration: 0,
-    isLoading: false,
-    playbackRate: 1,
-  };
+  private state: AudioPlayerState = createDefaultAudioPlayerState();
 
   private listeners: Set<AudioPlayerListener> = new Set();
   private postMessageSender: ((message: string) => void) | null = null;

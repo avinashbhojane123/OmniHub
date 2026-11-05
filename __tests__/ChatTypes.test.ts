@@ -6,6 +6,9 @@ import {
   isWatchPartyState,
   isChatStatusStory,
   isCallActive,
+  isRoomWallpaperState,
+  isAudioPlayerState,
+  isReplyReference,
   createDefaultWatchPartyState,
   createDefaultRoomWallpaper,
   createDefaultAudioPlayerState,
@@ -21,6 +24,9 @@ import {
   ActiveCallData,
   ChatStatusStory,
   WatchPartyState,
+  RoomWallpaperState,
+  AudioPlayerState,
+  ReplyReference,
 } from '../src/types/chat';
 
 describe('Chat Types & Runtime Guards Suite', () => {
@@ -35,6 +41,7 @@ describe('Chat Types & Runtime Guards Suite', () => {
       expect(DEFAULT_ROOM_WALLPAPER.theme).toBe('wa-doodle');
       expect(DEFAULT_ROOM_WALLPAPER.customWallpaper).toBeNull();
       expect(DEFAULT_ROOM_WALLPAPER.isDefault).toBe(true);
+      expect(Object.isFrozen(DEFAULT_ROOM_WALLPAPER)).toBe(true);
     });
 
     it('should export correct default watch party state', () => {
@@ -43,6 +50,7 @@ describe('Chat Types & Runtime Guards Suite', () => {
       expect(DEFAULT_WATCH_PARTY_STATE.currentTime).toBe(0);
       expect(DEFAULT_WATCH_PARTY_STATE.isPlaying).toBe(false);
       expect(DEFAULT_WATCH_PARTY_STATE.playbackRate).toBe(1);
+      expect(Object.isFrozen(DEFAULT_WATCH_PARTY_STATE)).toBe(true);
     });
   });
 
@@ -82,6 +90,8 @@ describe('Chat Types & Runtime Guards Suite', () => {
       expect(isChatMessage({ id: 1, nickname: 'Alice' })).toBe(false);
       expect(isChatMessage({ id: 1, nickname: 'Alice', message: 123 })).toBe(false);
       expect(isChatMessage({ id: true, nickname: 'Alice', message: 'Hi', createdAt: '2026-10-30' })).toBe(false);
+      expect(isChatMessage({ id: NaN, nickname: 'Alice', message: 'Hi', createdAt: '2026-10-30' })).toBe(false);
+      expect(isChatMessage({ id: 1, nickname: 'Alice', message: 'Hi', createdAt: new Date('invalid') })).toBe(false);
     });
   });
 
@@ -229,6 +239,7 @@ describe('Chat Types & Runtime Guards Suite', () => {
       expect(isCallActive(activeCall)).toBe(true);
       expect(isCallActive({ ...activeCall, state: 'calling' })).toBe(true);
       expect(isCallActive({ ...activeCall, state: 'incoming' })).toBe(true);
+      expect(isCallActive({ ...activeCall, state: 'reconnecting' })).toBe(true);
     });
 
     it('should return false for terminal states, idle, or null/undefined', () => {
@@ -246,6 +257,64 @@ describe('Chat Types & Runtime Guards Suite', () => {
       expect(isCallActive({ ...baseCall, state: 'idle' })).toBe(false);
       expect(isCallActive(null)).toBe(false);
       expect(isCallActive(undefined)).toBe(false);
+    });
+  });
+
+  describe('isRoomWallpaperState Type Guard', () => {
+    it('should return true for valid room wallpaper state', () => {
+      const wp: RoomWallpaperState = {
+        theme: 'wa-doodle',
+        customWallpaper: null,
+        isDefault: true,
+      };
+      expect(isRoomWallpaperState(wp)).toBe(true);
+      expect(isRoomWallpaperState({ theme: 'custom', customWallpaper: 'https://example.com/bg.png' })).toBe(true);
+    });
+
+    it('should return false for invalid wallpaper state or null', () => {
+      expect(isRoomWallpaperState(null)).toBe(false);
+      expect(isRoomWallpaperState({ customWallpaper: null })).toBe(false);
+      expect(isRoomWallpaperState({ theme: 123, customWallpaper: null })).toBe(false);
+    });
+  });
+
+  describe('isAudioPlayerState Type Guard', () => {
+    it('should return true for valid audio player state', () => {
+      const audioState: AudioPlayerState = {
+        activeId: 'msg_1',
+        url: 'https://example.com/voice.m4a',
+        isPlaying: true,
+        currentTime: 5.4,
+        duration: 12.0,
+        isLoading: false,
+        playbackRate: 1.5,
+      };
+      expect(isAudioPlayerState(audioState)).toBe(true);
+    });
+
+    it('should return false for invalid types, null, or NaN values', () => {
+      expect(isAudioPlayerState(null)).toBe(false);
+      expect(isAudioPlayerState({ isPlaying: true, currentTime: NaN })).toBe(false);
+      expect(isAudioPlayerState({ activeId: null, url: null, isPlaying: 'yes' })).toBe(false);
+    });
+  });
+
+  describe('isReplyReference Type Guard', () => {
+    it('should return true for valid reply reference', () => {
+      const reply: ReplyReference = {
+        id: 101,
+        nickname: 'Alice',
+        message: 'Hello OmniHub!',
+      };
+      expect(isReplyReference(reply)).toBe(true);
+      expect(isReplyReference({ nickname: 'Bob', message: 'Hi' })).toBe(true);
+    });
+
+    it('should return false for missing nickname, message or null', () => {
+      expect(isReplyReference(null)).toBe(false);
+      expect(isReplyReference({ nickname: 'Alice' })).toBe(false);
+      expect(isReplyReference({ message: 'Hi' })).toBe(false);
+      expect(isReplyReference({ id: NaN, nickname: 'Alice', message: 'Hi' })).toBe(false);
     });
   });
 
