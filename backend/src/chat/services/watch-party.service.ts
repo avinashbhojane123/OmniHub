@@ -152,12 +152,13 @@ export class WatchPartyService implements OnModuleDestroy {
         playbackRate: data.playbackRate || 1,
         lastUpdatedTimestamp: now,
         scheduledStartServerTime: undefined,
-        version: 1,
+        version: data.version || 1,
         lastActorNickname: session.nickname,
         hostNickname: session.nickname,
         isHostOnly: false,
         isBuffering: false,
         bufferingUsers: [],
+        queue: [],
       };
       this.watchPartyRooms.set(normPasscode, state);
     }
@@ -427,6 +428,55 @@ export class WatchPartyService implements OnModuleDestroy {
         }
         break;
       }
+
+      case 'suggest_video': {
+        const item = data.queueItem || {
+          id: data.queueId || data.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          url: data.url || (data.videoSource ? data.videoSource.url : ''),
+          title: data.title || (data.videoSource ? data.videoSource.title : 'Suggested Video'),
+          suggestedBy: data.suggestedBy || session.nickname,
+        };
+        if (!state.queue) state.queue = [];
+        state.queue.push(item);
+        state.lastActorNickname = session.nickname;
+        state.lastUpdatedTimestamp = now;
+        break;
+      }
+
+      case 'play_queue_item': {
+        const targetId = data.queueId || data.id;
+        const currentQueue = state.queue || [];
+        const targetItem = currentQueue.find((q) => q.id === targetId);
+        state.queue = currentQueue.filter((q) => q.id !== targetId);
+
+        const nextSource = data.videoSource || (targetItem ? {
+          url: targetItem.url,
+          title: targetItem.title,
+          type: (targetItem.url.includes('youtube.com') || targetItem.url.includes('youtu.be')) ? ('youtube' as const) : ('direct' as const),
+        } : state.videoSource);
+
+        state.videoSource = nextSource;
+        state.currentTime = 0;
+        state.isPlaying = true;
+        state.playbackRate = 1;
+        state.lastUpdatedTimestamp = now;
+        state.scheduledStartServerTime = undefined;
+        state.lastActorNickname = session.nickname;
+        state.isBuffering = false;
+        state.bufferingUsers = [];
+        state.isActive = true;
+        state.version = (state.version || 0) + 1;
+        this.clearWatchPartyBufferTimer(targetPasscode);
+        break;
+      }
+
+      case 'remove_queue_item': {
+        const targetId = data.queueId || data.id;
+        state.queue = (state.queue || []).filter((q) => q.id !== targetId);
+        state.lastActorNickname = session.nickname;
+        state.lastUpdatedTimestamp = now;
+        break;
+      }
     }
 
     const payload = {
@@ -443,6 +493,7 @@ export class WatchPartyService implements OnModuleDestroy {
       lastActorNickname: session.nickname,
       hostNickname: state.hostNickname,
       isHostOnly: Boolean(state.isHostOnly),
+      queue: state.queue || [],
       serverTime: now,
     };
 
@@ -504,6 +555,7 @@ export class WatchPartyService implements OnModuleDestroy {
       lastActorNickname: state.lastActorNickname,
       hostNickname: state.hostNickname,
       isHostOnly: Boolean(state.isHostOnly),
+      queue: state.queue || [],
       serverTime: now,
     };
 
@@ -525,12 +577,14 @@ export class WatchPartyService implements OnModuleDestroy {
       return;
     }
 
+    const emojiOrReaction = data.emoji || data.reaction;
     server
       .to(targetPasscode)
       .to(targetPasscode.toLowerCase())
       .emit('watchPartyReaction', {
         from: session.nickname,
-        reaction: data.reaction,
+        reaction: emojiOrReaction,
+        emoji: emojiOrReaction,
         timestamp: Date.now(),
       });
   }

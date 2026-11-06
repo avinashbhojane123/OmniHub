@@ -108,6 +108,13 @@ export interface WatchPartyVideoSource {
   originalUrl?: string;
 }
 
+export interface QueuedVideoItem {
+  id: string;
+  url: string;
+  title: string;
+  suggestedBy: string;
+}
+
 export type WatchPartyActionType =
   | 'open'
   | 'invite'
@@ -123,7 +130,10 @@ export type WatchPartyActionType =
   | 'close'
   | 'toggle_host_lock'
   | 'sync_tick'
-  | 'heartbeat';
+  | 'heartbeat'
+  | 'suggest_video'
+  | 'play_queue_item'
+  | 'remove_queue_item';
 
 export interface WatchPartyState {
   isActive: boolean;
@@ -139,6 +149,7 @@ export interface WatchPartyState {
   bufferingUsers: string[];
   hostNickname?: string;
   isHostOnly?: boolean;
+  queue?: QueuedVideoItem[];
 }
 
 export interface WatchPartyUpdatePayload {
@@ -156,6 +167,7 @@ export interface WatchPartyUpdatePayload {
   hostNickname?: string;
   isHostOnly: boolean;
   serverTime: number;
+  queue?: QueuedVideoItem[];
 }
 
 export interface WatchPartyReactionPayload {

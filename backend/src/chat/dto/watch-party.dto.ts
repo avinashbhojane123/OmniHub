@@ -33,6 +33,9 @@ export class WatchPartyActionDto {
     'toggle_host_lock',
     'sync_tick',
     'heartbeat',
+    'suggest_video',
+    'play_queue_item',
+    'remove_queue_item',
   ])
   action!: WatchPartyActionType;
 
@@ -69,7 +72,46 @@ export class WatchPartyActionDto {
 
   @IsString()
   @IsOptional()
+  emoji?: string;
+
+  @IsString()
+  @IsOptional()
+  comment?: string;
+
+  @IsString()
+  @IsOptional()
   nickname?: string;
+
+  @IsNumber()
+  @IsOptional()
+  version?: number;
+
+  @IsString()
+  @IsOptional()
+  queueId?: string;
+
+  @IsString()
+  @IsOptional()
+  id?: string;
+
+  @IsString()
+  @IsOptional()
+  url?: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+
+  @IsString()
+  @IsOptional()
+  suggestedBy?: string;
+
+  @IsOptional()
+  queueItem?: any;
+
+  @IsBoolean()
+  @IsOptional()
+  isHostOnly?: boolean;
 }
 
 export class WatchPartyClockPingDto {
@@ -98,8 +140,19 @@ export class WatchPartyReactionDto {
 
   @IsString()
   @IsNotEmpty()
-  @IsIn(['', 'heart', 'laugh', 'fire', 'cry', 'applause', 'thumbsup', 'surprised'])
   reaction!: string;
+
+  @IsString()
+  @IsOptional()
+  emoji?: string;
+
+  @IsString()
+  @IsOptional()
+  from?: string;
+
+  @IsNumber()
+  @IsOptional()
+  timestamp?: number;
 }
 
 export class WatchPartyCommentDto {
@@ -112,7 +165,22 @@ export class WatchPartyCommentDto {
   @IsNotEmpty()
   text!: string;
 
+  @IsString()
+  @IsOptional()
+  comment?: string;
+
   @IsOptional()
   @IsNumber()
   top?: number;
+
+  @IsOptional()
+  id?: string | number;
+
+  @IsString()
+  @IsOptional()
+  from?: string;
+
+  @IsNumber()
+  @IsOptional()
+  timestamp?: number;
 }
