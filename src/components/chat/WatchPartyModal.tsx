@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,10 +11,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Animated,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { WatchPartyState } from '../../types/chat';
 import { getFromClipboard } from '../../utils/clipboard';
+import { chatSocketService, calculateWatchPartyDrift } from '../../services/chat/ChatSocketService';
 
 interface WatchPartyModalProps {
   visible: boolean;
@@ -31,6 +33,112 @@ interface WatchPartyModalProps {
 
 const REACTIONS = ['🍿', '🔥', '😂', '❤️', '👏', '🎬'];
 
+interface DanmakuCommentItem {
+  id: string;
+  text: string;
+  from?: string;
+  topPercent: number;
+}
+
+interface FloatingReactionItem {
+  id: string;
+  emoji: string;
+  rightOffset: number;
+}
+
+interface QueuedVideoItem {
+  id: string;
+  url: string;
+  title: string;
+  suggestedBy: string;
+}
+
+const DanmakuCommentView: React.FC<{
+  item: DanmakuCommentItem;
+  onFinished: (id: string) => void;
+}> = React.memo(({ item, onFinished }) => {
+  const animX = useRef(new Animated.Value(340)).current;
+
+  useEffect(() => {
+    Animated.timing(animX, {
+      toValue: -360,
+      duration: 5000,
+      useNativeDriver: true,
+    }).start(() => onFinished(item.id));
+  }, [animX, item.id, onFinished]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.danmakuBubble,
+        {
+          top: `${item.topPercent}%`,
+          transform: [{ translateX: animX }],
+        },
+      ]}
+    >
+      {item.from ? <Text style={styles.danmakuUser}>@{item.from}: </Text> : null}
+      <Text style={styles.danmakuText}>{item.text}</Text>
+    </Animated.View>
+  );
+});
+
+const FloatingReactionView: React.FC<{
+  item: FloatingReactionItem;
+  onFinished: (id: string) => void;
+}> = React.memo(({ item, onFinished }) => {
+  const animY = useRef(new Animated.Value(0)).current;
+  const animOpacity = useRef(new Animated.Value(1)).current;
+  const animScale = useRef(new Animated.Value(0.6)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(animY, {
+        toValue: -150,
+        duration: 2400,
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.spring(animScale, {
+          toValue: 1.4,
+          friction: 4,
+          useNativeDriver: true,
+        }),
+        Animated.timing(animScale, {
+          toValue: 1.0,
+          duration: 1400,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.sequence([
+        Animated.delay(1400),
+        Animated.timing(animOpacity, {
+          toValue: 0,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start(() => onFinished(item.id));
+  }, [animY, animOpacity, animScale, item.id, onFinished]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.floatingReactionBubble,
+        {
+          right: item.rightOffset,
+          transform: [{ translateY: animY }, { scale: animScale }],
+          opacity: animOpacity,
+        },
+      ]}
+    >
+      <Text style={styles.floatingReactionEmoji}>{item.emoji}</Text>
+    </Animated.View>
+  );
+});
+
 export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
   visible,
   onClose,
@@ -44,10 +152,27 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
   const [videoTitle, setVideoTitle] = useState('');
   const [commentText, setCommentText] = useState('');
 
+  // Danmaku & Floating Reactions overlay state
+  const [isOverlayVisible, setIsOverlayVisible] = useState(true);
+  const [activeComments, setActiveComments] = useState<DanmakuCommentItem[]>([]);
+  const [activeReactions, setActiveReactions] = useState<FloatingReactionItem[]>([]);
+
+  // Sync state & drift management
+  const [isSynced, setIsSynced] = useState(true);
+  const [syncStatusText, setSyncStatusText] = useState('In Sync');
+
+  // Shared "Up Next" Queue state
+  const [showQueue, setShowQueue] = useState(false);
+  const [queue, setQueue] = useState<QueuedVideoItem[]>([]);
+  const [queueUrl, setQueueUrl] = useState('');
+  const [queueTitle, setQueueTitle] = useState('');
+
   const [hasWebviewError, setHasWebviewError] = useState(false);
   const webViewRef = useRef<any>(null);
-  const activeUrl = state?.videoSource?.url || '';
+  const localPlayerTimeRef = useRef<number>(0);
+  const localIsPlayingRef = useRef<boolean>(false);
 
+  const activeUrl = state?.videoSource?.url || '';
   const isPlaying = Boolean(state?.isPlaying);
   const currentTime = Math.floor(state?.currentTime || 0);
   const isControlsDisabled = Boolean(state?.isHostOnly && !isHost);
@@ -56,20 +181,121 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
     setHasWebviewError(false);
   }, [activeUrl]);
 
-  // Synchronize incoming remote state (seek, play, pause) to WebView player
+  const removeComment = useCallback((id: string) => {
+    setActiveComments((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
+  const removeReaction = useCallback((id: string) => {
+    setActiveReactions((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+
+  const addCommentAnimation = useCallback((text: string, from?: string) => {
+    const topTracks = [12, 30, 48, 66];
+    const chosenTrack = topTracks[Math.floor(Math.random() * topTracks.length)];
+    const newItem: DanmakuCommentItem = {
+      id: `comm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      text,
+      from,
+      topPercent: chosenTrack,
+    };
+    setActiveComments((prev) => [...prev.slice(-12), newItem]);
+  }, []);
+
+  const addReactionAnimation = useCallback((emoji: string) => {
+    const offsets = [16, 40, 68, 96, 128];
+    const chosenOffset = offsets[Math.floor(Math.random() * offsets.length)];
+    const newItem: FloatingReactionItem = {
+      id: `react_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      emoji,
+      rightOffset: chosenOffset,
+    };
+    setActiveReactions((prev) => [...prev.slice(-15), newItem]);
+  }, []);
+
+  // Subscribe to real-time incoming reactions and comments
   useEffect(() => {
-    if (state && webViewRef.current) {
+    if (!visible) return;
+
+    const unsubReaction = chatSocketService.subscribeWatchPartyReaction((payload) => {
+      const emoji = payload.emoji || payload.reaction;
+      if (emoji) {
+        addReactionAnimation(emoji);
+      }
+    });
+
+    const unsubComment = chatSocketService.subscribeWatchPartyComment((payload) => {
+      const comment = payload.comment || payload.text;
+      if (comment) {
+        addCommentAnimation(comment, payload.from);
+      }
+    });
+
+    return () => {
+      unsubReaction();
+      unsubComment();
+    };
+  }, [visible, addCommentAnimation, addReactionAnimation]);
+
+  // Synchronize incoming remote state with 2-second drift tolerance
+  useEffect(() => {
+    if (!state || !webViewRef.current || !visible) return;
+
+    if (isHost) {
+      // Host drives remote playback; avoid seeking to self
+      return;
+    }
+
+    const hostTime = state.currentTime || 0;
+    const hostIsPlaying = Boolean(state.isPlaying);
+    const localTime = localPlayerTimeRef.current;
+    const localIsPlaying = localIsPlayingRef.current;
+
+    const driftResult = calculateWatchPartyDrift(
+      hostTime,
+      localTime,
+      hostIsPlaying,
+      localIsPlaying,
+      2.0
+    );
+
+    if (driftResult.shouldSeek) {
+      setIsSynced(false);
+      setSyncStatusText('Re-syncing...');
       try {
         const syncPayload = JSON.stringify({
-          action: state.isPlaying ? 'play' : 'pause',
-          currentTime: state.currentTime,
+          action: hostIsPlaying ? 'play' : 'pause',
+          currentTime: hostTime,
         });
         webViewRef.current.postMessage(syncPayload);
-      } catch {
-        // non-critical
-      }
+      } catch {}
+
+      const timer = setTimeout(() => {
+        setIsSynced(true);
+        setSyncStatusText('In Sync');
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else {
+      setIsSynced(true);
+      setSyncStatusText('In Sync');
     }
-  }, [state?.currentTime, state?.isPlaying]);
+  }, [state?.currentTime, state?.isPlaying, state?.version, isHost, visible]);
+
+  const handleManualResync = () => {
+    if (!state || !webViewRef.current) return;
+    setIsSynced(false);
+    setSyncStatusText('Snapping...');
+    try {
+      const syncPayload = JSON.stringify({
+        action: state.isPlaying ? 'play' : 'pause',
+        currentTime: state.currentTime,
+      });
+      webViewRef.current.postMessage(syncPayload);
+    } catch {}
+    setTimeout(() => {
+      setIsSynced(true);
+      setSyncStatusText('In Sync');
+    }, 800);
+  };
 
   const handleLaunchVideo = () => {
     if (!videoUrl.trim()) return;
@@ -101,8 +327,46 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
 
   const handleCommentSubmit = () => {
     if (!commentText.trim()) return;
-    onSendComment(commentText.trim());
+    const text = commentText.trim();
+    onSendComment(text);
+    addCommentAnimation(text, 'You');
     setCommentText('');
+  };
+
+  const handleReactionPress = (emoji: string) => {
+    onSendReaction(emoji);
+    addReactionAnimation(emoji);
+  };
+
+  const handleAddToQueue = () => {
+    if (!queueUrl.trim()) return;
+    const newItem: QueuedVideoItem = {
+      id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      url: queueUrl.trim(),
+      title: queueTitle.trim() || 'Suggested Stream',
+      suggestedBy: chatSocketService.nickname || 'Viewer',
+    };
+    setQueue((prev) => [...prev, newItem]);
+    setQueueUrl('');
+    setQueueTitle('');
+    Alert.alert('Added to Queue', `"${newItem.title}" was added to the shared Up Next list.`);
+  };
+
+  const handlePlayQueueItem = (item: QueuedVideoItem) => {
+    onAction('change_video', {
+      videoSource: {
+        url: item.url,
+        title: item.title,
+        type: item.url.includes('youtube.com') || item.url.includes('youtu.be') ? 'youtube' : 'direct',
+      },
+      currentTime: 0,
+      isPlaying: true,
+    });
+    setQueue((prev) => prev.filter((q) => q.id !== item.id));
+  };
+
+  const handleRemoveQueueItem = (id: string) => {
+    setQueue((prev) => prev.filter((q) => q.id !== id));
   };
 
   const formatTime = (secs: number) => {
@@ -247,8 +511,10 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                     onMessage={(event) => {
                       try {
                         const data = JSON.parse(event.nativeEvent.data);
-                        if (data.type === 'state' && isHost) {
-                          if (data.isPlaying !== isPlaying) {
+                        if (data.type === 'state') {
+                          localPlayerTimeRef.current = data.currentTime || 0;
+                          localIsPlayingRef.current = Boolean(data.isPlaying);
+                          if (isHost && data.isPlaying !== isPlaying) {
                             onAction(data.isPlaying ? 'play' : 'pause');
                           }
                         } else if (data.type === 'player_error') {
@@ -265,6 +531,18 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                     )}
                     startInLoadingState
                   />
+
+                  {/* Danmaku & Floating Reactions Overlay */}
+                  {isOverlayVisible && (
+                    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+                      {activeComments.map((c) => (
+                        <DanmakuCommentView key={c.id} item={c} onFinished={removeComment} />
+                      ))}
+                      {activeReactions.map((r) => (
+                        <FloatingReactionView key={r.id} item={r} onFinished={removeReaction} />
+                      ))}
+                    </View>
+                  )}
                 </View>
               ) : (
                 <View style={styles.streamFallbackBox}>
@@ -277,6 +555,114 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                   <Text style={styles.streamFallbackTime}>
                     {formatTime(currentTime)}
                   </Text>
+
+                  {/* Danmaku & Floating Reactions Overlay */}
+                  {isOverlayVisible && (
+                    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+                      {activeComments.map((c) => (
+                        <DanmakuCommentView key={c.id} item={c} onFinished={removeComment} />
+                      ))}
+                      {activeReactions.map((r) => (
+                        <FloatingReactionView key={r.id} item={r} onFinished={removeReaction} />
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* Toolbar: Danmaku Toggle, Re-sync Button, Sync Pill, Queue Toggle */}
+              <View style={styles.toolbarRow}>
+                <TouchableOpacity
+                  style={[styles.overlayToggleBtn, !isOverlayVisible && styles.overlayToggleBtnInactive]}
+                  onPress={() => setIsOverlayVisible((prev) => !prev)}
+                >
+                  <Text style={[styles.overlayToggleText, !isOverlayVisible && styles.overlayToggleTextInactive]}>
+                    {isOverlayVisible ? '👁️ Danmaku ON' : '🙈 Danmaku OFF'}
+                  </Text>
+                </TouchableOpacity>
+
+                {!isHost && (
+                  <TouchableOpacity
+                    style={styles.resyncBtn}
+                    onPress={handleManualResync}
+                  >
+                    <Text style={styles.resyncBtnText}>⚡ Re-sync</Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.syncPill}>
+                  <View style={[styles.syncDot, { backgroundColor: isSynced ? '#22C55E' : '#EAB308' }]} />
+                  <Text style={styles.syncText}>{syncStatusText}</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.queueToggleBtn}
+                  onPress={() => setShowQueue((prev) => !prev)}
+                >
+                  <Text style={styles.queueToggleText}>
+                    📑 Up Next {queue.length > 0 ? `(${queue.length})` : ''}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Shared Up Next Queue Section */}
+              {showQueue && (
+                <View style={styles.queueSection}>
+                  <View style={styles.queueHeaderRow}>
+                    <Text style={styles.queueTitle}>Up Next Suggestions ({queue.length})</Text>
+                    <TouchableOpacity onPress={() => setShowQueue(false)}>
+                      <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: '700' }}>Hide</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {queue.length === 0 ? (
+                    <Text style={{ color: '#64748B', fontSize: 11, fontStyle: 'italic', marginBottom: 8 }}>
+                      No videos queued yet. Suggest one below!
+                    </Text>
+                  ) : (
+                    queue.map((item) => (
+                      <View key={item.id} style={styles.queueItemRow}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={styles.queueItemTitle} numberOfLines={1}>{item.title}</Text>
+                          <Text style={styles.queueItemSub} numberOfLines={1}>by @{item.suggestedBy}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                          {isHost && (
+                            <TouchableOpacity
+                              style={styles.queuePlayBtn}
+                              onPress={() => handlePlayQueueItem(item)}
+                            >
+                              <Text style={styles.queuePlayText}>▶ Play</Text>
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            onPress={() => handleRemoveQueueItem(item.id)}
+                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          >
+                            <Text style={{ color: '#EF4444', fontSize: 13, fontWeight: '700' }}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))
+                  )}
+
+                  <View style={styles.queueInputRow}>
+                    <TextInput
+                      style={styles.queueInput}
+                      placeholder="Paste YouTube/MP4 URL..."
+                      placeholderTextColor="#64748B"
+                      value={queueUrl}
+                      onChangeText={setQueueUrl}
+                      autoCapitalize="none"
+                    />
+                    <TouchableOpacity
+                      style={[styles.queueAddBtn, !queueUrl.trim() && { opacity: 0.5 }]}
+                      disabled={!queueUrl.trim()}
+                      onPress={handleAddToQueue}
+                    >
+                      <Text style={styles.queueAddText}>+ Suggest</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
 
@@ -335,7 +721,7 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                     <TouchableOpacity
                       key={emoji}
                       style={styles.reactionBtn}
-                      onPress={() => onSendReaction(emoji)}
+                      onPress={() => handleReactionPress(emoji)}
                     >
                       <Text style={styles.reactionText}>{emoji}</Text>
                     </TouchableOpacity>
@@ -659,5 +1045,193 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontSize: 15,
     fontWeight: '800',
+  },
+  danmakuBubble: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.45)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    elevation: 4,
+    maxWidth: 240,
+  },
+  danmakuUser: {
+    color: '#38BDF8',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  danmakuText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  floatingReactionBubble: {
+    position: 'absolute',
+    bottom: 20,
+    padding: 6,
+  },
+  floatingReactionEmoji: {
+    fontSize: 34,
+  },
+  toolbarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 12,
+    gap: 6,
+  },
+  overlayToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+  },
+  overlayToggleBtnInactive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  overlayToggleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#38BDF8',
+  },
+  overlayToggleTextInactive: {
+    color: '#94A3B8',
+  },
+  resyncBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245, 158, 11, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  resyncBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#F59E0B',
+  },
+  syncPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  syncDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  syncText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  queueToggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: 'rgba(99, 102, 241, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(99, 102, 241, 0.4)',
+  },
+  queueToggleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A5B4FC',
+  },
+  queueSection: {
+    width: '100%',
+    backgroundColor: '#1E293B',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  queueHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  queueTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#F8FAFC',
+  },
+  queueItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  queueItemTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  queueItemSub: {
+    fontSize: 10,
+    color: '#94A3B8',
+  },
+  queuePlayBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: '#38BDF8',
+    borderRadius: 8,
+  },
+  queuePlayText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  queueInputRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  queueInput: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    color: '#FFFFFF',
+    fontSize: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  queueAddBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#4F46E5',
+    borderRadius: 8,
+  },
+  queueAddText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

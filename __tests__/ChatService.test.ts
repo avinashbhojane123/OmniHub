@@ -1,4 +1,4 @@
-import { chatSocketService } from '../src/services/chat/ChatSocketService';
+import { chatSocketService, calculateWatchPartyDrift } from '../src/services/chat/ChatSocketService';
 
 describe('ChatSocketService', () => {
   afterEach(() => {
@@ -223,5 +223,52 @@ describe('ChatSocketService', () => {
 
     chatSocketService.watchPartyAction('close');
     expect(chatSocketService.getWatchParty).toBeNull();
+  });
+
+  it('correctly calculates watch party sync drift and seeks based on 2-second tolerance', () => {
+    // Case 1: Within tolerance (0.8s difference) -> no seek
+    const withinTolerance = calculateWatchPartyDrift(10.8, 10.0, true, true);
+    expect(withinTolerance.shouldSeek).toBe(false);
+    expect(withinTolerance.reason).toBe('in_tolerance');
+    expect(withinTolerance.driftSeconds).toBeCloseTo(0.8);
+
+    // Case 2: Exactly at 2.0s boundary -> no seek
+    const atBoundary = calculateWatchPartyDrift(12.0, 10.0, true, true, 2.0);
+    expect(atBoundary.shouldSeek).toBe(false);
+    expect(atBoundary.reason).toBe('in_tolerance');
+
+    // Case 3: Drift exceeded (2.5s difference) -> seek required
+    const exceeded = calculateWatchPartyDrift(12.5, 10.0, true, true, 2.0);
+    expect(exceeded.shouldSeek).toBe(true);
+    expect(exceeded.reason).toBe('drift_exceeded');
+    expect(exceeded.driftSeconds).toBeCloseTo(2.5);
+
+    // Case 4: Playback state mismatch (host is paused, participant is playing) -> seek required
+    const mismatch = calculateWatchPartyDrift(10.5, 10.0, false, true);
+    expect(mismatch.shouldSeek).toBe(true);
+    expect(mismatch.reason).toBe('playback_mismatch');
+
+    // Case 5: Forced resync flag active -> seek required immediately even with 0s drift
+    const forced = calculateWatchPartyDrift(10.0, 10.0, true, true, 2.0, true);
+    expect(forced.shouldSeek).toBe(true);
+    expect(forced.reason).toBe('forced');
+  });
+
+  it('dispatches watch party reactions and comments to registered subscribers', () => {
+    const reactionListener = jest.fn();
+    const commentListener = jest.fn();
+
+    const unsubReaction = chatSocketService.subscribeWatchPartyReaction(reactionListener);
+    const unsubComment = chatSocketService.subscribeWatchPartyComment(commentListener);
+
+    // Simulate dispatching events through helper or socket events
+    chatSocketService.dispatchWatchPartyReactionForTesting?.({ emoji: '🔥', reaction: '🔥' });
+    chatSocketService.dispatchWatchPartyCommentForTesting?.({ text: 'Amazing!', comment: 'Amazing!' });
+
+    expect(reactionListener).toHaveBeenCalledWith(expect.objectContaining({ emoji: '🔥' }));
+    expect(commentListener).toHaveBeenCalledWith(expect.objectContaining({ comment: 'Amazing!' }));
+
+    unsubReaction();
+    unsubComment();
   });
 });

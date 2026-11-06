@@ -48,6 +48,7 @@ export interface ChatMessage {
   duration?: number | null; // Duration in seconds for voice notes and media
   isVoiceNote?: boolean;
   isVideoNote?: boolean;
+  isWatchPartyComment?: boolean;
   isWithoutSound?: boolean;
   isEdited?: boolean;
   isDeleted?: boolean;
@@ -348,6 +349,7 @@ export interface SendMessagePayload {
   duration?: number | null;
   isVoiceNote?: boolean;
   isVideoNote?: boolean;
+  isWatchPartyComment?: boolean;
   isWithoutSound?: boolean;
   expiresIn?: number | null;
   pollData?: PollData | null;

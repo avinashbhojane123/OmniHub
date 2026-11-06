@@ -815,6 +815,13 @@ const ChatMessageBubbleComponent: React.FC<ChatMessageBubbleProps> = ({
             </View>
           ) : null}
 
+          {/* Watch Party Live Comment Badge */}
+          {Boolean(item.isWatchPartyComment) && (
+            <View style={styles.watchPartyBadge}>
+              <Text style={styles.watchPartyBadgeText}>🍿 Watch Party Comment</Text>
+            </View>
+          )}
+
           {/* Quoted Reply Reference with Quick Tap Jump */}
           {item.replyTo && (
             <TouchableOpacity
