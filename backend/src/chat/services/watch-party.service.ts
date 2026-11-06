@@ -168,7 +168,7 @@ export class WatchPartyService implements OnModuleDestroy {
       state.isHostOnly &&
       session.nickname.trim().toLowerCase() !==
         (state.hostNickname || '').trim().toLowerCase() &&
-      ['play', 'pause', 'seek', 'rate', 'change_video'].includes(data.action)
+      ['play', 'pause', 'seek', 'rate', 'change_video', 'play_queue_item'].includes(data.action)
     ) {
       return {
         success: false,
@@ -447,6 +447,9 @@ export class WatchPartyService implements OnModuleDestroy {
         const targetId = data.queueId || data.id;
         const currentQueue = state.queue || [];
         const targetItem = currentQueue.find((q) => q.id === targetId);
+        if (!targetItem && !data.videoSource) {
+          return { success: false, message: 'Queue item not found' };
+        }
         state.queue = currentQueue.filter((q) => q.id !== targetId);
 
         const nextSource = data.videoSource || (targetItem ? {

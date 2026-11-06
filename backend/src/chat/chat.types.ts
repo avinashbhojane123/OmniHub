@@ -129,11 +129,35 @@ export type WatchPartyActionType =
   | 'ready'
   | 'close'
   | 'toggle_host_lock'
+  | 'lock_controls'
   | 'sync_tick'
   | 'heartbeat'
   | 'suggest_video'
   | 'play_queue_item'
   | 'remove_queue_item';
+
+export interface WatchPartyActionPayload {
+  action: WatchPartyActionType;
+  currentTime?: number;
+  playbackRate?: number;
+  videoSource?: WatchPartyVideoSource | null;
+  isPlaying?: boolean;
+  isBuffering?: boolean;
+  buffering?: boolean;
+  isHostOnly?: boolean;
+  scheduledStartServerTime?: number;
+  clientSendTime?: number;
+  queueItem?: QueuedVideoItem;
+  queueId?: string;
+  id?: string;
+  url?: string;
+  title?: string;
+  suggestedBy?: string;
+  reaction?: string;
+  comment?: string;
+  passcode?: string;
+  version?: number;
+}
 
 export interface WatchPartyState {
   isActive: boolean;

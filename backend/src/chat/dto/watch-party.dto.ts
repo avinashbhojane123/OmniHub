@@ -31,6 +31,7 @@ export class WatchPartyActionDto {
     'ready',
     'close',
     'toggle_host_lock',
+    'lock_controls',
     'sync_tick',
     'heartbeat',
     'suggest_video',
