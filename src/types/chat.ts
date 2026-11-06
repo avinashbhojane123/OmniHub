@@ -138,6 +138,9 @@ export type WatchPartyActionType =
   | 'seek'
   | 'rate'
   | 'change_video'
+  | 'suggest_video'
+  | 'play_queue_item'
+  | 'remove_queue_item'
   | 'buffering'
   | 'ready'
   | 'close'
@@ -146,6 +149,13 @@ export type WatchPartyActionType =
   | 'sync'
   | 'sync_tick'
   | 'heartbeat';
+
+export interface QueuedVideoItem {
+  id: string;
+  url: string;
+  title: string;
+  suggestedBy: string;
+}
 
 export interface WatchPartyActionPayload {
   action: WatchPartyActionType;
@@ -158,6 +168,12 @@ export interface WatchPartyActionPayload {
   isHostOnly?: boolean;
   scheduledStartServerTime?: number;
   clientSendTime?: number;
+  queueItem?: QueuedVideoItem;
+  queueId?: string;
+  id?: string;
+  url?: string;
+  title?: string;
+  suggestedBy?: string;
   reaction?: string;
   comment?: string;
   passcode?: string;
@@ -202,6 +218,7 @@ export interface WatchPartyState {
   bufferingUsers: string[];
   hostNickname?: string;
   isHostOnly?: boolean;
+  queue?: QueuedVideoItem[];
 }
 
 export type RoomWallpaperThemeId =

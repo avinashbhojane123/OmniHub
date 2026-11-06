@@ -271,4 +271,34 @@ describe('ChatSocketService', () => {
     unsubReaction();
     unsubComment();
   });
+
+  it('supports shared video queue additions and playing queued items in watch party', () => {
+    chatSocketService.watchPartyAction('open', {
+      videoSource: { url: 'https://example.com/movie1.mp4', title: 'Movie 1', type: 'direct' },
+      currentTime: 0,
+      isPlaying: true,
+    });
+
+    expect(chatSocketService.getWatchParty?.queue || []).toEqual([]);
+
+    // Suggest a video
+    chatSocketService.watchPartyAction('suggest_video', {
+      url: 'https://example.com/movie2.mp4',
+      title: 'Movie 2',
+      suggestedBy: 'Alice',
+    });
+
+    expect(chatSocketService.getWatchParty?.queue?.length).toBe(1);
+    expect(chatSocketService.getWatchParty?.queue?.[0].title).toBe('Movie 2');
+    expect(chatSocketService.getWatchParty?.queue?.[0].suggestedBy).toBe('Alice');
+
+    // Host plays the queued item
+    const queuedId = chatSocketService.getWatchParty!.queue![0].id;
+    chatSocketService.watchPartyAction('play_queue_item', { id: queuedId });
+
+    expect(chatSocketService.getWatchParty?.videoSource?.url).toBe('https://example.com/movie2.mp4');
+    expect(chatSocketService.getWatchParty?.queue?.length).toBe(0);
+
+    chatSocketService.watchPartyAction('close');
+  });
 });

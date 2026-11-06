@@ -5,12 +5,12 @@ Refined video player synchronization that uses the 2-second drift tolerance logi
 
 **Blocked by:** 01 (Watch Party Socket Event Subscription & Drift Tolerance Engine)
 
-**Status:** resolved
+**Status:** ready-for-agent
 
 - [x] In `WatchPartyModal`, incoming periodic timestamp updates only trigger player seeks if drift exceeds 2 seconds.
 - [x] Explicit host actions (play, pause, seek) trigger immediate postMessage commands to the WebView player.
 - [x] For participants, an on-screen "⚡ Re-sync to Host" button is available in the player control bar to immediately snap playback to the host's current time.
 - [x] Clear visual indicator showing current sync offset status (e.g., "In Sync 🟢" vs "Syncing... 🟡").
 
-## Answer
-Integrated `calculateWatchPartyDrift` inside `WatchPartyModal.tsx`'s sync `useEffect` comparing host time against `localPlayerTimeRef.current`. Added dedicated "⚡ Re-sync" action and a live sync status pill.
+## Comments
+Integrated `calculateWatchPartyDrift` inside `WatchPartyModal.tsx`'s sync `useEffect` comparing host time against `localPlayerTimeRef.current`. Added dedicated "⚡ Re-sync" action, host version scrub detection, and a live sync status pill.

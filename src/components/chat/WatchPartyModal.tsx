@@ -11,12 +11,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  Animated,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { WatchPartyState } from '../../types/chat';
+import { WatchPartyState, QueuedVideoItem } from '../../types/chat';
 import { getFromClipboard } from '../../utils/clipboard';
 import { chatSocketService, calculateWatchPartyDrift } from '../../services/chat/ChatSocketService';
+import {
+  DanmakuOverlay,
+  DanmakuCommentItem,
+  FloatingReactionItem,
+} from './DanmakuOverlay';
 
 interface WatchPartyModalProps {
   visible: boolean;
@@ -24,7 +28,17 @@ interface WatchPartyModalProps {
   state: WatchPartyState | null;
   isHost: boolean;
   onAction: (
-    action: 'open' | 'play' | 'pause' | 'seek' | 'change_video' | 'close' | 'lock_controls',
+    action:
+      | 'open'
+      | 'play'
+      | 'pause'
+      | 'seek'
+      | 'change_video'
+      | 'close'
+      | 'lock_controls'
+      | 'suggest_video'
+      | 'play_queue_item'
+      | 'remove_queue_item',
     payload?: any
   ) => void;
   onSendReaction: (emoji: string) => void;
@@ -32,112 +46,6 @@ interface WatchPartyModalProps {
 }
 
 const REACTIONS = ['🍿', '🔥', '😂', '❤️', '👏', '🎬'];
-
-interface DanmakuCommentItem {
-  id: string;
-  text: string;
-  from?: string;
-  topPercent: number;
-}
-
-interface FloatingReactionItem {
-  id: string;
-  emoji: string;
-  rightOffset: number;
-}
-
-interface QueuedVideoItem {
-  id: string;
-  url: string;
-  title: string;
-  suggestedBy: string;
-}
-
-const DanmakuCommentView: React.FC<{
-  item: DanmakuCommentItem;
-  onFinished: (id: string) => void;
-}> = React.memo(({ item, onFinished }) => {
-  const animX = useRef(new Animated.Value(340)).current;
-
-  useEffect(() => {
-    Animated.timing(animX, {
-      toValue: -360,
-      duration: 5000,
-      useNativeDriver: true,
-    }).start(() => onFinished(item.id));
-  }, [animX, item.id, onFinished]);
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[
-        styles.danmakuBubble,
-        {
-          top: `${item.topPercent}%`,
-          transform: [{ translateX: animX }],
-        },
-      ]}
-    >
-      {item.from ? <Text style={styles.danmakuUser}>@{item.from}: </Text> : null}
-      <Text style={styles.danmakuText}>{item.text}</Text>
-    </Animated.View>
-  );
-});
-
-const FloatingReactionView: React.FC<{
-  item: FloatingReactionItem;
-  onFinished: (id: string) => void;
-}> = React.memo(({ item, onFinished }) => {
-  const animY = useRef(new Animated.Value(0)).current;
-  const animOpacity = useRef(new Animated.Value(1)).current;
-  const animScale = useRef(new Animated.Value(0.6)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(animY, {
-        toValue: -150,
-        duration: 2400,
-        useNativeDriver: true,
-      }),
-      Animated.sequence([
-        Animated.spring(animScale, {
-          toValue: 1.4,
-          friction: 4,
-          useNativeDriver: true,
-        }),
-        Animated.timing(animScale, {
-          toValue: 1.0,
-          duration: 1400,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.sequence([
-        Animated.delay(1400),
-        Animated.timing(animOpacity, {
-          toValue: 0,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start(() => onFinished(item.id));
-  }, [animY, animOpacity, animScale, item.id, onFinished]);
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[
-        styles.floatingReactionBubble,
-        {
-          right: item.rightOffset,
-          transform: [{ translateY: animY }, { scale: animScale }],
-          opacity: animOpacity,
-        },
-      ]}
-    >
-      <Text style={styles.floatingReactionEmoji}>{item.emoji}</Text>
-    </Animated.View>
-  );
-});
 
 export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
   visible,
@@ -163,7 +71,6 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
 
   // Shared "Up Next" Queue state
   const [showQueue, setShowQueue] = useState(false);
-  const [queue, setQueue] = useState<QueuedVideoItem[]>([]);
   const [queueUrl, setQueueUrl] = useState('');
   const [queueTitle, setQueueTitle] = useState('');
 
@@ -171,11 +78,13 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
   const webViewRef = useRef<any>(null);
   const localPlayerTimeRef = useRef<number>(0);
   const localIsPlayingRef = useRef<boolean>(false);
+  const lastSeenVersionRef = useRef<number>(state?.version || 0);
 
   const activeUrl = state?.videoSource?.url || '';
   const isPlaying = Boolean(state?.isPlaying);
   const currentTime = Math.floor(state?.currentTime || 0);
   const isControlsDisabled = Boolean(state?.isHostOnly && !isHost);
+  const roomQueue = state?.queue || [];
 
   useEffect(() => {
     setHasWebviewError(false);
@@ -236,7 +145,7 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
     };
   }, [visible, addCommentAnimation, addReactionAnimation]);
 
-  // Synchronize incoming remote state with 2-second drift tolerance
+  // Synchronize incoming remote state with 2-second drift tolerance + host scrub snapping
   useEffect(() => {
     if (!state || !webViewRef.current || !visible) return;
 
@@ -250,17 +159,22 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
     const localTime = localPlayerTimeRef.current;
     const localIsPlaying = localIsPlayingRef.current;
 
+    const currentVersion = state.version || 0;
+    const isNewHostVersion = currentVersion > lastSeenVersionRef.current;
+    lastSeenVersionRef.current = currentVersion;
+
     const driftResult = calculateWatchPartyDrift(
       hostTime,
       localTime,
       hostIsPlaying,
       localIsPlaying,
-      2.0
+      2.0,
+      isNewHostVersion
     );
 
     if (driftResult.shouldSeek) {
       setIsSynced(false);
-      setSyncStatusText('Re-syncing...');
+      setSyncStatusText(isNewHostVersion ? 'Snapping to Host...' : 'Re-syncing...');
       try {
         const syncPayload = JSON.stringify({
           action: hostIsPlaying ? 'play' : 'pause',
@@ -272,7 +186,7 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
       const timer = setTimeout(() => {
         setIsSynced(true);
         setSyncStatusText('In Sync');
-      }, 1000);
+      }, 900);
       return () => clearTimeout(timer);
     } else {
       setIsSynced(true);
@@ -340,33 +254,29 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
 
   const handleAddToQueue = () => {
     if (!queueUrl.trim()) return;
-    const newItem: QueuedVideoItem = {
-      id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    onAction('suggest_video', {
       url: queueUrl.trim(),
       title: queueTitle.trim() || 'Suggested Stream',
       suggestedBy: chatSocketService.nickname || 'Viewer',
-    };
-    setQueue((prev) => [...prev, newItem]);
+    });
     setQueueUrl('');
     setQueueTitle('');
-    Alert.alert('Added to Queue', `"${newItem.title}" was added to the shared Up Next list.`);
+    Alert.alert('Added to Queue', 'Your video recommendation was shared with the room queue!');
   };
 
   const handlePlayQueueItem = (item: QueuedVideoItem) => {
-    onAction('change_video', {
+    onAction('play_queue_item', {
+      id: item.id,
       videoSource: {
         url: item.url,
         title: item.title,
         type: item.url.includes('youtube.com') || item.url.includes('youtu.be') ? 'youtube' : 'direct',
       },
-      currentTime: 0,
-      isPlaying: true,
     });
-    setQueue((prev) => prev.filter((q) => q.id !== item.id));
   };
 
   const handleRemoveQueueItem = (id: string) => {
-    setQueue((prev) => prev.filter((q) => q.id !== id));
+    onAction('remove_queue_item', { id });
   };
 
   const formatTime = (secs: number) => {
@@ -533,16 +443,13 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                   />
 
                   {/* Danmaku & Floating Reactions Overlay */}
-                  {isOverlayVisible && (
-                    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-                      {activeComments.map((c) => (
-                        <DanmakuCommentView key={c.id} item={c} onFinished={removeComment} />
-                      ))}
-                      {activeReactions.map((r) => (
-                        <FloatingReactionView key={r.id} item={r} onFinished={removeReaction} />
-                      ))}
-                    </View>
-                  )}
+                  <DanmakuOverlay
+                    visible={isOverlayVisible}
+                    comments={activeComments}
+                    reactions={activeReactions}
+                    onRemoveComment={removeComment}
+                    onRemoveReaction={removeReaction}
+                  />
                 </View>
               ) : (
                 <View style={styles.streamFallbackBox}>
@@ -557,16 +464,13 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                   </Text>
 
                   {/* Danmaku & Floating Reactions Overlay */}
-                  {isOverlayVisible && (
-                    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-                      {activeComments.map((c) => (
-                        <DanmakuCommentView key={c.id} item={c} onFinished={removeComment} />
-                      ))}
-                      {activeReactions.map((r) => (
-                        <FloatingReactionView key={r.id} item={r} onFinished={removeReaction} />
-                      ))}
-                    </View>
-                  )}
+                  <DanmakuOverlay
+                    visible={isOverlayVisible}
+                    comments={activeComments}
+                    reactions={activeReactions}
+                    onRemoveComment={removeComment}
+                    onRemoveReaction={removeReaction}
+                  />
                 </View>
               )}
 
@@ -600,7 +504,7 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
                   onPress={() => setShowQueue((prev) => !prev)}
                 >
                   <Text style={styles.queueToggleText}>
-                    📑 Up Next {queue.length > 0 ? `(${queue.length})` : ''}
+                    📑 Up Next {roomQueue.length > 0 ? `(${roomQueue.length})` : ''}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -609,18 +513,18 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
               {showQueue && (
                 <View style={styles.queueSection}>
                   <View style={styles.queueHeaderRow}>
-                    <Text style={styles.queueTitle}>Up Next Suggestions ({queue.length})</Text>
+                    <Text style={styles.queueTitle}>Up Next Suggestions ({roomQueue.length})</Text>
                     <TouchableOpacity onPress={() => setShowQueue(false)}>
                       <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: '700' }}>Hide</Text>
                     </TouchableOpacity>
                   </View>
 
-                  {queue.length === 0 ? (
+                  {roomQueue.length === 0 ? (
                     <Text style={{ color: '#64748B', fontSize: 11, fontStyle: 'italic', marginBottom: 8 }}>
                       No videos queued yet. Suggest one below!
                     </Text>
                   ) : (
-                    queue.map((item) => (
+                    roomQueue.map((item) => (
                       <View key={item.id} style={styles.queueItemRow}>
                         <View style={{ flex: 1, marginRight: 8 }}>
                           <Text style={styles.queueItemTitle} numberOfLines={1}>{item.title}</Text>
@@ -1045,41 +949,6 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontSize: 15,
     fontWeight: '800',
-  },
-  danmakuBubble: {
-    position: 'absolute',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.88)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.45)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
-    elevation: 4,
-    maxWidth: 240,
-  },
-  danmakuUser: {
-    color: '#38BDF8',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  danmakuText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  floatingReactionBubble: {
-    position: 'absolute',
-    bottom: 20,
-    padding: 6,
-  },
-  floatingReactionEmoji: {
-    fontSize: 34,
   },
   toolbarRow: {
     flexDirection: 'row',

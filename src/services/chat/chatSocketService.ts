@@ -6,6 +6,7 @@ import {
   UserRole,
   ChatStatusStory,
   WatchPartyState,
+  QueuedVideoItem,
   RoomWallpaperState,
   RoomWallpaperThemeId,
   ActiveCallData,
@@ -28,6 +29,33 @@ export type { JoinRoomConfig, WebrtcSignalEvent };
 export type ChatEventListener = () => void;
 export type WatchPartyReactionListener = (data: WatchPartyReactionPayload) => void;
 export type WatchPartyCommentListener = (data: WatchPartyCommentPayload) => void;
+
+export interface WatchPartyDriftResult {
+  driftSeconds: number;
+  shouldSeek: boolean;
+  reason: 'in_tolerance' | 'drift_exceeded' | 'playback_mismatch' | 'forced';
+}
+
+export function calculateWatchPartyDrift(
+  hostTime: number,
+  participantTime: number,
+  hostIsPlaying: boolean,
+  participantIsPlaying: boolean,
+  toleranceSeconds: number = 2.0,
+  forceResync: boolean = false
+): WatchPartyDriftResult {
+  const drift = Math.abs(hostTime - participantTime);
+  if (forceResync) {
+    return { driftSeconds: drift, shouldSeek: true, reason: 'forced' };
+  }
+  if (hostIsPlaying !== participantIsPlaying) {
+    return { driftSeconds: drift, shouldSeek: true, reason: 'playback_mismatch' };
+  }
+  if (drift > toleranceSeconds) {
+    return { driftSeconds: drift, shouldSeek: true, reason: 'drift_exceeded' };
+  }
+  return { driftSeconds: drift, shouldSeek: false, reason: 'in_tolerance' };
+}
 
 class ChatSocketManager {
   private socket: Socket | null = null;
@@ -1238,6 +1266,19 @@ class ChatSocketManager {
           fn(normalized);
         } catch {}
       });
+
+      if (normalized.comment && this.currentPasscode) {
+        const watchPartyMsg: ChatMessage = {
+          id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          nickname: normalized.from || 'Party Viewer',
+          message: normalized.comment,
+          createdAt: new Date().toISOString(),
+          isWatchPartyComment: true,
+          status: 'sent',
+        };
+        this.messages.push(watchPartyMsg);
+        this.notify();
+      }
     });
 
     this.socket.on('kickedFromRoom', (data?: { reason?: string }) => {
@@ -2153,6 +2194,52 @@ class ChatSocketManager {
         isHostOnly: payload.isHostOnly !== undefined ? payload.isHostOnly : !this.watchParty.isHostOnly,
       };
       this.notify();
+    } else if (action === 'suggest_video' && this.watchParty) {
+      const currentQueue = this.watchParty.queue || [];
+      const item: QueuedVideoItem = payload.queueItem || {
+        id: payload.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        url: payload.url || payload.videoSource?.url || '',
+        title: payload.title || payload.videoSource?.title || 'Suggested Video',
+        suggestedBy: payload.suggestedBy || this.currentNickname || 'Viewer',
+      };
+      if (item.url) {
+        this.watchParty = {
+          ...this.watchParty,
+          queue: [...currentQueue, item],
+          version: (this.watchParty.version || 0) + 1,
+        };
+        this.notify();
+      }
+    } else if (action === 'play_queue_item' && this.watchParty) {
+      const currentQueue = this.watchParty.queue || [];
+      const targetId = payload.queueId || payload.id;
+      const targetItem = currentQueue.find((q) => q.id === targetId);
+      const remainingQueue = currentQueue.filter((q) => q.id !== targetId);
+
+      const nextSource = payload.videoSource || (targetItem ? {
+        url: targetItem.url,
+        title: targetItem.title,
+        type: targetItem.url.includes('youtube.com') || targetItem.url.includes('youtu.be') ? ('youtube' as const) : ('direct' as const),
+      } : this.watchParty.videoSource);
+
+      this.watchParty = {
+        ...this.watchParty,
+        videoSource: nextSource,
+        currentTime: 0,
+        isPlaying: true,
+        queue: remainingQueue,
+        version: (this.watchParty.version || 0) + 1,
+        lastActorNickname: this.currentNickname,
+      };
+      this.notify();
+    } else if (action === 'remove_queue_item' && this.watchParty) {
+      const targetId = payload.queueId || payload.id;
+      const remainingQueue = (this.watchParty.queue || []).filter((q) => q.id !== targetId);
+      this.watchParty = {
+        ...this.watchParty,
+        queue: remainingQueue,
+      };
+      this.notify();
     } else if (action === 'open' && payload.videoSource) {
       this.watchParty = {
         isActive: true,
@@ -2166,6 +2253,7 @@ class ChatSocketManager {
         isBuffering: false,
         bufferingUsers: [],
         isHostOnly: payload.isHostOnly !== undefined ? payload.isHostOnly : true,
+        queue: this.watchParty?.queue || [],
       };
       this.notify();
     }
@@ -2214,6 +2302,44 @@ class ChatSocketManager {
       text: comment.trim(),
       comment: comment.trim(),
       top,
+    });
+
+    // Optimistic local mirror
+    const localWatchPartyMsg: ChatMessage = {
+      id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      nickname: this.currentNickname || 'You',
+      message: comment.trim(),
+      createdAt: new Date().toISOString(),
+      isWatchPartyComment: true,
+      status: 'sent',
+    };
+    this.messages.push(localWatchPartyMsg);
+    this.notify();
+  }
+
+  public dispatchWatchPartyReactionForTesting(payload: WatchPartyReactionPayload) {
+    const normalized: WatchPartyReactionPayload = {
+      ...payload,
+      emoji: payload.emoji || payload.reaction,
+      reaction: payload.reaction || payload.emoji,
+    };
+    this.watchPartyReactionListeners.forEach((fn) => {
+      try {
+        fn(normalized);
+      } catch {}
+    });
+  }
+
+  public dispatchWatchPartyCommentForTesting(payload: WatchPartyCommentPayload) {
+    const normalized: WatchPartyCommentPayload = {
+      ...payload,
+      comment: payload.comment || payload.text,
+      text: payload.text || payload.comment,
+    };
+    this.watchPartyCommentListeners.forEach((fn) => {
+      try {
+        fn(normalized);
+      } catch {}
     });
   }
 
