@@ -5,12 +5,12 @@ Refactor `WatchPartyModal.tsx` so the WebView player and fallback box are wrappe
 
 **Blocked by:** 07 (Playback Version Isolation & Scrub Snapping in ChatSocketService)
 
-**Status:** resolved
+Status: resolved
 
 - [x] In `WatchPartyModal.tsx`, mount `<DanmakuOverlay />` exactly once over a parent `styles.playerViewport` box.
 - [x] Remove duplicate `<DanmakuOverlay />` from inside `realPlayerBox` and `streamFallbackBox`.
-- [x] Align all ticket files in `.scratch/watch-party-sync-danmaku/issues/` to `Status: resolved` with `## Answer` sections.
+- [x] Align all ticket files in `.scratch/watch-party-sync-danmaku/issues/` to `Status: resolved` with `## Comments` sections.
 
-## Answer
+## Comments
 
-Created `styles.playerViewport` wrapping both player states and mounted a single `<DanmakuOverlay />` instance. Harmonized all issue files 01–08 to `Status: resolved` with `## Answer` blocks in full compliance with project issue tracker standards.
+Created `styles.playerViewport` wrapping both player states and mounted a single `<DanmakuOverlay />` instance. Harmonized all issue files 01–08 to `Status: resolved` with `## Comments` blocks in full compliance with project issue tracker standards.

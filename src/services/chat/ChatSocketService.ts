@@ -36,14 +36,24 @@ export interface WatchPartyDriftResult {
   reason: 'in_tolerance' | 'drift_exceeded' | 'playback_mismatch' | 'forced';
 }
 
-export function calculateWatchPartyDrift(
-  hostTime: number,
-  participantTime: number,
-  hostIsPlaying: boolean,
-  participantIsPlaying: boolean,
-  toleranceSeconds: number = 2.0,
-  forceResync: boolean = false
-): WatchPartyDriftResult {
+export interface WatchPartyDriftParams {
+  hostTime: number;
+  participantTime: number;
+  hostIsPlaying: boolean;
+  participantIsPlaying: boolean;
+  toleranceSeconds?: number;
+  forceResync?: boolean;
+}
+
+export function calculateWatchPartyDrift(params: WatchPartyDriftParams): WatchPartyDriftResult {
+  const {
+    hostTime,
+    participantTime,
+    hostIsPlaying,
+    participantIsPlaying,
+    toleranceSeconds = 2.0,
+    forceResync = false,
+  } = params;
   const drift = Math.abs(hostTime - participantTime);
   if (forceResync) {
     return { driftSeconds: drift, shouldSeek: true, reason: 'forced' };
@@ -1243,42 +1253,11 @@ class ChatSocketManager {
     });
 
     this.socket.on('watchPartyReaction', (payload: WatchPartyReactionPayload) => {
-      const normalized: WatchPartyReactionPayload = {
-        ...payload,
-        emoji: payload.emoji || payload.reaction,
-        reaction: payload.reaction || payload.emoji,
-      };
-      this.watchPartyReactionListeners.forEach((fn) => {
-        try {
-          fn(normalized);
-        } catch {}
-      });
+      this.handleIncomingWatchPartyReaction(payload);
     });
 
     this.socket.on('watchPartyComment', (payload: WatchPartyCommentPayload) => {
-      const normalized: WatchPartyCommentPayload = {
-        ...payload,
-        comment: payload.comment || payload.text,
-        text: payload.text || payload.comment,
-      };
-      this.watchPartyCommentListeners.forEach((fn) => {
-        try {
-          fn(normalized);
-        } catch {}
-      });
-
-      if (normalized.comment && this.currentPasscode) {
-        const watchPartyMsg: ChatMessage = {
-          id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          nickname: normalized.from || 'Party Viewer',
-          message: normalized.comment,
-          createdAt: new Date().toISOString(),
-          isWatchPartyComment: true,
-          status: 'sent',
-        };
-        this.messages.push(watchPartyMsg);
-        this.notify();
-      }
+      this.handleIncomingWatchPartyComment(payload);
     });
 
     this.socket.on('kickedFromRoom', (data?: { reason?: string }) => {
@@ -2275,6 +2254,7 @@ class ChatSocketManager {
     this.socket.emit('watchPartyAction', {
       passcode: this.currentPasscode,
       action,
+      version: this.watchParty?.version,
       ...payload,
     });
   }
@@ -2330,7 +2310,7 @@ class ChatSocketManager {
     this.notify();
   }
 
-  public dispatchWatchPartyReactionForTesting(payload: WatchPartyReactionPayload) {
+  public handleIncomingWatchPartyReaction(payload: WatchPartyReactionPayload): void {
     const normalized: WatchPartyReactionPayload = {
       ...payload,
       emoji: payload.emoji || payload.reaction,
@@ -2343,7 +2323,7 @@ class ChatSocketManager {
     });
   }
 
-  public dispatchWatchPartyCommentForTesting(payload: WatchPartyCommentPayload) {
+  public handleIncomingWatchPartyComment(payload: WatchPartyCommentPayload): void {
     const normalized: WatchPartyCommentPayload = {
       ...payload,
       comment: payload.comment || payload.text,
@@ -2354,6 +2334,30 @@ class ChatSocketManager {
         fn(normalized);
       } catch {}
     });
+
+    if (normalized.comment && this.currentPasscode) {
+      const fromNick = normalized.from || 'Party Viewer';
+      if (fromNick.toLowerCase() !== this.currentNickname.toLowerCase()) {
+        const watchPartyMsg: ChatMessage = {
+          id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          nickname: fromNick,
+          message: normalized.comment,
+          createdAt: new Date().toISOString(),
+          isWatchPartyComment: true,
+          status: 'sent',
+        };
+        this.messages.push(watchPartyMsg);
+        this.notify();
+      }
+    }
+  }
+
+  public dispatchWatchPartyReactionForTesting(payload: WatchPartyReactionPayload): void {
+    this.handleIncomingWatchPartyReaction(payload);
+  }
+
+  public dispatchWatchPartyCommentForTesting(payload: WatchPartyCommentPayload): void {
+    this.handleIncomingWatchPartyComment(payload);
   }
 
   // --- Wallpaper & Customization ---

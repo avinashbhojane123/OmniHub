@@ -177,6 +177,7 @@ export interface WatchPartyActionPayload {
   reaction?: string;
   comment?: string;
   passcode?: string;
+  version?: number;
 }
 
 export interface WatchPartyComment {

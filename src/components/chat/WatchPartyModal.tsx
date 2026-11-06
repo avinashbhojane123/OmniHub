@@ -163,14 +163,14 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
     const isNewHostVersion = currentVersion > lastSeenVersionRef.current;
     lastSeenVersionRef.current = currentVersion;
 
-    const driftResult = calculateWatchPartyDrift(
+    const driftResult = calculateWatchPartyDrift({
       hostTime,
-      localTime,
+      participantTime: localTime,
       hostIsPlaying,
-      localIsPlaying,
-      2.0,
-      isNewHostVersion
-    );
+      participantIsPlaying: localIsPlaying,
+      toleranceSeconds: 2.0,
+      forceResync: isNewHostVersion,
+    });
 
     if (driftResult.shouldSeek) {
       setIsSynced(false);

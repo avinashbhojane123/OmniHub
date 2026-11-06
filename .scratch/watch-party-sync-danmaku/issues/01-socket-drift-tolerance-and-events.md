@@ -5,13 +5,13 @@ A robust drift calculation and socket dispatch engine for watch parties that det
 
 **Blocked by:** None (can start immediately)
 
-**Status:** resolved
+Status: resolved
 
 - [x] Provide a pure `calculateWatchPartyDrift` helper that evaluates host timestamp vs participant timestamp and returns whether a seek is required based on a 2.0-second tolerance window.
 - [x] Verify that immediate host state changes (play, pause, seek) bypass tolerance and trigger immediate synchronization.
 - [x] Ensure `ChatSocketService` reaction and comment event subscriptions reliably receive and format incoming payloads.
 - [x] Unit tests in `__tests__/ChatService.test.ts` pass verifying drift calculations and subscription dispatches.
 
-## Answer
+## Comments
 
 Implemented `calculateWatchPartyDrift` with `WatchPartyDriftResult` in `ChatSocketService.ts`, exported for use across components, with full test coverage in `__tests__/ChatService.test.ts`.

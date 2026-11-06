@@ -1,54 +1,79 @@
-# Spec: Watch Party Scrub Snapping, Version Isolation & Single Overlay Layer
+# Spec: Watch Party Socket Version Sync, Drift Parameter Refactor & Governance Alignment
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
-Two specific behavioral defects were detected during code review:
-1. When a host scrubs the playback timeline or pauses/plays, `state.version` does not increment, preventing participant players from triggering the immediate force-resync needed to snap to timeline jumps under 2 seconds.
-2. When a participant suggests a video to the queue, `state.version` mistakenly increments, falsely signaling a host scrub and triggering unwanted participant playback seeks.
-3. In `WatchPartyModal.tsx`, `<DanmakuOverlay />` is duplicated across conditional player branches instead of mounting once over a unified viewport.
-4. Git index casing discrepancy on `ChatSocketService.ts` risks breaking cross-platform builds.
+During deep code review of the Watch Party synchronization system, several architectural defects and governance inconsistencies were identified:
+1. When a host pauses, plays, seeks, or changes the video, `version` is incremented on local `this.watchParty.version`, but `version` is completely omitted from the socket emission payload (`this.socket.emit('watchPartyAction', ...)`), and `version` is missing from `WatchPartyActionPayload` in `src/types/chat.ts`. Consequently, remote participants never receive the host's incremented generation sequence across the wire, preventing participants from triggering scrub snapping under 2 seconds.
+2. `calculateWatchPartyDrift` exhibits a "Data Clumps" code smell by taking 6 loose primitive parameters (`hostTime`, `participantTime`, `hostIsPlaying`, `participantIsPlaying`, `toleranceSeconds`, `forceResync`).
+3. Testing dispatch hooks (`dispatchWatchPartyReactionForTesting` and `dispatchWatchPartyCommentForTesting`) in `ChatSocketService.ts` duplicate socket handler logic and create an unnecessary testing backdoor in production code.
+4. Issue tickets in `.scratch/watch-party-sync-danmaku/issues/` use bold formatting `**Status:** resolved` and `## Answer` sections rather than unadorned `Status: <role>` and `## Comments` conforming to `docs/agents/issue-tracker.md`.
 
 ## Solution
 
-1. **Playback Versioning Isolation**:
-   - Increment `state.version` only on playback-altering actions (`play`, `pause`, `seek`, `change_video`, `play_queue_item`).
-   - Preserve `state.version` on metadata actions (`suggest_video`, `remove_queue_item`, `toggle_host_lock`) so queue updates never interrupt playback.
-2. **Unified Player Viewport**: Wrap the player WebView and fallback state within a single `styles.playerViewport` container and mount `<DanmakuOverlay />` exactly once across all states.
-3. **Repository Casing Alignment**: Consistently track and import `src/services/chat/ChatSocketService.ts` with uppercase `C` matching all project call sites and tsconfig resolution.
-4. **Ticket Governance Compliance**: Align all issue files under `.scratch/` with `Status: resolved` and `## Answer` per `docs/agents/issue-tracker.md`.
+1. **Wire-Level Version Propagation**:
+   - Add optional `version?: number;` to `WatchPartyActionPayload` in `src/types/chat.ts`.
+   - In `ChatSocketService.watchPartyAction`, include `version: this.watchParty?.version` in the payload passed to `this.socket.emit('watchPartyAction', ...)`.
+2. **Data Clump Refactoring**:
+   - Introduce and export `WatchPartyDriftParams` interface containing `{ hostTime, participantTime, hostIsPlaying, participantIsPlaying, toleranceSeconds?, forceResync? }`.
+   - Refactor `calculateWatchPartyDrift` to accept a single `WatchPartyDriftParams` object, updating call sites in `WatchPartyModal.tsx` and unit tests in `__tests__/ChatService.test.ts`.
+3. **Event Handler Unification**:
+   - Replace testing-specific backdoors with unified public methods `handleIncomingWatchPartyReaction(payload)` and `handleIncomingWatchPartyComment(payload)`.
+   - Direct socket event listeners (`this.socket.on('watchPartyReaction')` and `this.socket.on('watchPartyComment')`) to these methods, removing duplication.
+4. **Issue Tracker Governance Compliance**:
+   - Standardize all issue ticket files to use unbolded `Status: resolved` and conversation/resolution updates under `## Comments`.
+   - Track and mark tickets for this cycle under `.scratch/watch-party-sync-danmaku/issues/`.
 
 ## User Stories
 
-1. As a watch party participant, I want my video to instantly jump to the host's position when they scrub the timeline, even for small jumps under 2 seconds.
-2. As a watch party participant, I want video playback to remain uninterrupted when someone adds a video to the "Up Next" queue, so my stream does not glitch.
-3. As a watch party host, I want my pauses, plays, and seeks to immediately enforce synchronization across all participants.
-4. As a mobile developer, I want the Danmaku overlay mounted once over a single player viewport container, avoiding duplicate component instances and unnecessary rerenders.
-5. As a developer on Linux/CI, I want consistent file casing for `ChatSocketService.ts`, so builds pass reliably across all platforms.
-6. As a workflow consumer, I want issue tracking files to correctly report `Status: resolved` with `## Answer` sections when criteria are met.
+1. As a watch party host, I want my scrub, play, and pause actions to transmit the updated playback version over the socket, so that all participants immediately snap to my exact timestamp.
+2. As a watch party participant, I want to receive the host's version counter in incoming socket updates, so that my player triggers instant resynchronization even for timeline jumps smaller than 2 seconds.
+3. As a developer maintaining `ChatSocketService`, I want drift calculations to accept a typed `WatchPartyDriftParams` object, so that coordinates and flags do not clump into loose positional arguments.
+4. As a test author, I want to invoke standard message handling methods (`handleIncomingWatchPartyReaction` and `handleIncomingWatchPartyComment`), so that test assertions exercise genuine production code paths without testing backdoor artifacts.
+5. As an agent or CI bot parsing `.scratch/` tickets, I want issue files to use unbolded `Status: <role>` headers and `## Comments` sections, so that issue parser scripts process statuses reliably.
+6. As a repository maintainer, I want `src/types/chat.ts` to strictly type the socket action payload, preventing runtime omission of protocol metadata.
 
 ## Implementation Decisions
 
-- **Version Bumping Rules**: In `ChatSocketService.watchPartyAction`, add `version: (this.watchParty.version || 0) + 1` to `play`, `pause`, and `seek` handlers. In `suggest_video` and `remove_queue_item`, omit version mutation.
-- **Single Mounting Point**: Restructure `WatchPartyModal.tsx` so `styles.playerViewport` wraps both the WebView player box and fallback stream box, hosting a single `<DanmakuOverlay />` layer at `position: 'absolute'`.
-- **Git Index Renaming**: Run `git mv` or fix index tracking so `src/services/chat/ChatSocketService.ts` is explicitly tracked with uppercase `C`.
-- **Triage Alignment**: Update all ticket files in `.scratch/watch-party-sync-danmaku/issues/` to `Status: resolved` with `## Answer`.
+- **Payload Typing**: In `src/types/chat.ts`, add `version?: number;` to `WatchPartyActionPayload`.
+- **Socket Emission**: In `ChatSocketService.watchPartyAction`, update the socket emit to:
+  ```ts
+  this.socket.emit('watchPartyAction', {
+    passcode: this.currentPasscode,
+    action,
+    version: this.watchParty?.version,
+    ...payload,
+  });
+  ```
+- **Drift Signature**: In `ChatSocketService.ts`:
+  ```ts
+  export interface WatchPartyDriftParams {
+    hostTime: number;
+    participantTime: number;
+    hostIsPlaying: boolean;
+    participantIsPlaying: boolean;
+    toleranceSeconds?: number;
+    forceResync?: boolean;
+  }
+  export function calculateWatchPartyDrift(params: WatchPartyDriftParams): WatchPartyDriftResult;
+  ```
+- **Modal Call Site**: In `WatchPartyModal.tsx`, invoke `calculateWatchPartyDrift({ hostTime, participantTime: localTime, hostIsPlaying, participantIsPlaying: localIsPlaying, toleranceSeconds: 2.0, forceResync: isNewHostVersion })`.
+- **Public Event Handlers**: Expose `public handleIncomingWatchPartyReaction(payload: WatchPartyReactionPayload): void` and `public handleIncomingWatchPartyComment(payload: WatchPartyCommentPayload): void` on `ChatSocketManager`, wired to `socket.on('watchPartyReaction')` and `socket.on('watchPartyComment')`.
+- **Issue Governance**: Strip `**` bolding from `Status: ` in all tickets and change `## Answer` to `## Comments`.
 
 ## Testing Decisions
 
-- **Test Boundaries**: Test external behavior in `__tests__/ChatService.test.ts`.
-- **Behavior to Verify**:
-  1. `watchPartyAction('seek', { currentTime: 45 })` increments `getWatchParty.version`.
-  2. `watchPartyAction('pause')` and `watchPartyAction('play')` increment `getWatchParty.version`.
-  3. `watchPartyAction('suggest_video', ...)` preserves `getWatchParty.version`.
-  4. Forced seek behaves correctly when `forceResync = true`.
+- Test all new behaviors in `__tests__/ChatService.test.ts`.
+- Verify `version` propagation: Inspect socket emit payload when `watchPartyAction('seek' | 'play' | 'pause')` is called.
+- Verify `calculateWatchPartyDrift`: Test with the new `WatchPartyDriftParams` object across all boundary cases.
+- Verify incoming reaction and comment handling via `chatSocketService.handleIncomingWatchPartyReaction` and `chatSocketService.handleIncomingWatchPartyComment`.
 
 ## Out of Scope
 
-- Redesigning the bottom controls toolbar.
-- Adding server-side WebSocket authentication middleware.
+- Changing backend database schemas.
+- Modifying UI components other than `WatchPartyModal.tsx`.
 
 ## Further Notes
 
-This cycle completes the entire hardening, alignment, and review loop for the Watch Party feature set.
+This cycle completes the hardening against code review findings and establishes strict compliance with repository standards.
