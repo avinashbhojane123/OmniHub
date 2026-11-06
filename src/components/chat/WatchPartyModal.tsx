@@ -405,74 +405,67 @@ export const WatchPartyModal: React.FC<WatchPartyModalProps> = ({
           {/* Active Player Card */}
           {state?.isActive ? (
             <View style={styles.playerCard}>
-              {/* Real Embedded Stream with Fallback */}
-              {Boolean(activeUrl) && !hasWebviewError ? (
-                <View style={styles.realPlayerBox}>
-                  <WebView
-                    ref={webViewRef}
-                    source={embedSource}
-                    style={styles.realPlayerWebView}
-                    allowsFullscreenVideo
-                    allowsInlineMediaPlayback
-                    mediaPlaybackRequiresUserAction={false}
-                    mixedContentMode="always"
-                    javaScriptEnabled
-                    domStorageEnabled
-                    onMessage={(event) => {
-                      try {
-                        const data = JSON.parse(event.nativeEvent.data);
-                        if (data.type === 'state') {
-                          localPlayerTimeRef.current = data.currentTime || 0;
-                          localIsPlayingRef.current = Boolean(data.isPlaying);
-                          if (isHost && data.isPlaying !== isPlaying) {
-                            onAction(data.isPlaying ? 'play' : 'pause');
+              {/* Real Embedded Stream with Fallback inside Unified Viewport */}
+              <View style={styles.playerViewport}>
+                {Boolean(activeUrl) && !hasWebviewError ? (
+                  <View style={styles.realPlayerBox}>
+                    <WebView
+                      ref={webViewRef}
+                      source={embedSource}
+                      style={styles.realPlayerWebView}
+                      allowsFullscreenVideo
+                      allowsInlineMediaPlayback
+                      mediaPlaybackRequiresUserAction={false}
+                      mixedContentMode="always"
+                      javaScriptEnabled
+                      domStorageEnabled
+                      onMessage={(event) => {
+                        try {
+                          const data = JSON.parse(event.nativeEvent.data);
+                          if (data.type === 'state') {
+                            localPlayerTimeRef.current = data.currentTime || 0;
+                            localIsPlayingRef.current = Boolean(data.isPlaying);
+                            if (isHost && data.isPlaying !== isPlaying) {
+                              onAction(data.isPlaying ? 'play' : 'pause');
+                            }
+                          } else if (data.type === 'player_error') {
+                            Alert.alert('Playback Notice', data.message || 'Video stream could not be loaded.');
                           }
-                        } else if (data.type === 'player_error') {
-                          Alert.alert('Playback Notice', data.message || 'Video stream could not be loaded.');
-                        }
-                      } catch {}
-                    }}
-                    onError={() => setHasWebviewError(true)}
-                    renderLoading={() => (
-                      <View style={styles.playerLoadingBox}>
-                        <ActivityIndicator size="small" color="#38BDF8" />
-                        <Text style={styles.playerLoadingText}>Loading stream...</Text>
-                      </View>
-                    )}
-                    startInLoadingState
-                  />
+                        } catch {}
+                      }}
+                      onError={() => setHasWebviewError(true)}
+                      renderLoading={() => (
+                        <View style={styles.playerLoadingBox}>
+                          <ActivityIndicator size="small" color="#38BDF8" />
+                          <Text style={styles.playerLoadingText}>Loading stream...</Text>
+                        </View>
+                      )}
+                      startInLoadingState
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.streamFallbackBox}>
+                    <Text style={styles.streamFallbackIcon}>
+                      {isPlaying ? '▶️' : '⏸️'}
+                    </Text>
+                    <Text style={styles.streamFallbackTitle}>
+                      {state.videoSource?.title || 'Shared Stream'}
+                    </Text>
+                    <Text style={styles.streamFallbackTime}>
+                      {formatTime(currentTime)}
+                    </Text>
+                  </View>
+                )}
 
-                  {/* Danmaku & Floating Reactions Overlay */}
-                  <DanmakuOverlay
-                    visible={isOverlayVisible}
-                    comments={activeComments}
-                    reactions={activeReactions}
-                    onRemoveComment={removeComment}
-                    onRemoveReaction={removeReaction}
-                  />
-                </View>
-              ) : (
-                <View style={styles.streamFallbackBox}>
-                  <Text style={styles.streamFallbackIcon}>
-                    {isPlaying ? '▶️' : '⏸️'}
-                  </Text>
-                  <Text style={styles.streamFallbackTitle}>
-                    {state.videoSource?.title || 'Shared Stream'}
-                  </Text>
-                  <Text style={styles.streamFallbackTime}>
-                    {formatTime(currentTime)}
-                  </Text>
-
-                  {/* Danmaku & Floating Reactions Overlay */}
-                  <DanmakuOverlay
-                    visible={isOverlayVisible}
-                    comments={activeComments}
-                    reactions={activeReactions}
-                    onRemoveComment={removeComment}
-                    onRemoveReaction={removeReaction}
-                  />
-                </View>
-              )}
+                {/* Single Mount Danmaku & Floating Reactions Overlay */}
+                <DanmakuOverlay
+                  visible={isOverlayVisible}
+                  comments={activeComments}
+                  reactions={activeReactions}
+                  onRemoveComment={removeComment}
+                  onRemoveReaction={removeReaction}
+                />
+              </View>
 
               {/* Toolbar: Danmaku Toggle, Re-sync Button, Sync Pill, Queue Toggle */}
               <View style={styles.toolbarRow}>
@@ -752,6 +745,11 @@ const styles = StyleSheet.create({
   playerCard: {
     alignItems: 'center',
   },
+  playerViewport: {
+    width: '100%',
+    position: 'relative',
+    marginBottom: 16,
+  },
   streamFallbackBox: {
     width: '100%',
     height: 140,
@@ -761,7 +759,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(56, 189, 248, 0.3)',
-    marginBottom: 16,
   },
   streamFallbackIcon: {
     fontSize: 32,
@@ -784,7 +781,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#000',
-    marginBottom: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },

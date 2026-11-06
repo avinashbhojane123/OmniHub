@@ -2156,13 +2156,27 @@ class ChatSocketManager {
       this.watchParty = null;
       this.notify();
     } else if (action === 'play' && this.watchParty) {
-      this.watchParty = { ...this.watchParty, isPlaying: true, currentTime: payload.currentTime ?? this.watchParty.currentTime };
+      this.watchParty = {
+        ...this.watchParty,
+        isPlaying: true,
+        currentTime: payload.currentTime ?? this.watchParty.currentTime,
+        version: (this.watchParty.version || 0) + 1,
+      };
       this.notify();
     } else if (action === 'pause' && this.watchParty) {
-      this.watchParty = { ...this.watchParty, isPlaying: false, currentTime: payload.currentTime ?? this.watchParty.currentTime };
+      this.watchParty = {
+        ...this.watchParty,
+        isPlaying: false,
+        currentTime: payload.currentTime ?? this.watchParty.currentTime,
+        version: (this.watchParty.version || 0) + 1,
+      };
       this.notify();
     } else if (action === 'seek' && this.watchParty && typeof payload.currentTime === 'number') {
-      this.watchParty = { ...this.watchParty, currentTime: payload.currentTime };
+      this.watchParty = {
+        ...this.watchParty,
+        currentTime: payload.currentTime,
+        version: (this.watchParty.version || 0) + 1,
+      };
       this.notify();
     } else if (action === 'rate' && this.watchParty && typeof payload.playbackRate === 'number') {
       this.watchParty = { ...this.watchParty, playbackRate: payload.playbackRate };
@@ -2206,7 +2220,6 @@ class ChatSocketManager {
         this.watchParty = {
           ...this.watchParty,
           queue: [...currentQueue, item],
-          version: (this.watchParty.version || 0) + 1,
         };
         this.notify();
       }

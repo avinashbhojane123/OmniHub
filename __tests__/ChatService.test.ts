@@ -301,4 +301,39 @@ describe('ChatSocketService', () => {
 
     chatSocketService.watchPartyAction('close');
   });
+
+  it('increments version on playback actions and isolates metadata from version bumping', () => {
+    chatSocketService.watchPartyAction('open', {
+      videoSource: { url: 'https://example.com/movie1.mp4', title: 'Movie 1', type: 'direct' },
+      currentTime: 0,
+      isPlaying: false,
+    });
+    const v1 = chatSocketService.getWatchParty!.version;
+
+    // Seek increments version
+    chatSocketService.watchPartyAction('seek', { currentTime: 25 });
+    const v2 = chatSocketService.getWatchParty!.version;
+    expect(v2).toBe(v1 + 1);
+
+    // Play increments version
+    chatSocketService.watchPartyAction('play');
+    const v3 = chatSocketService.getWatchParty!.version;
+    expect(v3).toBe(v2 + 1);
+
+    // Pause increments version
+    chatSocketService.watchPartyAction('pause');
+    const v4 = chatSocketService.getWatchParty!.version;
+    expect(v4).toBe(v3 + 1);
+
+    // Suggest video DOES NOT increment version (prevents spurious participant seeks)
+    chatSocketService.watchPartyAction('suggest_video', {
+      url: 'https://example.com/movie3.mp4',
+      title: 'Movie 3',
+      suggestedBy: 'Bob',
+    });
+    const v5 = chatSocketService.getWatchParty!.version;
+    expect(v5).toBe(v4);
+
+    chatSocketService.watchPartyAction('close');
+  });
 });
