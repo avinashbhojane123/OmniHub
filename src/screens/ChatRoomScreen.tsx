@@ -43,96 +43,10 @@ import { settingsRepository } from '../database/repositories/SettingsRepository'
 import { copyToClipboard } from '../utils/clipboard';
 import { WebView } from 'react-native-webview';
 import { ChatUploadModal } from '../components/chat/ChatUploadModal';
-import { chatAudioPlayerService } from '../services/chat/ChatAudioPlayerService';
+import { chatAudioPlayerService, AUDIO_BRIDGE_HTML } from '../services/chat/ChatAudioPlayerService';
 
 const WebViewComponent: any = WebView;
 
-const AUDIO_BRIDGE_HTML = `
-<!DOCTYPE html>
-<html>
-<head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:transparent;">
-  <audio id="audioEl" preload="auto" playsinline></audio>
-  <script>
-    const audio = document.getElementById('audioEl');
-
-    audio.addEventListener('loadedmetadata', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'loaded',
-          duration: audio.duration || 0
-        }));
-      }
-    });
-
-    audio.addEventListener('timeupdate', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'timeupdate',
-          currentTime: audio.currentTime || 0,
-          duration: audio.duration || 0
-        }));
-      }
-    });
-
-    audio.addEventListener('ended', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'ended'
-        }));
-      }
-    });
-
-    audio.addEventListener('error', function(e) {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'error',
-          message: 'Audio playback failed'
-        }));
-      }
-    });
-
-    function handleCommand(rawData) {
-      try {
-        const data = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-        if (data.command === 'play') {
-          audio.src = data.url;
-          audio.currentTime = 0;
-          if (data.rate) {
-            audio.playbackRate = Number(data.rate) || 1;
-          }
-          audio.play().catch(function(err) {
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'error',
-                message: err.message
-              }));
-            }
-          });
-        } else if (data.command === 'rate') {
-          audio.playbackRate = Number(data.rate) || 1;
-        } else if (data.command === 'pause') {
-          audio.pause();
-        } else if (data.command === 'resume') {
-          audio.play().catch(function() {});
-        } else if (data.command === 'stop') {
-          audio.pause();
-          audio.currentTime = 0;
-          audio.src = '';
-        }
-      } catch (err) {}
-    }
-
-    window.addEventListener('message', function(event) {
-      handleCommand(event.data);
-    });
-    document.addEventListener('message', function(event) {
-      handleCommand(event.data);
-    });
-  </script>
-</body>
-</html>
-`;
 
 const DEFAULT_SERVER_URL = 'https://omnihub-1x3r.onrender.com';
 

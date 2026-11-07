@@ -1327,19 +1327,9 @@ export const WorkspaceSelectScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  outerContainer: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 24,
-  },
-  header: {
-    alignItems: 'center',
-    marginTop: 2,
-    marginBottom: 8,
-  },
+  outerContainer: { flex: 1, paddingHorizontal: 16, },
+  scrollContent: { flexGrow: 1, paddingBottom: 24, },
+  header: { alignItems: 'center', marginTop: 2, marginBottom: 8, },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1348,11 +1338,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     paddingHorizontal: 2,
   },
-  topLeftGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  topLeftGroup: { flexDirection: 'row', alignItems: 'center', gap: 8, },
   brandPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1361,20 +1347,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
   },
-  brandIcon: {
-    fontSize: 13,
-    marginRight: 6,
-  },
-  brandText: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  topRightGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  brandIcon: { fontSize: 13, marginRight: 6, },
+  brandText: { fontSize: 12, fontWeight: '700', letterSpacing: 0.3, },
+  topRightGroup: { flexDirection: 'row', alignItems: 'center', gap: 8, },
   quickThemeBtn: {
     width: 34,
     height: 34,
@@ -1383,9 +1358,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  quickThemeBtnIcon: {
-    fontSize: 14,
-  },
+  quickThemeBtnIcon: { fontSize: 14, },
   mainTitle: {
     fontSize: 22,
     fontWeight: '800',
@@ -1402,12 +1375,7 @@ const styles = StyleSheet.create({
   },
 
   // Responsive Bento Grid Styles
-  gridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    marginVertical: 8,
-  },
+  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', marginVertical: 8, },
   gridCard: {
     borderRadius: 20,
     padding: 12,
@@ -1434,22 +1402,9 @@ const styles = StyleSheet.create({
     elevation: 12,
     zIndex: 10,
   },
-  gridCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  categoryBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-    maxWidth: '75%',
-  },
-  categoryBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
+  gridCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', },
+  categoryBadge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, maxWidth: '75%', },
+  categoryBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, },
   checkCircle: {
     width: 22,
     height: 22,
@@ -1457,14 +1412,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  checkIcon: {
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  gridCardMiddle: {
-    alignItems: 'flex-start',
-    marginVertical: 4,
-  },
+  checkIcon: { fontSize: 11, fontWeight: '900', },
+  gridCardMiddle: { alignItems: 'flex-start', marginVertical: 4, },
   gridIconCircle: {
     width: 38,
     height: 38,
@@ -1474,27 +1423,11 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     marginBottom: 6,
   },
-  gridIconEmoji: {
-    fontSize: 18,
-  },
-  titleContainer: {
-    minHeight: 36,
-    justifyContent: 'center',
-  },
-  gridCardTitle: {
-    fontSize: 13.5,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-    lineHeight: 18,
-  },
-  gridCardTagline: {
-    fontSize: 10.5,
-    marginTop: 2,
-    lineHeight: 14,
-  },
-  gridCardBottom: {
-    marginTop: 4,
-  },
+  gridIconEmoji: { fontSize: 18, },
+  titleContainer: { minHeight: 36, justifyContent: 'center', },
+  gridCardTitle: { fontSize: 13.5, fontWeight: '800', letterSpacing: -0.2, lineHeight: 18, },
+  gridCardTagline: { fontSize: 10.5, marginTop: 2, lineHeight: 14, },
+  gridCardBottom: { marginTop: 4, },
   liveTelemetryBadge: {
     paddingVertical: 3,
     paddingHorizontal: 7,
@@ -1502,14 +1435,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 6,
   },
-  liveTelemetryText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-  },
-  gridActionRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
+  liveTelemetryText: { fontSize: 10.5, fontWeight: '700', },
+  gridActionRow: { flexDirection: 'row', justifyContent: 'flex-end', },
   gridActionPill: {
     paddingHorizontal: 9,
     paddingVertical: 3.5,
@@ -1519,22 +1446,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  gridActionHint: {
-    fontSize: 10.5,
-    fontWeight: '800',
-  },
+  gridActionHint: { fontSize: 10.5, fontWeight: '800', },
 
   // Bottom Section Styles
-  bottomSection: {
-    alignItems: 'center',
-    width: '100%',
-    marginTop: 10,
-  },
-  featuresPreview: {
-    width: '100%',
-    marginBottom: 10,
-    marginTop: 2,
-  },
+  bottomSection: { alignItems: 'center', width: '100%', marginTop: 10, },
+  featuresPreview: { width: '100%', marginBottom: 10, marginTop: 2, },
   featuresPreviewTitle: {
     fontSize: 9.5,
     fontWeight: '800',
@@ -1542,11 +1458,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textTransform: 'uppercase',
   },
-  featuresRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
+  featuresRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, },
   featurePill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1556,15 +1468,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 4,
   },
-  featureDot: {
-    fontSize: 14,
-    lineHeight: 14,
-    fontWeight: '900',
-  },
-  featureText: {
-    fontSize: 10.5,
-    fontWeight: '600',
-  },
+  featureDot: { fontSize: 14, lineHeight: 14, fontWeight: '900', },
+  featureText: { fontSize: 10.5, fontWeight: '600', },
   defaultWorkspaceToggle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1584,16 +1489,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  defaultCheckmark: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '900',
-    lineHeight: 14,
-  },
-  defaultWorkspaceText: {
-    fontSize: 11.5,
-    flex: 1,
-  },
+  defaultCheckmark: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', lineHeight: 14, },
+  defaultWorkspaceText: { fontSize: 11.5, flex: 1, },
   continueButton: {
     width: '100%',
     paddingVertical: 14,
@@ -1606,12 +1503,7 @@ const styles = StyleSheet.create({
     elevation: 5,
     minHeight: 48,
   },
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
+  continueButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.3, },
 
   brandLiveBadge: {
     flexDirection: 'row',
@@ -1631,12 +1523,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#10B981',
     marginRight: 4,
   },
-  brandLiveText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#10B981',
-    letterSpacing: 0.2,
-  },
+  brandLiveText: { fontSize: 9, fontWeight: '800', color: '#10B981', letterSpacing: 0.2, },
   brandOtaBadge: {
     backgroundColor: 'rgba(139, 92, 246, 0.15)',
     paddingHorizontal: 5,
@@ -1646,12 +1533,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(139, 92, 246, 0.35)',
   },
-  brandOtaText: {
-    fontSize: 8.5,
-    fontWeight: '800',
-    color: '#8B5CF6',
-    letterSpacing: 0.2,
-  },
+  brandOtaText: { fontSize: 8.5, fontWeight: '800', color: '#8B5CF6', letterSpacing: 0.2, },
 
   // OTA Modal Styles
   otaModalBackdrop: {
@@ -1661,10 +1543,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
   },
-  otaKeyboardAvoid: {
-    width: '100%',
-    maxWidth: 440,
-  },
+  otaKeyboardAvoid: { width: '100%', maxWidth: 440, },
   otaModalContent: {
     width: '100%',
     borderRadius: 24,
@@ -1677,18 +1556,8 @@ const styles = StyleSheet.create({
     elevation: 10,
     maxHeight: '90%',
   },
-  otaModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  otaModalHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
+  otaModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, },
+  otaModalHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, },
   otaModalIconBox: {
     width: 40,
     height: 40,
@@ -1697,18 +1566,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  otaModalIcon: {
-    fontSize: 18,
-  },
-  otaModalTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  otaModalSubtitle: {
-    fontSize: 11,
-    marginTop: 1,
-  },
+  otaModalIcon: { fontSize: 18, },
+  otaModalTitle: { fontSize: 16, fontWeight: '800', letterSpacing: -0.2, },
+  otaModalSubtitle: { fontSize: 11, marginTop: 1, },
   otaModalCloseBtn: {
     width: 32,
     height: 32,
@@ -1717,15 +1577,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  otaModalCloseText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  otaModalStatusGrid: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 14,
-  },
+  otaModalCloseText: { fontSize: 14, fontWeight: '700', },
+  otaModalStatusGrid: { flexDirection: 'row', gap: 8, marginBottom: 14, },
   otaModalStatusPill: {
     flex: 1,
     paddingVertical: 8,
@@ -1742,10 +1595,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     textTransform: 'uppercase',
   },
-  otaModalStatusPillValue: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
+  otaModalStatusPillValue: { fontSize: 12, fontWeight: '800', },
   otaLiveMessageCard: {
     borderRadius: 14,
     borderWidth: 1,
@@ -1755,15 +1605,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  otaLiveMessageIcon: {
-    fontSize: 18,
-  },
-  otaLiveMessageText: {
-    fontSize: 12,
-    flex: 1,
-    lineHeight: 16,
-    fontWeight: '600',
-  },
+  otaLiveMessageIcon: { fontSize: 18, },
+  otaLiveMessageText: { fontSize: 12, flex: 1, lineHeight: 16, fontWeight: '600', },
   otaModalPrimaryBtn: {
     width: '100%',
     paddingVertical: 13,
@@ -1774,28 +1617,10 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 14,
   },
-  otaModalPrimaryBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  otaServerSection: {
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(150, 150, 150, 0.15)',
-  },
-  otaServerLabel: {
-    fontSize: 9.5,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginBottom: 6,
-  },
-  otaInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  otaModalPrimaryBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800', letterSpacing: 0.2, },
+  otaServerSection: { paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(150, 150, 150, 0.15)', },
+  otaServerLabel: { fontSize: 9.5, fontWeight: '800', letterSpacing: 0.6, marginBottom: 6, },
+  otaInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, },
   otaServerInput: {
     flex: 1,
     height: 36,
@@ -1812,17 +1637,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  otaSaveBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  otaRevertBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-  },
-  otaRevertBtnText: {
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
+  otaSaveBtnText: { fontSize: 12, fontWeight: '700', },
+  otaRevertBtn: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, },
+  otaRevertBtnText: { fontSize: 11.5, fontWeight: '700', },
 });

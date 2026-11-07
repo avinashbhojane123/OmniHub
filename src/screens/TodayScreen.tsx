@@ -36,7 +36,6 @@ import { radius, spacing } from '../theme';
 import { formatTimeTo12H } from '../utils/time';
 import { getHabitIconDetails } from '../utils/habitIcons';
 import { SETTINGS_KEYS } from '../constants/settingsKeys';
-import { googleSheetsSyncService } from '../services/backup/GoogleSheetsSyncService';
 import { syncEventBus } from '../services/backup/SyncEventBus';
 import { format, parseISO, isValid } from 'date-fns';
 
@@ -471,7 +470,6 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
       setCurrentHour(new Date().getHours());
       loadUserAndSettings();
       refreshToday(true);
-      googleSheetsSyncService.triggerAutoSyncIfEnabled().catch(() => { });
 
       if (Platform.OS === 'android') {
         alarmService

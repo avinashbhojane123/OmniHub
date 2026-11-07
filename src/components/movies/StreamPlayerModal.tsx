@@ -1458,10 +1458,7 @@ export const StreamPlayerModal: React.FC<StreamPlayerModalProps> = React.memo(
 );
 
 const styles = StyleSheet.create({
-  streamModalContainer: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
+  streamModalContainer: { flex: 1, backgroundColor: '#000000', },
   streamModalTopBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1480,30 +1477,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  streamModalCloseBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  streamModalTitleWrap: {
-    flex: 1,
-  },
-  streamModalTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  streamModalBadge: {
-    color: '#FBBF24',
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  streamModalTopActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  streamModalCloseBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: 'bold', },
+  streamModalTitleWrap: { flex: 1, },
+  streamModalTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', },
+  streamModalBadge: { color: '#FBBF24', fontSize: 11, fontWeight: '600', marginTop: 2, },
+  streamModalTopActions: { flexDirection: 'row', alignItems: 'center', gap: 8, },
   streamActionBtn: {
     width: 34,
     height: 34,
@@ -1514,15 +1492,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#262D3D',
   },
-  streamActionBtnBookmarked: {
-    backgroundColor: 'rgba(251, 191, 36, 0.2)',
-    borderColor: '#FBBF24',
-  },
-  streamActionBtnText: {
-    color: '#FBBF24',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  streamActionBtnBookmarked: { backgroundColor: 'rgba(251, 191, 36, 0.2)', borderColor: '#FBBF24', },
+  streamActionBtnText: { color: '#FBBF24', fontSize: 16, fontWeight: 'bold', },
   streamDownloadBtn: {
     width: 34,
     height: 34,
@@ -1533,9 +1504,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  streamDownloadBtnText: {
-    fontSize: 15,
-  },
+  streamDownloadBtnText: { fontSize: 15, },
   streamReloadBtn: {
     width: 34,
     height: 34,
@@ -1544,24 +1513,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  streamReloadBtnText: {
-    fontSize: 14,
-  },
-  streamPlayerBox: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    backgroundColor: '#000000',
-    position: 'relative',
-  },
-  webviewWrapper: {
-    flex: 1,
-    position: 'relative',
-    backgroundColor: '#000000',
-  },
-  streamWebview: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
+  streamReloadBtnText: { fontSize: 14, },
+  streamPlayerBox: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000000', position: 'relative', },
+  webviewWrapper: { flex: 1, position: 'relative', backgroundColor: '#000000', },
+  streamWebview: { flex: 1, backgroundColor: '#000000', },
   streamPlayerLoader: {
     position: 'absolute',
     top: 0,
@@ -1573,12 +1528,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#090B10',
     zIndex: 10,
   },
-  streamLoaderText: {
-    marginTop: 10,
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  streamLoaderText: { marginTop: 10, color: '#FFFFFF', fontSize: 13, fontWeight: '600', },
   seekZonesOverlay: {
     position: 'absolute',
     top: 0,
@@ -1588,11 +1538,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     zIndex: 15,
   },
-  seekZoneHalf: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  seekZoneHalf: { flex: 1, alignItems: 'center', justifyContent: 'center', },
   seekFeedbackBadge: {
     backgroundColor: 'rgba(0,0,0,0.8)',
     borderRadius: 24,
@@ -1603,15 +1549,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#F59E0B',
   },
-  seekFeedbackIcon: {
-    fontSize: 22,
-    marginBottom: 2,
-  },
-  seekFeedbackText: {
-    color: '#FBBF24',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
+  seekFeedbackIcon: { fontSize: 22, marginBottom: 2, },
+  seekFeedbackText: { color: '#FBBF24', fontSize: 12, fontWeight: 'bold', },
   cinemaOverlayControls: {
     position: 'absolute',
     top: 16,
@@ -1630,15 +1569,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#374151',
   },
-  cinemaExitBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  cinemaOverlayRight: {
-    flexDirection: 'row',
-    gap: 8,
-  },
+  cinemaExitBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', },
+  cinemaOverlayRight: { flexDirection: 'row', gap: 8, },
   cinemaSeekBtn: {
     backgroundColor: 'rgba(0,0,0,0.75)',
     paddingHorizontal: 10,
@@ -1647,11 +1579,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#374151',
   },
-  cinemaSeekBtnText: {
-    color: '#F9FAFB',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  cinemaSeekBtnText: { color: '#F9FAFB', fontSize: 12, fontWeight: '700', },
   resumePromptBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1662,34 +1590,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 10,
   },
-  resumePromptTitle: {
-    color: '#FBBF24',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  resumePromptSubtitle: {
-    color: '#9CA3AF',
-    fontSize: 10,
-  },
-  resumeBtn: {
-    backgroundColor: '#F59E0B',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  resumeBtnText: {
-    color: '#000000',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  resumeDismissBtn: {
-    padding: 6,
-  },
-  resumeDismissBtnText: {
-    color: '#9CA3AF',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
+  resumePromptTitle: { color: '#FBBF24', fontSize: 12, fontWeight: '800', },
+  resumePromptSubtitle: { color: '#9CA3AF', fontSize: 10, },
+  resumeBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, },
+  resumeBtnText: { color: '#000000', fontSize: 12, fontWeight: '800', },
+  resumeDismissBtn: { padding: 6, },
+  resumeDismissBtnText: { color: '#9CA3AF', fontSize: 14, fontWeight: 'bold', },
   mirrorNoticeBar: {
     backgroundColor: '#141824',
     paddingHorizontal: 12,
@@ -1697,12 +1603,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#1E2433',
   },
-  mirrorNoticeText: {
-    color: '#9CA3AF',
-    fontSize: 10,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+  mirrorNoticeText: { color: '#9CA3AF', fontSize: 10, fontWeight: '600', textAlign: 'center', },
   playerToolbar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1724,38 +1625,13 @@ const styles = StyleSheet.create({
     borderColor: '#262D3D',
     minWidth: 46,
   },
-  toolBtnActive: {
-    borderColor: '#E11D48',
-    backgroundColor: 'rgba(225, 29, 72, 0.15)',
-  },
-  toolBtnNextEp: {
-    borderColor: '#10B981',
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-  },
-  toolBtnIcon: {
-    fontSize: 14,
-  },
-  toolBtnLabel: {
-    color: '#9CA3AF',
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  toolBtnLabelActive: {
-    color: '#E11D48',
-  },
-  toolBtnLabelNextEp: {
-    color: '#10B981',
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  streamControlsScroll: {
-    flex: 1,
-    backgroundColor: '#090B10',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
+  toolBtnActive: { borderColor: '#E11D48', backgroundColor: 'rgba(225, 29, 72, 0.15)', },
+  toolBtnNextEp: { borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.15)', },
+  toolBtnIcon: { fontSize: 14, },
+  toolBtnLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '700', marginTop: 2, },
+  toolBtnLabelActive: { color: '#E11D48', },
+  toolBtnLabelNextEp: { color: '#10B981', fontSize: 10, fontWeight: '700', marginTop: 2, },
+  streamControlsScroll: { flex: 1, backgroundColor: '#090B10', paddingHorizontal: 16, paddingTop: 12, },
   streamSectionLabel: {
     color: '#9CA3AF',
     fontSize: 11,
@@ -1772,10 +1648,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1E2433',
   },
-  selectorPillsRow: {
-    gap: 8,
-    paddingVertical: 2,
-  },
+  selectorPillsRow: { gap: 8, paddingVertical: 2, },
   selectorPill: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1784,32 +1657,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#262D3D',
   },
-  selectorPillActive: {
-    backgroundColor: '#E11D48',
-    borderColor: '#E11D48',
-  },
-  selectorPillText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  selectorPillTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  serversSection: {
-    marginBottom: 16,
-  },
-  serversHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  serversHint: {
-    color: '#6B7280',
-    fontSize: 11,
-    marginBottom: 8,
-  },
+  selectorPillActive: { backgroundColor: '#E11D48', borderColor: '#E11D48', },
+  selectorPillText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600', },
+  selectorPillTextActive: { color: '#FFFFFF', fontWeight: '700', },
+  serversSection: { marginBottom: 16, },
+  serversHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', },
+  serversHint: { color: '#6B7280', fontSize: 11, marginBottom: 8, },
   serverCard: {
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1820,29 +1673,11 @@ const styles = StyleSheet.create({
     marginRight: 2,
     minWidth: 110,
   },
-  serverCardActive: {
-    backgroundColor: '#1E2433',
-    borderColor: '#E11D48',
-    borderWidth: 1.5,
-  },
-  serverCardName: {
-    color: '#E5E7EB',
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  serverCardNameActive: {
-    color: '#FFFFFF',
-  },
-  serverCardBadge: {
-    color: '#9CA3AF',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  serverCardBadgeActive: {
-    color: '#F43F5E',
-    fontWeight: '700',
-  },
+  serverCardActive: { backgroundColor: '#1E2433', borderColor: '#E11D48', borderWidth: 1.5, },
+  serverCardName: { color: '#E5E7EB', fontSize: 12, fontWeight: '700', marginBottom: 2, },
+  serverCardNameActive: { color: '#FFFFFF', },
+  serverCardBadge: { color: '#9CA3AF', fontSize: 10, fontWeight: '600', },
+  serverCardBadgeActive: { color: '#F43F5E', fontWeight: '700', },
   adShieldCard: {
     backgroundColor: '#121620',
     borderRadius: 14,
@@ -1851,25 +1686,10 @@ const styles = StyleSheet.create({
     borderColor: '#1E2433',
     marginBottom: 20,
   },
-  adShieldHeader: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 10,
-  },
-  adShieldIcon: {
-    fontSize: 22,
-  },
-  adShieldTitle: {
-    color: '#10B981',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  adShieldDesc: {
-    color: '#9CA3AF',
-    fontSize: 11,
-    lineHeight: 16,
-  },
+  adShieldHeader: { flexDirection: 'row', gap: 10, marginBottom: 10, },
+  adShieldIcon: { fontSize: 22, },
+  adShieldTitle: { color: '#10B981', fontSize: 13, fontWeight: '700', marginBottom: 2, },
+  adShieldDesc: { color: '#9CA3AF', fontSize: 11, lineHeight: 16, },
   streamInfoMetaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1879,17 +1699,8 @@ const styles = StyleSheet.create({
     borderTopColor: '#1A1E29',
     paddingTop: 10,
   },
-  metaChip: {
-    backgroundColor: '#161B26',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  metaChipText: {
-    color: '#9CA3AF',
-    fontSize: 10,
-    fontWeight: '600',
-  },
+  metaChip: { backgroundColor: '#161B26', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, },
+  metaChipText: { color: '#9CA3AF', fontSize: 10, fontWeight: '600', },
   openExternalLinkBtn: {
     marginLeft: 'auto',
     paddingHorizontal: 10,
@@ -1897,11 +1708,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#1E2433',
   },
-  openExternalLinkText: {
-    color: '#FBBF24',
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  openExternalLinkText: { color: '#FBBF24', fontSize: 11, fontWeight: '700', },
   streamErrorOverlay: {
     position: 'absolute',
     top: 0,
@@ -1914,10 +1721,7 @@ const styles = StyleSheet.create({
     padding: 20,
     zIndex: 20,
   },
-  streamErrorIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
+  streamErrorIcon: { fontSize: 32, marginBottom: 8, },
   streamErrorTitle: {
     color: '#EF4444',
     fontSize: 16,
@@ -1939,11 +1743,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 10,
   },
-  switchMirrorBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 13,
-  },
+  switchMirrorBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13, },
   dnsTipText: {
     color: '#9CA3AF',
     fontSize: 11,
@@ -1951,15 +1751,8 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     maxWidth: 280,
   },
-  languageSection: {
-    marginBottom: 16,
-  },
-  resetLangText: {
-    color: '#F59E0B',
-    fontSize: 11,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
+  languageSection: { marginBottom: 16, },
+  resetLangText: { color: '#F59E0B', fontSize: 11, fontWeight: '700', marginBottom: 8, },
   streamLangNotice: {
     color: '#9CA3AF',
     fontSize: 11,
@@ -1976,18 +1769,7 @@ const styles = StyleSheet.create({
     borderColor: '#1E2433',
     marginRight: 2,
   },
-  languagePillActive: {
-    backgroundColor: '#1E2433',
-    borderColor: '#F59E0B',
-    borderWidth: 1.5,
-  },
-  languagePillText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  languagePillTextActive: {
-    color: '#FBBF24',
-    fontWeight: '700',
-  },
+  languagePillActive: { backgroundColor: '#1E2433', borderColor: '#F59E0B', borderWidth: 1.5, },
+  languagePillText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600', },
+  languagePillTextActive: { color: '#FBBF24', fontWeight: '700', },
 });

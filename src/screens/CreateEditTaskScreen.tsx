@@ -34,7 +34,7 @@ import { taskService } from '../services/tasks/TaskService';
 import { DateTimePickerModal } from '../components/DateTimePickerModal';
 import { CreateCategoryModal } from '../components/CreateCategoryModal';
 import { ConflictBanner } from '../components/ConflictBanner';
-import { formatTimeTo12H, parseTimeToMinutes } from '../utils/time';
+import { formatTimeTo12H, parseTimeToMinutes, addMinutesToTime } from '../utils/time';
 
 interface RouteParams {
   taskId?: string;
@@ -73,22 +73,6 @@ function getNextUpcomingHourTime(): string {
   return `${String(nextH).padStart(2, '0')}:00`;
 }
 
-function addMinutesToTime(timeStr: string, minutesToAdd: number): { time: string; isOvernight: boolean } {
-  const baseM = parseTimeToMinutes(timeStr);
-  if (baseM === null) return { time: '10:00', isOvernight: false };
-  const targetM = baseM + minutesToAdd;
-  if (targetM >= 1440) {
-    const nextDayM = targetM - 1440;
-    return {
-      time: `${String(Math.floor(nextDayM / 60)).padStart(2, '0')}:${String(nextDayM % 60).padStart(2, '0')}`,
-      isOvernight: true,
-    };
-  }
-  return {
-    time: `${String(Math.floor(targetM / 60)).padStart(2, '0')}:${String(targetM % 60).padStart(2, '0')}`,
-    isOvernight: false,
-  };
-}
 
 const TASK_ACCENT_COLORS = [
   { color: undefined, label: 'Default' },
@@ -2049,9 +2033,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-  },
+  safeArea: { flex: 1, },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2067,25 +2049,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  navButtonIcon: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  navTitleContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navTitle: {
-    fontWeight: '800',
-    fontSize: 17,
-    letterSpacing: -0.2,
-  },
-  navSubtitle: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginTop: 2,
-  },
+  navButtonIcon: { fontSize: 15, fontWeight: '700', },
+  navTitleContainer: { alignItems: 'center', justifyContent: 'center', },
+  navTitle: { fontWeight: '800', fontSize: 17, letterSpacing: -0.2, },
+  navSubtitle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginTop: 2, },
   saveBtn: {
     paddingHorizontal: spacing.lg,
     paddingVertical: 9,
@@ -2095,19 +2062,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
   },
-  saveBtnText: {
-    color: '#FFF',
-    fontWeight: '700',
-    fontSize: 14,
-    letterSpacing: 0.2,
-  },
-  keyboardAvoid: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
+  saveBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14, letterSpacing: 0.2, },
+  keyboardAvoid: { flex: 1, },
+  scrollContent: { padding: spacing.lg, gap: spacing.md, },
   cardContainer: {
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -2124,11 +2081,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  sectionHeaderTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
+  sectionHeaderTitleGroup: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, },
   sectionIconBadge: {
     width: 28,
     height: 28,
@@ -2136,23 +2089,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sectionIconEmoji: {
-    fontSize: 14,
-  },
-  cardHeaderLabel: {
-    fontWeight: '800',
-    fontSize: 11,
-    letterSpacing: 0.8,
-  },
-  charBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.full,
-  },
-  charCountText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
+  sectionIconEmoji: { fontSize: 14, },
+  cardHeaderLabel: { fontWeight: '800', fontSize: 11, letterSpacing: 0.8, },
+  charBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, },
+  charCountText: { fontSize: 10, fontWeight: '700', },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2161,37 +2101,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: Platform.OS === 'ios' ? 10 : 4,
   },
-  titleInput: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    paddingVertical: 6,
-  },
-  clearBtn: {
-    padding: spacing.xs,
-    marginLeft: spacing.xs,
-  },
-  clearBtnIcon: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  fieldErrorText: {
-    fontSize: 11,
-    marginTop: 6,
-    fontWeight: '600',
-  },
-  cardDivider: {
-    height: 1,
-    marginVertical: spacing.md,
-  },
-  subFieldHeaderRow: {
-    marginBottom: spacing.xs,
-  },
-  subFieldLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
+  titleInput: { flex: 1, fontSize: 16, fontWeight: '700', paddingVertical: 6, },
+  clearBtn: { padding: spacing.xs, marginLeft: spacing.xs, },
+  clearBtnIcon: { fontSize: 13, fontWeight: '700', },
+  fieldErrorText: { fontSize: 11, marginTop: 6, fontWeight: '600', },
+  cardDivider: { height: 1, marginVertical: spacing.md, },
+  subFieldHeaderRow: { marginBottom: spacing.xs, },
+  subFieldLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, },
   notesWrapper: {
     borderRadius: radius.md,
     borderWidth: 1,
@@ -2199,12 +2115,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     minHeight: 110,
   },
-  notesInput: {
-    fontSize: 14,
-    minHeight: 90,
-    textAlignVertical: 'top',
-    lineHeight: 20,
-  },
+  notesInput: { fontSize: 14, minHeight: 90, textAlignVertical: 'top', lineHeight: 20, },
   dateHeroTile: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2213,12 +2124,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
   },
-  dateTileLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    flex: 1,
-  },
+  dateTileLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1, },
   dateIconSquircle: {
     width: 44,
     height: 44,
@@ -2226,31 +2132,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dateSquircleEmoji: {
-    fontSize: 20,
-  },
-  dateTileTextCol: {
-    flex: 1,
-  },
-  dateTileSublabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    marginBottom: 2,
-  },
-  dateTileValue: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  changeDatePill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radius.full,
-  },
-  changeDatePillText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  dateSquircleEmoji: { fontSize: 20, },
+  dateTileTextCol: { flex: 1, },
+  dateTileSublabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.6, marginBottom: 2, },
+  dateTileValue: { fontSize: 15, fontWeight: '700', },
+  changeDatePill: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.full, },
+  changeDatePillText: { fontSize: 12, fontWeight: '700', },
   timingSegmentContainer: {
     flexDirection: 'row',
     borderRadius: radius.md,
@@ -2272,14 +2159,8 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  timingSegmentText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  timingSegmentTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
+  timingSegmentText: { fontSize: 13, fontWeight: '700', },
+  timingSegmentTextActive: { color: '#FFFFFF', fontWeight: '800', },
   allDayHeroBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2289,59 +2170,18 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginTop: spacing.xs,
   },
-  allDayHeroEmoji: {
-    fontSize: 24,
-  },
-  allDayHeroTextCol: {
-    flex: 1,
-  },
-  allDayHeroTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  allDayHeroSubtitle: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  timeSlotsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  timeTile: {
-    flex: 1,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-  },
-  timeTileHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  timeTileLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
-  clearEndPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.xs,
-  },
-  clearEndPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  timeTileTouchArea: {
-    marginTop: 2,
-  },
-  timeTileValue: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  allDayHeroEmoji: { fontSize: 24, },
+  allDayHeroTextCol: { flex: 1, },
+  allDayHeroTitle: { fontSize: 14, fontWeight: '700', },
+  allDayHeroSubtitle: { fontSize: 12, fontWeight: '500', marginTop: 2, },
+  timeSlotsRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md, },
+  timeTile: { flex: 1, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, },
+  timeTileHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, },
+  timeTileLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.6, },
+  clearEndPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.xs, },
+  clearEndPillText: { fontSize: 10, fontWeight: '700', },
+  timeTileTouchArea: { marginTop: 2, },
+  timeTileValue: { fontSize: 14, fontWeight: '700', },
   durationSummaryCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2351,28 +2191,12 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     gap: spacing.sm,
   },
-  durationSummaryIcon: {
-    fontSize: 18,
-  },
-  durationSummaryTextCol: {
-    flex: 1,
-  },
-  durationSummaryTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  durationSummarySub: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  presetsSection: {
-    marginTop: spacing.md,
-  },
-  presetsScroll: {
-    gap: spacing.xs,
-    paddingVertical: 2,
-  },
+  durationSummaryIcon: { fontSize: 18, },
+  durationSummaryTextCol: { flex: 1, },
+  durationSummaryTitle: { fontSize: 13, fontWeight: '700', },
+  durationSummarySub: { fontSize: 11, fontWeight: '500', marginTop: 2, },
+  presetsSection: { marginTop: spacing.md, },
+  presetsScroll: { gap: spacing.xs, paddingVertical: 2, },
   presetChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -2381,10 +2205,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  presetChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  presetChipText: { fontSize: 12, fontWeight: '700', },
   overnightCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2395,27 +2216,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: spacing.sm,
   },
-  overnightIcon: {
-    fontSize: 16,
-  },
-  overnightLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  overnightSubtext: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  overnightBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.xs,
-  },
-  categoryScrollContainer: {
-    gap: spacing.sm,
-    paddingVertical: 2,
-  },
+  overnightIcon: { fontSize: 16, },
+  overnightLabel: { fontSize: 12, fontWeight: '600', },
+  overnightSubtext: { fontSize: 11, fontWeight: '500', marginTop: 2, },
+  overnightBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.xs, },
+  categoryScrollContainer: { gap: spacing.sm, paddingVertical: 2, },
   categoryChip: {
     paddingHorizontal: spacing.md,
     paddingVertical: 9,
@@ -2424,18 +2229,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  categoryChipDashed: {
-    borderStyle: 'dashed',
-  },
-  categoryChipText: {
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  statusChipsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
+  categoryChipDashed: { borderStyle: 'dashed', },
+  categoryChipText: { fontWeight: '700', fontSize: 12, },
+  statusChipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, },
   statusChipItem: {
     flex: 1,
     minWidth: '45%',
@@ -2447,10 +2243,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
   },
-  statusChipItemText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  statusChipItemText: { fontSize: 13, fontWeight: '700', },
   metadataCard: {
     marginTop: spacing.xs,
     padding: spacing.md,
@@ -2458,10 +2251,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
   },
-  metadataText: {
-    fontSize: 11,
-    fontWeight: '500',
-  },
+  metadataText: { fontSize: 11, fontWeight: '500', },
   deleteCardButton: {
     borderWidth: 1,
     borderRadius: radius.md,
@@ -2469,8 +2259,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.xs,
   },
-  deleteButtonLabel: {
-    fontWeight: '700',
-    fontSize: 14,
-  },
+  deleteButtonLabel: { fontWeight: '700', fontSize: 14, },
 });

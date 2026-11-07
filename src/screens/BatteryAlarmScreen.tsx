@@ -1345,24 +1345,10 @@ export const BatteryAlarmScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-  },
-  responsiveContainer: {
-    width: '100%',
-    maxWidth: 600,
-    alignSelf: 'center',
-    gap: 14,
-  },
-  topHeader: {
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  safeArea: { flex: 1, },
+  responsiveContainer: { width: '100%', maxWidth: 600, alignSelf: 'center', gap: 14, },
+  topHeader: { paddingHorizontal: 16, paddingBottom: 10, },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 8, },
   backButton: {
     width: 36,
     height: 36,
@@ -1371,11 +1357,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backButtonText: {
-    fontSize: 22,
-    fontWeight: '600',
-    marginTop: -2,
-  },
+  backButtonText: { fontSize: 22, fontWeight: '600', marginTop: -2, },
   brandPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1385,35 +1367,12 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
   },
-  brandIcon: {
-    fontSize: 15,
-    marginRight: 4,
-  },
-  brandTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#10B981',
-    letterSpacing: 0.3,
-  },
-  quickNavScroll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingLeft: 4,
-  },
-  navPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-  },
-  navPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-  },
+  brandIcon: { fontSize: 15, marginRight: 4, },
+  brandTitle: { fontSize: 13, fontWeight: '800', color: '#10B981', letterSpacing: 0.3, },
+  quickNavScroll: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 4, },
+  navPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, },
+  navPillText: { fontSize: 12, fontWeight: '700', color: '#94A3B8', },
+  scrollContent: { paddingHorizontal: 16, },
   activeAlarmBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1431,30 +1390,11 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: 8,
   },
-  activeAlarmIcon: {
-    fontSize: 24,
-  },
-  activeAlarmTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#EF4444',
-  },
-  activeAlarmSub: {
-    fontSize: 12,
-    color: '#F87171',
-    marginTop: 2,
-  },
-  stopAlarmBtn: {
-    backgroundColor: '#EF4444',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  stopAlarmBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 12,
-  },
+  activeAlarmIcon: { fontSize: 24, },
+  activeAlarmTitle: { fontSize: 15, fontWeight: '800', color: '#EF4444', },
+  activeAlarmSub: { fontSize: 12, color: '#F87171', marginTop: 2, },
+  stopAlarmBtn: { backgroundColor: '#EF4444', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, },
+  stopAlarmBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12, },
   masterBanner: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1470,18 +1410,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: 8,
   },
-  masterIcon: {
-    fontSize: 26,
-  },
-  masterTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  masterSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
-    lineHeight: 16,
-  },
+  masterIcon: { fontSize: 26, },
+  masterTitle: { fontSize: 15, fontWeight: '800', },
+  masterSubtitle: { fontSize: 12, marginTop: 2, lineHeight: 16, },
   heroCard: {
     borderRadius: 24,
     borderWidth: 1,
@@ -1509,9 +1440,7 @@ const styles = StyleSheet.create({
     height: 190,
     alignItems: 'center',
   },
-  radialTick: {
-    marginTop: 1,
-  },
+  radialTick: { marginTop: 1, },
   circleInnerContent: {
     width: 140,
     height: 140,
@@ -1525,38 +1454,13 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
-  boltWrapper: {
-    marginBottom: 2,
-  },
-  boltEmoji: {
-    fontSize: 24,
-  },
-  bigPercent: {
-    fontSize: 38,
-    fontWeight: '900',
-    letterSpacing: -1,
-  },
-  statusPillText: {
-    fontSize: 10,
-    fontWeight: '800',
-    marginTop: 2,
-    letterSpacing: 0.5,
-  },
-  linearBarContainer: {
-    width: '100%',
-    marginTop: 14,
-    paddingHorizontal: 4,
-  },
-  linearBarTrack: {
-    height: 8,
-    borderRadius: 4,
-    width: '100%',
-    position: 'relative',
-  },
-  linearBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
+  boltWrapper: { marginBottom: 2, },
+  boltEmoji: { fontSize: 24, },
+  bigPercent: { fontSize: 38, fontWeight: '900', letterSpacing: -1, },
+  statusPillText: { fontSize: 10, fontWeight: '800', marginTop: 2, letterSpacing: 0.5, },
+  linearBarContainer: { width: '100%', marginTop: 14, paddingHorizontal: 4, },
+  linearBarTrack: { height: 8, borderRadius: 4, width: '100%', position: 'relative', },
+  linearBarFill: { height: '100%', borderRadius: 4, },
   targetPin: {
     position: 'absolute',
     top: -2,
@@ -1574,20 +1478,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#10B981',
     marginTop: -8,
   },
-  targetPinLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  linearBarLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  targetPinLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  targetPinLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, },
+  linearBarLabel: { fontSize: 11, fontWeight: '600', },
+  targetPinLabel: { fontSize: 11, fontWeight: '700', },
   estimateBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1598,13 +1491,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 6,
   },
-  estimateIcon: {
-    fontSize: 14,
-  },
-  estimateText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  estimateIcon: { fontSize: 14, },
+  estimateText: { fontSize: 13, fontWeight: '600', },
   sessionBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1615,12 +1503,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     gap: 6,
   },
-  sessionIcon: {
-    fontSize: 13,
-  },
-  sessionText: {
-    fontSize: 12,
-  },
+  sessionIcon: { fontSize: 13, },
+  sessionText: { fontSize: 12, },
   metricsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1635,31 +1519,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
   },
-  metricLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#94A3B8',
-    marginBottom: 4,
-  },
-  metricValue: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  metricSub: {
-    fontSize: 11,
-    marginTop: 2,
-    fontWeight: '600',
-  },
-  configCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 16,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
+  metricLabel: { fontSize: 12, fontWeight: '600', color: '#94A3B8', marginBottom: 4, },
+  metricValue: { fontSize: 16, fontWeight: '800', },
+  metricSub: { fontSize: 11, marginTop: 2, fontWeight: '600', },
+  configCard: { borderRadius: 20, borderWidth: 1, padding: 16, },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', },
   cardHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1674,39 +1538,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconBadgeText: {
-    fontSize: 22,
-  },
-  cardHeaderTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  cardHeaderSub: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  targetSection: {
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  targetHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  targetLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
+  iconBadgeText: { fontSize: 22, },
+  cardHeaderTitle: { fontSize: 16, fontWeight: '800', },
+  cardHeaderSub: { fontSize: 12, marginTop: 2, },
+  targetSection: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.08)', },
+  targetHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, },
+  targetLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, },
+  stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 6, },
   stepperBtn: {
     width: 28,
     height: 28,
@@ -1714,15 +1552,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepperBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  equalPillsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    width: '100%',
-  },
+  stepperBtnText: { fontSize: 16, fontWeight: '700', },
+  equalPillsRow: { flexDirection: 'row', gap: 6, width: '100%', },
   equalTargetPill: {
     flex: 1,
     paddingVertical: 10,
@@ -1731,18 +1562,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  targetPillActive: {
-    backgroundColor: '#10B981',
-    borderColor: '#10B981',
-  },
-  targetPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  targetPillTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
+  targetPillActive: { backgroundColor: '#10B981', borderColor: '#10B981', },
+  targetPillText: { fontSize: 12, fontWeight: '700', },
+  targetPillTextActive: { color: '#FFFFFF', fontWeight: '800', },
   alreadyReachedBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1754,10 +1576,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     gap: 6,
   },
-  alreadyReachedIcon: {
-    fontSize: 14,
-    marginTop: 1,
-  },
+  alreadyReachedIcon: { fontSize: 14, marginTop: 1, },
   alreadyReachedText: {
     fontSize: 11,
     color: '#F59E0B',
@@ -1774,16 +1593,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     gap: 8,
   },
-  tipIcon: {
-    fontSize: 16,
-    marginTop: 1,
-  },
-  tipText: {
-    fontSize: 12,
-    color: '#94A3B8',
-    flex: 1,
-    lineHeight: 18,
-  },
+  tipIcon: { fontSize: 16, marginTop: 1, },
+  tipText: { fontSize: 12, color: '#94A3B8', flex: 1, lineHeight: 18, },
   subSettingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1793,52 +1604,21 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.06)',
   },
-  subSettingTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  subSettingDesc: {
-    fontSize: 11,
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  tempNote: {
-    fontSize: 11,
-    marginTop: 8,
-    lineHeight: 15,
-  },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
-    marginBottom: 14,
-  },
+  subSettingTitle: { fontSize: 13, fontWeight: '700', },
+  subSettingDesc: { fontSize: 11, marginTop: 2, lineHeight: 15, },
+  tempNote: { fontSize: 11, marginTop: 8, lineHeight: 15, },
+  sectionTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 14, },
   settingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 6,
   },
-  settingTextCol: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  settingLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  settingDesc: {
-    fontSize: 12,
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  divider: {
-    height: 1,
-    marginVertical: 10,
-  },
-  actionButtonsCol: {
-    gap: 12,
-  },
+  settingTextCol: { flex: 1, paddingRight: 12, },
+  settingLabel: { fontSize: 14, fontWeight: '700', },
+  settingDesc: { fontSize: 12, marginTop: 2, lineHeight: 16, },
+  divider: { height: 1, marginVertical: 10, },
+  actionButtonsCol: { gap: 12, },
   stopButtonLarge: {
     paddingVertical: 16,
     borderRadius: 18,
@@ -1850,12 +1630,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  stopButtonLargeText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
+  stopButtonLargeText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.3, },
   testButton: {
     paddingVertical: 16,
     borderRadius: 18,
@@ -1867,16 +1642,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  testButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  testSubRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
+  testButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.3, },
+  testSubRow: { flexDirection: 'row', gap: 10, },
   testSubButton: {
     flex: 1,
     paddingVertical: 13,
@@ -1889,12 +1656,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
-  testSubButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
+  testSubButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800', letterSpacing: 0.2, },
   silentWarningBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1906,9 +1668,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 8,
   },
-  silentWarningIcon: {
-    fontSize: 18,
-  },
+  silentWarningIcon: { fontSize: 18, },
   silentWarningText: {
     fontSize: 12,
     color: '#F59E0B',

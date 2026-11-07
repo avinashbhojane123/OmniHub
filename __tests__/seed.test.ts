@@ -10,8 +10,7 @@ import {
   seedDatabase,
   SeedDatabaseExecutor,
 } from '../src/database/seed';
-import { SETTINGS_KEYS } from '../src/constants/settingsKeys';
-import { DEFAULT_GOOGLE_SHEET_WEBHOOK_URL } from '../src/services/backup/GoogleSheetsSyncService';
+import { SETTINGS_KEYS, DEFAULT_GOOGLE_SHEET_WEBHOOK_URL } from '../src/constants/settingsKeys';
 
 describe('Database Seed Module (seed.ts)', () => {
   describe('1. DEFAULT_CATEGORIES & Category Factories', () => {

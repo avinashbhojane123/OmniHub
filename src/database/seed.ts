@@ -1,6 +1,5 @@
 import { Category } from '../types';
-import { SETTINGS_KEYS } from '../constants/settingsKeys';
-import { DEFAULT_GOOGLE_SHEET_WEBHOOK_URL } from '../services/backup/GoogleSheetsSyncService';
+import { SETTINGS_KEYS, DEFAULT_GOOGLE_SHEET_WEBHOOK_URL } from '../constants/settingsKeys';
 
 /**
  * Minimal database executor contract to avoid circular dependencies with DatabaseAdapter.

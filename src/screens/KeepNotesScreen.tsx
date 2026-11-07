@@ -1398,9 +1398,7 @@ export const KeepNotesScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
+  screen: { flex: 1, },
   searchBarWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1417,12 +1415,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backBtnText: {
-    fontSize: 24,
-    fontWeight: '400',
-    lineHeight: 26,
-    marginLeft: -2,
-  },
+  backBtnText: { fontSize: 24, fontWeight: '400', lineHeight: 26, marginLeft: -2, },
   searchBarPill: {
     flex: 1,
     flexDirection: 'row',
@@ -1437,29 +1430,12 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  searchIcon: {
-    fontSize: 16,
-    marginRight: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    paddingVertical: 0,
-  },
-  clearSearchBtn: {
-    padding: 6,
-  },
-  clearSearchIcon: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  viewToggleBtn: {
-    padding: 6,
-    marginLeft: 6,
-  },
-  viewToggleIcon: {
-    fontSize: 18,
-  },
+  searchIcon: { fontSize: 16, marginRight: 10, },
+  searchInput: { flex: 1, fontSize: 15, paddingVertical: 0, },
+  clearSearchBtn: { padding: 6, },
+  clearSearchIcon: { fontSize: 14, fontWeight: '700', },
+  viewToggleBtn: { padding: 6, marginLeft: 6, },
+  viewToggleIcon: { fontSize: 18, },
   selectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1468,27 +1444,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
-  selHeaderBtn: {
-    padding: 6,
-  },
-  selCloseIcon: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  selCountText: {
-    fontSize: 17,
-    fontWeight: '700',
-    flex: 1,
-    marginLeft: 12,
-  },
-  selActionGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  selActionIcon: {
-    fontSize: 18,
-  },
+  selHeaderBtn: { padding: 6, },
+  selCloseIcon: { fontSize: 18, fontWeight: '700', },
+  selCountText: { fontSize: 17, fontWeight: '700', flex: 1, marginLeft: 12, },
+  selActionGroup: { flexDirection: 'row', alignItems: 'center', gap: 8, },
+  selActionIcon: { fontSize: 18, },
   batchColorOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
@@ -1516,22 +1476,10 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     marginBottom: 4,
   },
-  colorPickerModalTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  clearFilterModalText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  tabScrollContainer: {
-    paddingVertical: 8,
-  },
-  tabScrollContent: {
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    gap: 8,
-  },
+  colorPickerModalTitle: { fontSize: 14, fontWeight: '700', },
+  clearFilterModalText: { fontSize: 13, fontWeight: '700', },
+  tabScrollContainer: { paddingVertical: 8, },
+  tabScrollContent: { paddingHorizontal: 16, flexDirection: 'row', gap: 8, },
   tabChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1541,13 +1489,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     gap: 6,
   },
-  tabIcon: {
-    fontSize: 13,
-  },
-  tabLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  tabIcon: { fontSize: 13, },
+  tabLabel: { fontSize: 13, fontWeight: '600', },
   trashNoticeBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1558,46 +1501,15 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 8,
   },
-  trashNoticeText: {
-    fontSize: 12.5,
-    fontWeight: '500',
-  },
-  emptyTrashBtnText: {
-    color: '#EF4444',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  feedScroll: {
-    flex: 1,
-  },
-  feedContent: {
-    paddingHorizontal: 14,
-    paddingTop: 6,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 80,
-    paddingHorizontal: 32,
-  },
-  emptyIcon: {
-    fontSize: 56,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  sectionContainer: {
-    marginBottom: 16,
-  },
+  trashNoticeText: { fontSize: 12.5, fontWeight: '500', },
+  emptyTrashBtnText: { color: '#EF4444', fontSize: 13, fontWeight: '700', },
+  feedScroll: { flex: 1, },
+  feedContent: { paddingHorizontal: 14, paddingTop: 6, },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 32, },
+  emptyIcon: { fontSize: 56, marginBottom: 16, },
+  emptyTitle: { fontSize: 18, fontWeight: '700', marginBottom: 6, textAlign: 'center', },
+  emptySubtitle: { fontSize: 14, textAlign: 'center', lineHeight: 20, },
+  sectionContainer: { marginBottom: 16, },
   sectionHeading: {
     fontSize: 11,
     fontWeight: '700',
@@ -1606,22 +1518,10 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     textTransform: 'uppercase',
   },
-  masonryRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  masonryCol: {
-    flex: 1,
-  },
-  listCol: {
-    gap: 10,
-  },
-  bottomDockWrapper: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 99,
-  },
+  masonryRow: { flexDirection: 'row', gap: 10, },
+  masonryCol: { flex: 1, },
+  listCol: { gap: 10, },
+  bottomDockWrapper: { position: 'absolute', left: 16, right: 16, zIndex: 99, },
   bottomDock: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1637,26 +1537,11 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
-  takeNotePill: {
-    flex: 1,
-    paddingVertical: 6,
-  },
-  takeNoteText: {
-    fontSize: 14.5,
-    fontWeight: '500',
-  },
-  dockIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  dockIconBtn: {
-    padding: 8,
-    borderRadius: 18,
-  },
-  dockIconText: {
-    fontSize: 18,
-  },
+  takeNotePill: { flex: 1, paddingVertical: 6, },
+  takeNoteText: { fontSize: 14.5, fontWeight: '500', },
+  dockIcons: { flexDirection: 'row', alignItems: 'center', gap: 6, },
+  dockIconBtn: { padding: 8, borderRadius: 18, },
+  dockIconText: { fontSize: 18, },
   emptyCtaBtn: {
     marginTop: 18,
     paddingHorizontal: 18,
@@ -1668,17 +1553,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  emptyCtaText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  snackbarWrapper: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    zIndex: 150,
-  },
+  emptyCtaText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', },
+  snackbarWrapper: { position: 'absolute', left: 20, right: 20, zIndex: 150, },
   snackbarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1699,11 +1575,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 12,
   },
-  snackbarUndoText: {
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
+  snackbarUndoText: { fontSize: 14, fontWeight: '700', letterSpacing: 0.5, },
   activeFilterBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1715,12 +1587,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 8,
   },
-  activeFilterText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  clearFilterText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  activeFilterText: { fontSize: 13, fontWeight: '600', },
+  clearFilterText: { fontSize: 13, fontWeight: '700', },
 });

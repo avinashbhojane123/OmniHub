@@ -1721,10 +1721,7 @@ export const MovieWorkspaceScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#090B10',
-  },
+  container: { flex: 1, backgroundColor: '#090B10', },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1734,11 +1731,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#1A1E29',
   },
-  headerLeftRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
+  headerLeftRow: { flexDirection: 'row', alignItems: 'center', gap: 10, },
   backButton: {
     width: 38,
     height: 38,
@@ -1766,26 +1759,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#262D3D',
   },
-  workspaceIcon: {
-    fontSize: 20,
-    marginRight: 8,
-  },
-  workspaceTitle: {
-    color: '#F9FAFB',
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  workspaceSubtitle: {
-    color: '#9CA3AF',
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  workspaceIcon: { fontSize: 20, marginRight: 8, },
+  workspaceTitle: { color: '#F9FAFB', fontSize: 14, fontWeight: '700', letterSpacing: 0.5, },
+  workspaceSubtitle: { color: '#9CA3AF', fontSize: 10, fontWeight: '500', },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8, },
   headerButton: {
     width: 38,
     height: 38,
@@ -1796,13 +1773,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#262D3D',
   },
-  headerButtonActive: {
-    backgroundColor: '#E11D48',
-    borderColor: '#E11D48',
-  },
-  headerButtonText: {
-    fontSize: 16,
-  },
+  headerButtonActive: { backgroundColor: '#E11D48', borderColor: '#E11D48', },
+  headerButtonText: { fontSize: 16, },
   watchlistBadge: {
     position: 'absolute',
     top: -4,
@@ -1817,15 +1789,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#090B10',
   },
-  watchlistBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  searchSection: {
-    marginHorizontal: 16,
-    marginTop: 8,
-  },
+  watchlistBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold', },
+  searchSection: { marginHorizontal: 16, marginTop: 8, },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1835,23 +1800,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#262D3D',
   },
-  searchInput: {
-    flex: 1,
-    height: 40,
-    color: '#FFFFFF',
-    fontSize: 14,
-  },
-  clearSearchBtn: {
-    padding: 6,
-  },
-  clearSearchText: {
-    color: '#9CA3AF',
-    fontSize: 14,
-  },
-  searchFilterBadgeRow: {
-    marginTop: 6,
-    flexDirection: 'row',
-  },
+  searchInput: { flex: 1, height: 40, color: '#FFFFFF', fontSize: 14, },
+  clearSearchBtn: { padding: 6, },
+  clearSearchText: { color: '#9CA3AF', fontSize: 14, },
+  searchFilterBadgeRow: { marginTop: 6, flexDirection: 'row', },
   searchFilterBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1863,24 +1815,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(225, 29, 72, 0.4)',
   },
-  searchFilterBadgeText: {
-    color: '#FB7185',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  searchFilterBadgeClose: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  tabsContainer: {
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  tabsScrollContent: {
-    paddingHorizontal: 16,
-    gap: 8,
-  },
+  searchFilterBadgeText: { color: '#FB7185', fontSize: 11, fontWeight: '600', },
+  searchFilterBadgeClose: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', },
+  tabsContainer: { marginTop: 10, marginBottom: 4, },
+  tabsScrollContent: { paddingHorizontal: 16, gap: 8, },
   categoryTab: {
     paddingHorizontal: 14,
     paddingVertical: 7,
@@ -1889,26 +1827,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#262D3D',
   },
-  categoryTabActive: {
-    backgroundColor: '#E11D48',
-    borderColor: '#E11D48',
-  },
-  categoryTabText: {
-    color: '#9CA3AF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  categoryTabTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  genresContainer: {
-    marginVertical: 6,
-  },
-  genresScrollContent: {
-    paddingHorizontal: 16,
-    gap: 6,
-  },
+  categoryTabActive: { backgroundColor: '#E11D48', borderColor: '#E11D48', },
+  categoryTabText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600', },
+  categoryTabTextActive: { color: '#FFFFFF', fontWeight: '700', },
+  genresContainer: { marginVertical: 6, },
+  genresScrollContent: { paddingHorizontal: 16, gap: 6, },
   genreChip: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -1917,44 +1840,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1E2433',
   },
-  genreChipActive: {
-    backgroundColor: '#262D3D',
-    borderColor: '#E11D48',
-  },
-  genreChipText: {
-    color: '#6B7280',
-    fontSize: 12,
-  },
-  genreChipTextActive: {
-    color: '#F43F5E',
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    color: '#9CA3AF',
-    fontSize: 14,
-  },
-  errorContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  errorIcon: {
-    fontSize: 36,
-    marginBottom: 10,
-  },
-  errorTitle: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
+  genreChipActive: { backgroundColor: '#262D3D', borderColor: '#E11D48', },
+  genreChipText: { color: '#6B7280', fontSize: 12, },
+  genreChipTextActive: { color: '#F43F5E', fontWeight: '600', },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', },
+  loadingText: { marginTop: 12, color: '#9CA3AF', fontSize: 14, },
+  errorContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, },
+  errorIcon: { fontSize: 36, marginBottom: 10, },
+  errorTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', marginBottom: 4, },
   errorSubtitle: {
     color: '#9CA3AF',
     fontSize: 13,
@@ -1962,21 +1855,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 16,
   },
-  retryBtn: {
-    backgroundColor: '#E11D48',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  retryBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  listContainer: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-  },
+  retryBtn: { backgroundColor: '#E11D48', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, },
+  retryBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13, },
+  listContainer: { paddingHorizontal: 12, paddingTop: 8, },
   spotlightWrapper: {
     height: 230,
     borderRadius: 18,
@@ -1986,20 +1867,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#262D3D',
   },
-  spotlightBackdrop: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute',
-  },
-  fallbackSpotlightBackdrop: {
-    backgroundColor: '#161B26',
-  },
-  spotlightGradient: {
-    flex: 1,
-    backgroundColor: 'rgba(9, 11, 16, 0.72)',
-    padding: 16,
-    justifyContent: 'flex-end',
-  },
+  spotlightBackdrop: { width: '100%', height: '100%', position: 'absolute', },
+  fallbackSpotlightBackdrop: { backgroundColor: '#161B26', },
+  spotlightGradient: { flex: 1, backgroundColor: 'rgba(9, 11, 16, 0.72)', padding: 16, justifyContent: 'flex-end', },
   spotlightBadge: {
     backgroundColor: '#E11D48',
     paddingHorizontal: 8,
@@ -2008,56 +1878,16 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     marginBottom: 6,
   },
-  spotlightBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
-  },
-  spotlightTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  spotlightMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  spotlightRating: {
-    color: '#FBBF24',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  spotlightDot: {
-    color: '#6B7280',
-    marginHorizontal: 6,
-  },
-  spotlightYear: {
-    color: '#D1D5DB',
-    fontSize: 13,
-  },
-  spotlightGenre: {
-    color: '#9CA3AF',
-    fontSize: 13,
-  },
-  spotlightBtnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  playTrailerBtn: {
-    backgroundColor: '#E11D48',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  playTrailerBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 13,
-  },
+  spotlightBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold', letterSpacing: 0.5, },
+  spotlightTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', marginBottom: 4, },
+  spotlightMeta: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, },
+  spotlightRating: { color: '#FBBF24', fontSize: 13, fontWeight: '700', },
+  spotlightDot: { color: '#6B7280', marginHorizontal: 6, },
+  spotlightYear: { color: '#D1D5DB', fontSize: 13, },
+  spotlightGenre: { color: '#9CA3AF', fontSize: 13, },
+  spotlightBtnRow: { flexDirection: 'row', alignItems: 'center', gap: 8, },
+  playTrailerBtn: { backgroundColor: '#E11D48', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, },
+  playTrailerBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13, },
   spotlightWatchlistBtn: {
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     paddingHorizontal: 14,
@@ -2066,15 +1896,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.25)',
   },
-  spotlightWatchlistBtnActive: {
-    backgroundColor: '#10B981',
-    borderColor: '#10B981',
-  },
-  spotlightWatchlistBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 13,
-  },
+  spotlightWatchlistBtnActive: { backgroundColor: '#10B981', borderColor: '#10B981', },
+  spotlightWatchlistBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13, },
   spotlightInfoBtn: {
     width: 36,
     height: 36,
@@ -2083,31 +1906,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  spotlightInfoBtnText: {
-    fontSize: 16,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 24,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  emptyTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  emptySubtitle: {
-    color: '#6B7280',
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
+  spotlightInfoBtnText: { fontSize: 16, },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, paddingHorizontal: 24, },
+  emptyIcon: { fontSize: 48, marginBottom: 12, },
+  emptyTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginBottom: 6, },
+  emptySubtitle: { color: '#6B7280', fontSize: 13, textAlign: 'center', lineHeight: 18, },
   footerLoader: {
     paddingVertical: 18,
     alignItems: 'center',
@@ -2115,11 +1918,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  footerLoaderText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  footerLoaderText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600', },
   watchlistRow: {
     flexDirection: 'row',
     backgroundColor: '#121620',
@@ -2129,111 +1928,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1E2433',
   },
-  watchlistPoster: {
-    width: 90,
-    height: 135,
-    backgroundColor: '#1A1E29',
-  },
-  fallbackWatchlistPoster: {
-    backgroundColor: '#161B26',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fallbackWatchlistPosterIcon: {
-    fontSize: 28,
-  },
-  watchlistInfo: {
-    flex: 1,
-    padding: 10,
-    justifyContent: 'space-between',
-  },
-  watchlistTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  watchlistTvBadge: {
-    backgroundColor: '#3B82F6',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  watchlistTvBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  watchlistMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginVertical: 4,
-  },
-  ratingText: {
-    color: '#FBBF24',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  watchlistYear: {
-    color: '#9CA3AF',
-    fontSize: 12,
-  },
-  watchlistGenre: {
-    color: '#E11D48',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  watchlistOverview: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  watchlistActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
-  },
-  watchlistStreamBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: '#E11D48',
-  },
-  watchlistStreamBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  watchedBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: '#1E2433',
-  },
-  watchedBtnActive: {
-    backgroundColor: '#10B981',
-  },
-  watchedBtnText: {
-    color: '#9CA3AF',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  watchedBtnTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
+  watchlistPoster: { width: 90, height: 135, backgroundColor: '#1A1E29', },
+  fallbackWatchlistPoster: { backgroundColor: '#161B26', alignItems: 'center', justifyContent: 'center', },
+  fallbackWatchlistPosterIcon: { fontSize: 28, },
+  watchlistInfo: { flex: 1, padding: 10, justifyContent: 'space-between', },
+  watchlistTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', },
+  watchlistTvBadge: { backgroundColor: '#3B82F6', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, },
+  watchlistTvBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', },
+  watchlistMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 4, },
+  ratingText: { color: '#FBBF24', fontWeight: '700', fontSize: 12, },
+  watchlistYear: { color: '#9CA3AF', fontSize: 12, },
+  watchlistGenre: { color: '#E11D48', fontSize: 12, fontWeight: '600', },
+  watchlistOverview: { color: '#9CA3AF', fontSize: 12, lineHeight: 16, },
+  watchlistActionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, },
+  watchlistStreamBtn: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12, backgroundColor: '#E11D48', },
+  watchlistStreamBtnText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', },
+  watchedBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: '#1E2433', },
+  watchedBtnActive: { backgroundColor: '#10B981', },
+  watchedBtnText: { color: '#9CA3AF', fontSize: 11, fontWeight: '600', },
+  watchedBtnTextActive: { color: '#FFFFFF', fontWeight: '700', },
   removeBtn: {
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 12,
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
   },
-  removeBtnText: {
-    color: '#EF4444',
-    fontSize: 11,
-    fontWeight: '600',
-  },
+  removeBtnText: { color: '#EF4444', fontSize: 11, fontWeight: '600', },
   // --- TVmaze Sub-Filter Chips ---
   tvSubChip: {
     paddingHorizontal: 12,
@@ -2243,19 +1963,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1E2433',
   },
-  tvSubChipActive: {
-    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    borderColor: '#3B82F6',
-  },
-  tvSubChipText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  tvSubChipTextActive: {
-    color: '#60A5FA',
-    fontWeight: '700',
-  },
+  tvSubChipActive: { backgroundColor: 'rgba(59, 130, 246, 0.2)', borderColor: '#3B82F6', },
+  tvSubChipText: { color: '#9CA3AF', fontSize: 12, fontWeight: '500', },
+  tvSubChipTextActive: { color: '#60A5FA', fontWeight: '700', },
   // --- TVmaze Live Radar Banner ---
   tvLiveBanner: {
     marginHorizontal: 12,
@@ -2267,12 +1977,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1D2A47',
   },
-  tvLiveTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
+  tvLiveTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, },
   tvLiveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2284,35 +1989,11 @@ const styles = StyleSheet.create({
     borderColor: '#3B82F6',
     gap: 6,
   },
-  tvPulseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#3B82F6',
-  },
-  tvLiveBadgeText: {
-    color: '#60A5FA',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  tvFreeBadge: {
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  tvFreeBadgeText: {
-    color: '#10B981',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  tvLiveHeadline: {
-    color: '#E5E7EB',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18,
-  },
+  tvPulseDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#3B82F6', },
+  tvLiveBadgeText: { color: '#60A5FA', fontSize: 10, fontWeight: '800', letterSpacing: 0.5, },
+  tvFreeBadge: { backgroundColor: '#1E293B', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, },
+  tvFreeBadgeText: { color: '#10B981', fontSize: 10, fontWeight: '700', },
+  tvLiveHeadline: { color: '#E5E7EB', fontSize: 13, fontWeight: '700', lineHeight: 18, },
   spotlightTvGuideBtn: {
     backgroundColor: '#1E293B',
     paddingHorizontal: 12,
@@ -2323,21 +2004,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  spotlightTvGuideBtnText: {
-    color: '#60A5FA',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  spotlightTvGuideBtnText: { color: '#60A5FA', fontSize: 12, fontWeight: '700', },
   languageFilterContainer: {
     paddingVertical: 6,
     backgroundColor: '#090B10',
     borderBottomWidth: 1,
     borderBottomColor: '#161B26',
   },
-  languageFilterScroll: {
-    paddingHorizontal: 12,
-    gap: 8,
-  },
+  languageFilterScroll: { paddingHorizontal: 12, gap: 8, },
   langFilterPill: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -2346,18 +2020,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1E2433',
   },
-  langFilterPillActive: {
-    backgroundColor: 'rgba(225, 29, 72, 0.15)',
-    borderColor: '#E11D48',
-  },
-  langFilterPillText: {
-    color: '#9CA3AF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  langFilterPillTextActive: {
-    color: '#F43F5E',
-    fontWeight: '800',
-  },
+  langFilterPillActive: { backgroundColor: 'rgba(225, 29, 72, 0.15)', borderColor: '#E11D48', },
+  langFilterPillText: { color: '#9CA3AF', fontSize: 11, fontWeight: '700', },
+  langFilterPillTextActive: { color: '#F43F5E', fontWeight: '800', },
 });
 

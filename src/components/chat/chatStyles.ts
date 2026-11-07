@@ -1,16 +1,10 @@
 import { StyleSheet, Platform } from 'react-native';
 
 export const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1, },
   // Full-Screen Gateway Screen Styles
-  gatewayContainer: {
-    flex: 1,
-  },
-  gatewayFlex: {
-    flex: 1,
-  },
+  gatewayContainer: { flex: 1, },
+  gatewayFlex: { flex: 1, },
   gatewayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -26,11 +20,7 @@ export const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
-  backBtnText: {
-    color: '#38BDF8',
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  backBtnText: { color: '#38BDF8', fontSize: 13, fontWeight: '700', },
   gatewayBadgePill: {
     paddingHorizontal: 12,
     paddingVertical: 5,
@@ -39,21 +29,9 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(56, 189, 248, 0.25)',
   },
-  gatewayBadge: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#38BDF8',
-    letterSpacing: 1.5,
-  },
-  gatewayScrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-  },
-  gatewayHero: {
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 12,
-  },
+  gatewayBadge: { fontSize: 11, fontWeight: '800', color: '#38BDF8', letterSpacing: 1.5, },
+  gatewayScrollContent: { paddingHorizontal: 20, paddingTop: 16, },
+  gatewayHero: { alignItems: 'center', marginBottom: 20, paddingHorizontal: 12, },
   gatewayIconBox: {
     width: 68,
     height: 68,
@@ -65,9 +43,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  gatewayIcon: {
-    fontSize: 32,
-  },
+  gatewayIcon: { fontSize: 32, },
   gatewayTitle: {
     fontSize: 24,
     fontWeight: '900',
@@ -95,9 +71,7 @@ export const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 6,
   },
-  fieldSection: {
-    marginBottom: 18,
-  },
+  fieldSection: { marginBottom: 18, },
   label: {
     fontSize: 11,
     fontWeight: '800',
@@ -116,12 +90,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  presetRoomsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-  },
+  presetRoomsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, },
   presetChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -130,21 +99,10 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  presetChipActive: {
-    backgroundColor: '#38BDF8',
-    borderColor: '#38BDF8',
-  },
-  presetChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  presetChipTextActive: {
-    color: '#0F172A',
-  },
-  recentRoomsSection: {
-    marginTop: 12,
-  },
+  presetChipActive: { backgroundColor: '#38BDF8', borderColor: '#38BDF8', },
+  presetChipText: { fontSize: 12, fontWeight: '700', color: '#94A3B8', },
+  presetChipTextActive: { color: '#0F172A', },
+  recentRoomsSection: { marginTop: 12, },
   recentRoomsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -158,11 +116,7 @@ export const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  recentClearBtnText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#EF4444',
-  },
+  recentClearBtnText: { fontSize: 11, fontWeight: '600', color: '#EF4444', },
   recentChip: {
     paddingHorizontal: 11,
     paddingVertical: 6,
@@ -171,34 +125,17 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(56, 189, 248, 0.2)',
   },
-  recentChipActive: {
-    backgroundColor: '#38BDF8',
-    borderColor: '#38BDF8',
-  },
-  recentChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#38BDF8',
-  },
-  recentChipTextActive: {
-    color: '#0F172A',
-    fontWeight: '700',
-  },
+  recentChipActive: { backgroundColor: '#38BDF8', borderColor: '#38BDF8', },
+  recentChipText: { fontSize: 12, fontWeight: '600', color: '#38BDF8', },
+  recentChipTextActive: { color: '#0F172A', fontWeight: '700', },
   serverRowHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
-  toggleCustomText: {
-    color: '#38BDF8',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  serverPresetsRow: {
-    flexDirection: 'column',
-    gap: 8,
-  },
+  toggleCustomText: { color: '#38BDF8', fontSize: 12, fontWeight: '700', },
+  serverPresetsRow: { flexDirection: 'column', gap: 8, },
   serverChip: {
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -207,18 +144,9 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  serverChipActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    borderColor: '#38BDF8',
-  },
-  serverChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  serverChipTextActive: {
-    color: '#38BDF8',
-  },
+  serverChipActive: { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderColor: '#38BDF8', },
+  serverChipText: { fontSize: 12, fontWeight: '700', color: '#94A3B8', },
+  serverChipTextActive: { color: '#38BDF8', },
   joinBtn: {
     backgroundColor: '#38BDF8',
     paddingVertical: 16,
@@ -231,25 +159,12 @@ export const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  joinBtnText: {
-    color: '#0F172A',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
+  joinBtnText: { color: '#0F172A', fontSize: 16, fontWeight: '800', letterSpacing: 0.3, },
 
   // Active Room Header Styles
-  activeRoomContainer: {
-    flex: 1,
-    backgroundColor: '#0B141B',
-  },
-  doodlePatternOverlay: {
-    backgroundColor: '#0B141B',
-    opacity: 0.98,
-  },
-  activeRoomBody: {
-    flex: 1,
-  },
+  activeRoomContainer: { flex: 1, backgroundColor: '#0B141B', },
+  doodlePatternOverlay: { backgroundColor: '#0B141B', opacity: 0.98, },
+  activeRoomBody: { flex: 1, },
   chatHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -265,12 +180,7 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 3,
   },
-  headerLeftCol: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 8,
-  },
+  headerLeftCol: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, },
   headerBackBtn: {
     width: 36,
     height: 36,
@@ -279,18 +189,8 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 4,
   },
-  headerBackText: {
-    fontSize: 26,
-    color: '#E9EDEF',
-    lineHeight: 28,
-    marginTop: -2,
-  },
-  headerInfoTouch: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 10,
-  },
+  headerBackText: { fontSize: 26, color: '#E9EDEF', lineHeight: 28, marginTop: -2, },
+  headerInfoTouch: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10, },
   headerRoomAvatar: {
     width: 40,
     height: 40,
@@ -306,26 +206,10 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
   },
-  headerRoomAvatarText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  headerTitleCol: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  roomNameText: {
-    fontSize: 16.5,
-    fontWeight: '700',
-    color: '#E9EDEF',
-    letterSpacing: 0.2,
-  },
-  latencyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
+  headerRoomAvatarText: { fontSize: 18, fontWeight: '800', color: '#FFFFFF', },
+  headerTitleCol: { flex: 1, justifyContent: 'center', },
+  roomNameText: { fontSize: 16.5, fontWeight: '700', color: '#E9EDEF', letterSpacing: 0.2, },
+  latencyRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, },
   onlineDot: {
     width: 7,
     height: 7,
@@ -333,16 +217,8 @@ export const styles = StyleSheet.create({
     backgroundColor: '#25D366',
     marginRight: 6,
   },
-  latencyText: {
-    fontSize: 11.5,
-    color: '#8696A0',
-    fontWeight: '500',
-  },
-  headerRightCol: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
+  latencyText: { fontSize: 11.5, color: '#8696A0', fontWeight: '500', },
+  headerRightCol: { flexDirection: 'row', alignItems: 'center', gap: 6, },
   iconBtn: {
     width: 36,
     height: 36,
@@ -351,9 +227,7 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  iconBtnText: {
-    fontSize: 16,
-  },
+  iconBtnText: { fontSize: 16, },
 
   // 24h Stories Bar
   storiesBar: {
@@ -362,10 +236,7 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
-  addStoryRing: {
-    alignItems: 'center',
-    marginRight: 14,
-  },
+  addStoryRing: { alignItems: 'center', marginRight: 14, },
   addStoryPlusCircle: {
     width: 48,
     height: 48,
@@ -378,15 +249,8 @@ export const styles = StyleSheet.create({
     borderStyle: 'dashed',
     marginBottom: 4,
   },
-  addStoryPlusText: {
-    fontSize: 22,
-    color: '#38BDF8',
-    fontWeight: '700',
-  },
-  storyRingItem: {
-    alignItems: 'center',
-    marginRight: 14,
-  },
+  addStoryPlusText: { fontSize: 22, color: '#38BDF8', fontWeight: '700', },
+  storyRingItem: { alignItems: 'center', marginRight: 14, },
   storyRingGradient: {
     width: 50,
     height: 50,
@@ -397,9 +261,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
-  storyRingGradientViewed: {
-    backgroundColor: '#475569',
-  },
+  storyRingGradientViewed: { backgroundColor: '#475569', },
   storyAvatarCircle: {
     width: 44,
     height: 44,
@@ -408,17 +270,8 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  storyAvatarLetter: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  storyRingName: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '600',
-    maxWidth: 58,
-  },
+  storyAvatarLetter: { fontSize: 18, fontWeight: '800', color: '#FFFFFF', },
+  storyRingName: { fontSize: 11, color: '#94A3B8', fontWeight: '600', maxWidth: 58, },
 
   // Pinned Banner
   pinnedBanner: {
@@ -430,46 +283,17 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(56, 189, 248, 0.2)',
   },
-  pinnedContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  pinnedIcon: {
-    fontSize: 14,
-    marginRight: 8,
-  },
-  pinnedTextCol: {
-    flex: 1,
-  },
-  pinnedAuthor: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#38BDF8',
-  },
-  pinnedSnippet: {
-    fontSize: 12,
-    color: '#E2E8F0',
-  },
-  unpinBtn: {
-    padding: 6,
-    marginLeft: 6,
-  },
-  unpinText: {
-    fontSize: 14,
-    color: '#94A3B8',
-    padding: 4,
-  },
+  pinnedContent: { flex: 1, flexDirection: 'row', alignItems: 'center', },
+  pinnedIcon: { fontSize: 14, marginRight: 8, },
+  pinnedTextCol: { flex: 1, },
+  pinnedAuthor: { fontSize: 11, fontWeight: '700', color: '#38BDF8', },
+  pinnedSnippet: { fontSize: 12, color: '#E2E8F0', },
+  unpinBtn: { padding: 6, marginLeft: 6, },
+  unpinText: { fontSize: 14, color: '#94A3B8', padding: 4, },
 
   // Feed & Bubbles
-  feedContent: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  feedContentEmpty: {
-    flexGrow: 1,
-    justifyContent: 'center',
-  },
+  feedContent: { paddingHorizontal: 14, paddingVertical: 12, },
+  feedContentEmpty: { flexGrow: 1, justifyContent: 'center', },
   emptyFeedContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -487,9 +311,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  emptyFeedIcon: {
-    fontSize: 28,
-  },
+  emptyFeedIcon: { fontSize: 28, },
   emptyFeedTitle: {
     fontSize: 18,
     fontWeight: '800',
@@ -505,12 +327,7 @@ export const styles = StyleSheet.create({
     maxWidth: 280,
     marginBottom: 18,
   },
-  emptyFeedPillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-  },
+  emptyFeedPillRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, },
   emptyFeedStarterChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -519,28 +336,11 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  emptyFeedStarterText: {
-    fontSize: 12,
-    color: '#38BDF8',
-    fontWeight: '600',
-  },
-  messageRow: {
-    marginVertical: 1.5,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  messageRowMe: {
-    justifyContent: 'flex-end',
-  },
-  messageRowOther: {
-    justifyContent: 'flex-start',
-  },
-  avatarGutter: {
-    width: 32,
-    marginRight: 6,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
+  emptyFeedStarterText: { fontSize: 12, color: '#38BDF8', fontWeight: '600', },
+  messageRow: { marginVertical: 1.5, flexDirection: 'row', alignItems: 'flex-end', },
+  messageRowMe: { justifyContent: 'flex-end', },
+  messageRowOther: { justifyContent: 'flex-start', },
+  avatarGutter: { width: 32, marginRight: 6, justifyContent: 'flex-end', alignItems: 'center', },
   memberAvatar: {
     width: 28,
     height: 28,
@@ -554,15 +354,8 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 1,
   },
-  memberAvatarText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  memberAvatarSpacer: {
-    width: 28,
-    height: 28,
-  },
+  memberAvatarText: { fontSize: 12, fontWeight: '800', color: '#FFFFFF', },
+  memberAvatarSpacer: { width: 28, height: 28, },
   bubble: {
     maxWidth: '82%',
     paddingHorizontal: 12,
@@ -575,39 +368,24 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.22,
     shadowRadius: 1.5,
   },
-  bubbleMe: {
-    backgroundColor: '#005C4B',
-  },
-  bubbleMeGrouped: {
-    borderRadius: 16,
-  },
+  bubbleMe: { backgroundColor: '#005C4B', },
+  bubbleMeGrouped: { borderRadius: 16, },
   bubbleMeTail: {
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 3,
   },
-  bubbleOther: {
-    backgroundColor: '#202C33',
-  },
-  bubbleOtherGrouped: {
-    borderRadius: 16,
-  },
+  bubbleOther: { backgroundColor: '#202C33', },
+  bubbleOtherGrouped: { borderRadius: 16, },
   bubbleOtherTail: {
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderBottomRightRadius: 16,
     borderBottomLeftRadius: 3,
   },
-  bubbleWhisper: {
-    borderWidth: 1.5,
-    borderColor: '#F59E0B',
-  },
-  bubbleHighlighted: {
-    borderWidth: 2,
-    borderColor: '#38BDF8',
-    backgroundColor: '#0F2942',
-  },
+  bubbleWhisper: { borderWidth: 1.5, borderColor: '#F59E0B', },
+  bubbleHighlighted: { borderWidth: 2, borderColor: '#38BDF8', backgroundColor: '#0F2942', },
   senderHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -615,16 +393,8 @@ export const styles = StyleSheet.create({
     marginBottom: 3,
     gap: 8,
   },
-  senderNickname: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: '#25D366',
-  },
-  whisperBadge: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#F59E0B',
-  },
+  senderNickname: { fontSize: 12.5, fontWeight: '700', color: '#25D366', },
+  whisperBadge: { fontSize: 10, fontWeight: '700', color: '#F59E0B', },
   replyPreviewCard: {
     backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderLeftWidth: 3,
@@ -634,15 +404,8 @@ export const styles = StyleSheet.create({
     borderRadius: 6,
     marginBottom: 6,
   },
-  replySender: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#25D366',
-  },
-  replySnippet: {
-    fontSize: 12,
-    color: '#CBD5E1',
-  },
+  replySender: { fontSize: 11, fontWeight: '700', color: '#25D366', },
+  replySnippet: { fontSize: 12, color: '#CBD5E1', },
   inlineMessageRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -656,24 +419,10 @@ export const styles = StyleSheet.create({
     marginLeft: 10,
     marginBottom: -1,
   },
-  messageText: {
-    fontSize: 15.5,
-    lineHeight: 21,
-    color: '#E9EDEF',
-    letterSpacing: 0.1,
-  },
-  linkText: {
-    color: '#53BDEB',
-    textDecorationLine: 'underline',
-  },
-  deletedMessageText: {
-    fontStyle: 'italic',
-    color: '#8696A0',
-  },
-  dateSeparatorRow: {
-    alignItems: 'center',
-    marginVertical: 12,
-  },
+  messageText: { fontSize: 15.5, lineHeight: 21, color: '#E9EDEF', letterSpacing: 0.1, },
+  linkText: { color: '#53BDEB', textDecorationLine: 'underline', },
+  deletedMessageText: { fontStyle: 'italic', color: '#8696A0', },
+  dateSeparatorRow: { alignItems: 'center', marginVertical: 12, },
   dateBadge: {
     backgroundColor: '#182229',
     paddingHorizontal: 14,
@@ -687,12 +436,7 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 2,
   },
-  dateBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8696A0',
-    letterSpacing: 0.3,
-  },
+  dateBadgeText: { fontSize: 12, fontWeight: '600', color: '#8696A0', letterSpacing: 0.3, },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -700,37 +444,13 @@ export const styles = StyleSheet.create({
     marginTop: 2,
     gap: 4,
   },
-  expiringIcon: {
-    fontSize: 11,
-  },
-  silentIcon: {
-    fontSize: 11,
-  },
-  editedTag: {
-    fontSize: 10.5,
-    fontStyle: 'italic',
-    color: 'rgba(233, 237, 239, 0.55)',
-  },
-  timeText: {
-    fontSize: 11,
-    color: 'rgba(233, 237, 239, 0.6)',
-    fontWeight: '500',
-  },
-  readTicks: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: 'rgba(233, 237, 239, 0.6)',
-    marginLeft: 2,
-  },
-  readTicksDelivered: {
-    color: 'rgba(233, 237, 239, 0.85)',
-  },
-  reactionsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 6,
-  },
+  expiringIcon: { fontSize: 11, },
+  silentIcon: { fontSize: 11, },
+  editedTag: { fontSize: 10.5, fontStyle: 'italic', color: 'rgba(233, 237, 239, 0.55)', },
+  timeText: { fontSize: 11, color: 'rgba(233, 237, 239, 0.6)', fontWeight: '500', },
+  readTicks: { fontSize: 12, fontWeight: '700', color: 'rgba(233, 237, 239, 0.6)', marginLeft: 2, },
+  readTicksDelivered: { color: 'rgba(233, 237, 239, 0.85)', },
+  reactionsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6, },
   reactionPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -742,33 +462,14 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  reactionPillActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.22)',
-    borderColor: '#38BDF8',
-  },
-  reactionEmoji: {
-    fontSize: 12,
-  },
-  reactionCount: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  reactionCountActive: {
-    color: '#38BDF8',
-    fontWeight: '800',
-  },
+  reactionPillActive: { backgroundColor: 'rgba(56, 189, 248, 0.22)', borderColor: '#38BDF8', },
+  reactionEmoji: { fontSize: 12, },
+  reactionCount: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', },
+  reactionCountActive: { color: '#38BDF8', fontWeight: '800', },
 
   // Interactive Poll Card
-  pollCard: {
-    width: 220,
-  },
-  pollQuestion: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 10,
-  },
+  pollCard: { width: 220, },
+  pollQuestion: { fontSize: 15, fontWeight: '800', color: '#FFFFFF', marginBottom: 10, },
   pollOptionBtn: {
     backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 10,
@@ -776,10 +477,7 @@ export const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: 8,
   },
-  pollOptionBtnVoted: {
-    borderWidth: 1,
-    borderColor: '#38BDF8',
-  },
+  pollOptionBtnVoted: { borderWidth: 1, borderColor: '#38BDF8', },
   pollProgressFill: {
     position: 'absolute',
     left: 0,
@@ -793,27 +491,12 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  pollOptionText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  pollPercentText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#38BDF8',
-  },
+  pollOptionText: { fontSize: 13, fontWeight: '600', color: '#FFFFFF', },
+  pollPercentText: { fontSize: 12, fontWeight: '800', color: '#38BDF8', },
 
   // Typing bar
-  typingIndicatorRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-  },
-  typingText: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    color: '#94A3B8',
-  },
+  typingIndicatorRow: { paddingHorizontal: 16, paddingVertical: 4, },
+  typingText: { fontSize: 12, fontStyle: 'italic', color: '#94A3B8', },
 
   // Whisper notice
   whisperNoticeBar: {
@@ -824,11 +507,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
   },
-  whisperNoticeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#F59E0B',
-  },
+  whisperNoticeText: { fontSize: 12, fontWeight: '700', color: '#F59E0B', },
 
   // Reply bar
   replyBar: {
@@ -841,23 +520,10 @@ export const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
-  replyBarCol: {
-    flex: 1,
-  },
-  replyBarAuthor: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#38BDF8',
-  },
-  replyBarSnippet: {
-    fontSize: 12,
-    color: '#E2E8F0',
-  },
-  replyBarDismiss: {
-    fontSize: 16,
-    color: '#94A3B8',
-    padding: 4,
-  },
+  replyBarCol: { flex: 1, },
+  replyBarAuthor: { fontSize: 11, fontWeight: '700', color: '#38BDF8', },
+  replyBarSnippet: { fontSize: 12, color: '#E2E8F0', },
+  replyBarDismiss: { fontSize: 16, color: '#94A3B8', padding: 4, },
 
   // Modes bar
   composerModesBar: {
@@ -878,11 +544,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(56, 189, 248, 0.3)',
   },
-  modeBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#38BDF8',
-  },
+  modeBadgeText: { fontSize: 11, fontWeight: '700', color: '#38BDF8', },
 
   // Quick Emoji Bar
   quickEmojiBar: {
@@ -894,17 +556,9 @@ export const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
-  quickEmojiBtn: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-  },
-  quickEmojiItem: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-  },
-  quickEmojiText: {
-    fontSize: 22,
-  },
+  quickEmojiBtn: { paddingHorizontal: 6, paddingVertical: 4, },
+  quickEmojiItem: { paddingHorizontal: 6, paddingVertical: 4, },
+  quickEmojiText: { fontSize: 22, },
 
   // Composer
   composerContainer: {
@@ -929,12 +583,7 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 1.5,
   },
-  attachBtnIcon: {
-    fontSize: 24,
-    color: '#8696A0',
-    fontWeight: '600',
-    marginTop: -2,
-  },
+  attachBtnIcon: { fontSize: 24, color: '#8696A0', fontWeight: '600', marginTop: -2, },
   composerInputCapsule: {
     flex: 1,
     flexDirection: 'row',
@@ -959,10 +608,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 4,
   },
-  emojiToggleIcon: {
-    fontSize: 20,
-    color: '#8696A0',
-  },
+  emojiToggleIcon: { fontSize: 20, color: '#8696A0', },
   composerInput: {
     flex: 1,
     fontSize: 15.5,
@@ -980,10 +626,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 4,
   },
-  cameraInlineIcon: {
-    fontSize: 19,
-    color: '#8696A0',
-  },
+  cameraInlineIcon: { fontSize: 19, color: '#8696A0', },
   sendBtn: {
     width: 42,
     height: 42,
@@ -997,22 +640,15 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 2,
   },
-  sendBtnActive: {
-    backgroundColor: '#00A884',
-  },
+  sendBtnActive: { backgroundColor: '#00A884', },
   sendBtnIcon: {
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '900',
     marginLeft: Platform.OS === 'android' ? 2 : 1,
   },
-  micBtn: {
-    backgroundColor: '#00A884',
-  },
-  micBtnIcon: {
-    fontSize: 19,
-    color: '#FFFFFF',
-  },
+  micBtn: { backgroundColor: '#00A884', },
+  micBtnIcon: { fontSize: 19, color: '#FFFFFF', },
 
   // Attach Popup & Backdrop
   attachBackdrop: {
@@ -1040,16 +676,8 @@ export const styles = StyleSheet.create({
     elevation: 14,
     zIndex: 100,
   },
-  attachGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 14,
-  },
-  attachGridItem: {
-    width: '23%',
-    alignItems: 'center',
-  },
+  attachGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 14, },
+  attachGridItem: { width: '23%', alignItems: 'center', },
   attachCircleBtn: {
     width: 52,
     height: 52,
@@ -1063,15 +691,8 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3,
   },
-  attachCircleText: {
-    fontSize: 22,
-  },
-  attachItemLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#D1D7DB',
-    textAlign: 'center',
-  },
+  attachCircleText: { fontSize: 22, },
+  attachItemLabel: { fontSize: 11, fontWeight: '600', color: '#D1D7DB', textAlign: 'center', },
   attachPopupItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1080,14 +701,8 @@ export const styles = StyleSheet.create({
     borderRadius: 10,
     gap: 10,
   },
-  attachItemIcon: {
-    fontSize: 16,
-  },
-  attachItemText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
+  attachItemIcon: { fontSize: 16, },
+  attachItemText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF', },
 
   // Gesture & Reaction styles
   swipeReplyIconBox: {
@@ -1104,29 +719,13 @@ export const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 3,
   },
-  swipeReplyIconText: {
-    fontSize: 15,
-    color: '#FFFFFF',
-  },
-  heartBurstContainer: {
-    position: 'absolute',
-    top: '25%',
-    left: '38%',
-    zIndex: 999,
-  },
-  heartBurstText: {
-    fontSize: 44,
-  },
-  bubbleWrapperAnim: {
-    maxWidth: '85%',
-  },
+  swipeReplyIconText: { fontSize: 15, color: '#FFFFFF', },
+  heartBurstContainer: { position: 'absolute', top: '25%', left: '38%', zIndex: 999, },
+  heartBurstText: { fontSize: 44, },
+  bubbleWrapperAnim: { maxWidth: '85%', },
 
   // Action Sheet
-  actionSheetBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'flex-end',
-  },
+  actionSheetBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.65)', justifyContent: 'flex-end', },
   actionSheetCard: {
     backgroundColor: '#111B21',
     borderTopLeftRadius: 28,
@@ -1155,9 +754,7 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sheetReactionEmoji: {
-    fontSize: 22,
-  },
+  sheetReactionEmoji: { fontSize: 22, },
   actionSheetReactions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -1174,14 +771,8 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  reactionCircleActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.25)',
-    borderWidth: 1,
-    borderColor: '#38BDF8',
-  },
-  reactionCircleText: {
-    fontSize: 22,
-  },
+  reactionCircleActive: { backgroundColor: 'rgba(56, 189, 248, 0.25)', borderWidth: 1, borderColor: '#38BDF8', },
+  reactionCircleText: { fontSize: 22, },
   moreReactionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1201,9 +792,7 @@ export const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
-  moreReactionText: {
-    fontSize: 20,
-  },
+  moreReactionText: { fontSize: 20, },
   sheetItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1211,15 +800,8 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
-  sheetItemIcon: {
-    fontSize: 18,
-    marginRight: 12,
-  },
-  sheetItemText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#E2E8F0',
-  },
+  sheetItemIcon: { fontSize: 18, marginRight: 12, },
+  sheetItemText: { fontSize: 15, fontWeight: '600', color: '#E2E8F0', },
 
   // In-Chat Search Bar Styles
   searchBarContainer: {
@@ -1234,23 +816,9 @@ export const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
     gap: 6,
   },
-  searchInput: {
-    flex: 1,
-    height: 38,
-    color: '#FFFFFF',
-    fontSize: 13,
-  },
-  searchNavRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  searchCountText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#38BDF8',
-    paddingHorizontal: 2,
-  },
+  searchInput: { flex: 1, height: 38, color: '#FFFFFF', fontSize: 13, },
+  searchNavRow: { flexDirection: 'row', alignItems: 'center', gap: 4, },
+  searchCountText: { fontSize: 11, fontWeight: '700', color: '#38BDF8', paddingHorizontal: 2, },
   searchNavArrowBtn: {
     width: 24,
     height: 24,
@@ -1259,23 +827,10 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  searchNavArrowText: {
-    fontSize: 10,
-    color: '#38BDF8',
-    fontWeight: '800',
-  },
-  searchCloseBtn: {
-    padding: 4,
-  },
-  searchCloseText: {
-    fontSize: 14,
-    color: '#94A3B8',
-  },
-  iconBtnActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.25)',
-    borderColor: '#38BDF8',
-    borderWidth: 1,
-  },
+  searchNavArrowText: { fontSize: 10, color: '#38BDF8', fontWeight: '800', },
+  searchCloseBtn: { padding: 4, },
+  searchCloseText: { fontSize: 14, color: '#94A3B8', },
+  iconBtnActive: { backgroundColor: 'rgba(56, 189, 248, 0.25)', borderColor: '#38BDF8', borderWidth: 1, },
 
   // Edit Message Preview Bar Styles
   editBar: {
@@ -1288,51 +843,20 @@ export const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(56, 189, 248, 0.2)',
   },
-  editBarCol: {
-    flex: 1,
-  },
-  editBarTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#38BDF8',
-  },
-  editBarSnippet: {
-    fontSize: 12,
-    color: '#E2E8F0',
-  },
-  editBarDismiss: {
-    fontSize: 16,
-    color: '#94A3B8',
-    padding: 4,
-  },
+  editBarCol: { flex: 1, },
+  editBarTitle: { fontSize: 11, fontWeight: '700', color: '#38BDF8', },
+  editBarSnippet: { fontSize: 12, color: '#E2E8F0', },
+  editBarDismiss: { fontSize: 16, color: '#94A3B8', padding: 4, },
 
   // Gateway Connecting State
-  connectingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  joinBtnConnecting: {
-    opacity: 0.85,
-  },
+  connectingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, },
+  joinBtnConnecting: { opacity: 0.85, },
 
   // Connection Indicator & Banner Styles
-  dotConnecting: {
-    backgroundColor: '#F59E0B',
-  },
-  dotDisconnected: {
-    backgroundColor: '#EF4444',
-  },
-  dotConnected: {
-    backgroundColor: '#10B981',
-  },
-  connectionBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
+  dotConnecting: { backgroundColor: '#F59E0B', },
+  dotDisconnected: { backgroundColor: '#EF4444', },
+  dotConnected: { backgroundColor: '#10B981', },
+  connectionBanner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, },
   connectionBannerConnecting: {
     backgroundColor: 'rgba(245, 158, 11, 0.18)',
     borderBottomWidth: 1,
@@ -1344,12 +868,7 @@ export const styles = StyleSheet.create({
     borderBottomColor: 'rgba(239, 68, 68, 0.3)',
     justifyContent: 'space-between',
   },
-  connectionBannerText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    flex: 1,
-  },
+  connectionBannerText: { fontSize: 12, fontWeight: '600', color: '#FFFFFF', flex: 1, },
   retryBtn: {
     backgroundColor: '#EF4444',
     paddingHorizontal: 12,
@@ -1357,37 +876,15 @@ export const styles = StyleSheet.create({
     borderRadius: 8,
     marginLeft: 8,
   },
-  retryBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-  },
+  retryBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800', },
 
   // Search Highlighting & Pending Indicators
-  searchHighlight: {
-    backgroundColor: '#FDE047',
-    color: '#0F172A',
-    borderRadius: 2,
-    paddingHorizontal: 2,
-  },
-  pendingTick: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#F59E0B',
-  },
+  searchHighlight: { backgroundColor: '#FDE047', color: '#0F172A', borderRadius: 2, paddingHorizontal: 2, },
+  pendingTick: { fontSize: 10, fontWeight: '700', color: '#F59E0B', },
 
   // Image Card in Message Bubble
-  imageCardContainer: {
-    marginBottom: 8,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  bubbleImage: {
-    width: 220,
-    height: 160,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-  },
+  imageCardContainer: { marginBottom: 8, borderRadius: 12, overflow: 'hidden', },
+  bubbleImage: { width: 220, height: 160, borderRadius: 12, backgroundColor: 'rgba(0, 0, 0, 0.2)', },
   imageErrorBox: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -1395,15 +892,8 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  imageErrorIcon: {
-    fontSize: 28,
-    marginBottom: 4,
-  },
-  imageErrorText: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '600',
-  },
+  imageErrorIcon: { fontSize: 28, marginBottom: 4, },
+  imageErrorText: { fontSize: 11, color: '#94A3B8', fontWeight: '600', },
 
   // Scroll to Bottom FAB
   scrollBottomFab: {
@@ -1423,12 +913,7 @@ export const styles = StyleSheet.create({
     shadowRadius: 6,
     zIndex: 50,
   },
-  scrollBottomFabIcon: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '900',
-    lineHeight: 22,
-  },
+  scrollBottomFabIcon: { color: '#FFFFFF', fontSize: 20, fontWeight: '900', lineHeight: 22, },
   scrollBottomBadge: {
     position: 'absolute',
     top: -5,
@@ -1441,11 +926,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 4,
   },
-  scrollBottomBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '800',
-  },
+  scrollBottomBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800', },
 
   // Photo Sharing Modal Styles
   imageModalOverlay: {
@@ -1470,16 +951,8 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  imageModalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  imageModalClose: {
-    fontSize: 18,
-    color: '#94A3B8',
-    padding: 4,
-  },
+  imageModalTitle: { fontSize: 18, fontWeight: '800', color: '#FFFFFF', },
+  imageModalClose: { fontSize: 18, color: '#94A3B8', padding: 4, },
   imageInputLabel: {
     fontSize: 11,
     fontWeight: '800',
@@ -1498,18 +971,8 @@ export const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
     marginBottom: 12,
   },
-  imagePresetLabel: {
-    fontSize: 11,
-    color: '#64748B',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  presetPhotoChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 14,
-  },
+  imagePresetLabel: { fontSize: 11, color: '#64748B', fontWeight: '600', marginBottom: 8, },
+  presetPhotoChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14, },
   presetPhotoChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -1518,19 +981,9 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  presetPhotoChipActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
-    borderColor: '#38BDF8',
-  },
-  presetPhotoChipText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-  },
-  presetPhotoChipTextActive: {
-    color: '#38BDF8',
-    fontWeight: '700',
-  },
+  presetPhotoChipActive: { backgroundColor: 'rgba(56, 189, 248, 0.2)', borderColor: '#38BDF8', },
+  presetPhotoChipText: { fontSize: 11, fontWeight: '600', color: '#94A3B8', },
+  presetPhotoChipTextActive: { color: '#38BDF8', fontWeight: '700', },
   imagePreviewBox: {
     alignItems: 'center',
     marginBottom: 14,
@@ -1539,11 +992,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  imagePreviewThumb: {
-    width: '100%',
-    height: 140,
-    borderRadius: 10,
-  },
+  imagePreviewThumb: { width: '100%', height: 140, borderRadius: 10, },
   previewErrorOverlay: {
     position: 'absolute',
     top: 0,
@@ -1554,11 +1003,7 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  previewErrorText: {
-    fontSize: 11,
-    color: '#F59E0B',
-    fontWeight: '700',
-  },
+  previewErrorText: { fontSize: 11, color: '#F59E0B', fontWeight: '700', },
   sendImageBtn: {
     backgroundColor: '#38BDF8',
     paddingVertical: 14,
@@ -1566,14 +1011,8 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 4,
   },
-  sendImageBtnDisabled: {
-    opacity: 0.4,
-  },
-  sendImageBtnText: {
-    color: '#0F172A',
-    fontSize: 15,
-    fontWeight: '800',
-  },
+  sendImageBtnDisabled: { opacity: 0.4, },
+  sendImageBtnText: { color: '#0F172A', fontSize: 15, fontWeight: '800', },
 
   // Fullscreen Lightbox Preview Styles
   lightboxOverlay: {
@@ -1591,15 +1030,8 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  lightboxCloseText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  lightboxImage: {
-    width: '100%',
-    height: '80%',
-  },
+  lightboxCloseText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', },
+  lightboxImage: { width: '100%', height: '80%', },
 
   // Voice Note Card Styles
   voiceNoteCard: {
@@ -1622,46 +1054,20 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 10,
   },
-  voicePlayBtnActive: {
-    backgroundColor: '#F59E0B',
-  },
-  voicePlayIcon: {
-    fontSize: 12,
-    color: '#0F172A',
-    fontWeight: '800',
-  },
-  voiceWaveCol: {
-    flex: 1,
-  },
+  voicePlayBtnActive: { backgroundColor: '#F59E0B', },
+  voicePlayIcon: { fontSize: 12, color: '#0F172A', fontWeight: '800', },
+  voiceWaveCol: { flex: 1, },
   voiceHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 4,
   },
-  voiceWaveTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#38BDF8',
-  },
-  voiceDurationText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  voiceWaveBarsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  voiceWaveBar: {
-    width: 3,
-    backgroundColor: '#38BDF8',
-    borderRadius: 2,
-  },
-  voiceWaveBarPlaying: {
-    backgroundColor: '#F59E0B',
-  },
+  voiceWaveTitle: { fontSize: 12, fontWeight: '700', color: '#38BDF8', },
+  voiceDurationText: { fontSize: 10, fontWeight: '700', color: '#94A3B8', },
+  voiceWaveBarsRow: { flexDirection: 'row', alignItems: 'center', gap: 3, },
+  voiceWaveBar: { width: 3, backgroundColor: '#38BDF8', borderRadius: 2, },
+  voiceWaveBarPlaying: { backgroundColor: '#F59E0B', },
 
   // Location Sharing Card Styles
   locationCard: {
@@ -1675,29 +1081,11 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(16, 185, 129, 0.25)',
   },
-  locationIcon: {
-    fontSize: 22,
-    marginRight: 10,
-  },
-  locationCol: {
-    flex: 1,
-  },
-  locationTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#10B981',
-  },
-  locationCoords: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 2,
-  },
-  locationLink: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#38BDF8',
-    marginTop: 4,
-  },
+  locationIcon: { fontSize: 22, marginRight: 10, },
+  locationCol: { flex: 1, },
+  locationTitle: { fontSize: 12, fontWeight: '700', color: '#10B981', },
+  locationCoords: { fontSize: 11, color: '#94A3B8', marginTop: 2, },
+  locationLink: { fontSize: 11, fontWeight: '700', color: '#38BDF8', marginTop: 4, },
 
   // Story Ring Count Badge Styles
   storyCountBadge: {
@@ -1714,27 +1102,13 @@ export const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#0F172A',
   },
-  storyCountBadgeText: {
-    color: '#0F172A',
-    fontSize: 10,
-    fontWeight: '900',
-  },
+  storyCountBadgeText: { color: '#0F172A', fontSize: 10, fontWeight: '900', },
 
   // Outgoing Whisper Indicator Style
-  whisperBadgeMe: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#38BDF8',
-    marginBottom: 4,
-  },
+  whisperBadgeMe: { fontSize: 10, fontWeight: '700', color: '#38BDF8', marginBottom: 4, },
 
   // Poll Total Votes Counter
-  pollTotalVotesText: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 6,
-    textAlign: 'right',
-  },
+  pollTotalVotesText: { fontSize: 11, color: '#94A3B8', marginTop: 6, textAlign: 'right', },
 
   // Search Mode Footer Notice
   searchFooterNotice: {
@@ -1745,12 +1119,7 @@ export const styles = StyleSheet.create({
     borderTopColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
   },
-  searchFooterText: {
-    color: '#94A3B8',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
+  searchFooterText: { color: '#94A3B8', fontSize: 12, textAlign: 'center', lineHeight: 18, },
 
   // Compact Story Bar for Empty State
   storiesBarCompact: {
@@ -1784,12 +1153,7 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: Platform.OS === 'android' ? -2 : -1,
   },
-  imageRetryText: {
-    fontSize: 10,
-    color: '#38BDF8',
-    fontWeight: '700',
-    marginTop: 4,
-  },
+  imageRetryText: { fontSize: 10, color: '#38BDF8', fontWeight: '700', marginTop: 4, },
   fileAttachmentCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1801,41 +1165,19 @@ export const styles = StyleSheet.create({
     marginBottom: 6,
     gap: 10,
   },
-  fileAttachmentIcon: {
-    fontSize: 24,
-  },
-  fileAttachmentInfo: {
-    flex: 1,
-  },
-  fileAttachmentName: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  fileAttachmentType: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 2,
-  },
-  whisperNoticeLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  whisperLockIcon: {
-    fontSize: 12,
-  },
+  fileAttachmentIcon: { fontSize: 24, },
+  fileAttachmentInfo: { flex: 1, },
+  fileAttachmentName: { fontSize: 13, fontWeight: '700', color: '#FFFFFF', },
+  fileAttachmentType: { fontSize: 11, color: '#94A3B8', marginTop: 2, },
+  whisperNoticeLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, },
+  whisperLockIcon: { fontSize: 12, },
   whisperExitBtn: {
     backgroundColor: 'rgba(245, 158, 11, 0.25)',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
   },
-  whisperExitBtnText: {
-    fontSize: 11,
-    color: '#F59E0B',
-    fontWeight: '700',
-  },
+  whisperExitBtnText: { fontSize: 11, color: '#F59E0B', fontWeight: '700', },
   minimizedCallBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1847,24 +1189,9 @@ export const styles = StyleSheet.create({
     paddingVertical: 10,
     zIndex: 100,
   },
-  minimizedCallLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  minimizedCallPulseDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#10B981',
-  },
-  minimizedCallTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    maxWidth: 160,
-  },
+  minimizedCallLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, },
+  minimizedCallPulseDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#10B981', },
+  minimizedCallTitle: { fontSize: 13, fontWeight: '700', color: '#FFFFFF', maxWidth: 160, },
   minimizedCallTimer: {
     fontSize: 12,
     fontWeight: '700',
@@ -1874,22 +1201,14 @@ export const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
   },
-  minimizedCallRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  minimizedCallRight: { flexDirection: 'row', alignItems: 'center', gap: 8, },
   minimizedCallActionBtn: {
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
-  minimizedCallActionText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
+  minimizedCallActionText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF', },
   renderNoticeBanner: {
     backgroundColor: 'rgba(245, 158, 11, 0.12)',
     borderWidth: 1,
@@ -1899,12 +1218,7 @@ export const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 4,
   },
-  renderNoticeText: {
-    fontSize: 12,
-    color: '#F59E0B',
-    lineHeight: 16,
-    fontWeight: '600',
-  },
+  renderNoticeText: { fontSize: 12, color: '#F59E0B', lineHeight: 16, fontWeight: '600', },
   watchPartyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1916,25 +1230,10 @@ export const styles = StyleSheet.create({
     paddingVertical: 10,
     zIndex: 99,
   },
-  watchPartyBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  watchPartyBannerIcon: {
-    fontSize: 22,
-  },
-  watchPartyBannerTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  watchPartyBannerSub: {
-    fontSize: 11,
-    color: '#A5B4FC',
-    marginTop: 2,
-  },
+  watchPartyBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, },
+  watchPartyBannerIcon: { fontSize: 22, },
+  watchPartyBannerTitle: { fontSize: 13, fontWeight: '800', color: '#FFFFFF', },
+  watchPartyBannerSub: { fontSize: 11, color: '#A5B4FC', marginTop: 2, },
   watchPartyJoinBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1942,11 +1241,7 @@ export const styles = StyleSheet.create({
     backgroundColor: '#4F46E5',
     marginLeft: 8,
   },
-  watchPartyJoinText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-  },
+  watchPartyJoinText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800', },
   watchPartyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1959,10 +1254,5 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(234, 179, 8, 0.45)',
   },
-  watchPartyBadgeText: {
-    color: '#FACC15',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
+  watchPartyBadgeText: { color: '#FACC15', fontSize: 10, fontWeight: '800', letterSpacing: 0.5, },
 });

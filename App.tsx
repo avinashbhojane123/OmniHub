@@ -19,7 +19,6 @@ import { AlarmRingingModal } from './src/components/AlarmRingingModal';
 import { ThemeProvider, useAppTheme } from './src/hooks/useTheme';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { settingsRepository } from './src/database/repositories/SettingsRepository';
-import { googleSheetsSyncService } from './src/services/backup/GoogleSheetsSyncService';
 import { taskBackendSyncService } from './src/services/tasks/TaskBackendSyncService';
 import { FocusTimerProvider } from './src/context/FocusTimerContext';
 
@@ -131,7 +130,6 @@ function MainApp() {
       // In background: quietly restore scheduled alarms, pending reminders, & cloud state without stalling cold-start UI
       Promise.all([
         notificationService.restoreAllReminders(),
-        googleSheetsSyncService.autoRestoreIfEmptyOnStartup(),
         taskBackendSyncService.syncWithBackend(),
       ]).catch((e) => console.warn('Background reminder restoration error:', e));
     } catch (err: any) {

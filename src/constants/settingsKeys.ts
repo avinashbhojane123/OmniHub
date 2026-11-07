@@ -96,4 +96,10 @@ export function getChatDraftKey(roomKey: string): string {
   return `chat_draft_${roomKey.trim().toLowerCase()}`;
 }
 
+export const DEFAULT_GOOGLE_SHEET_DEPLOYMENT_ID =
+  'AKfycbwWSp3Y47KKz4LSJTgGRfUkh0qwDNZnuqSWG2Ud7tBdKmJhBI_bMhh4Lidi9jE5tKzZ';
+
+export const DEFAULT_GOOGLE_SHEET_WEBHOOK_URL =
+  `https://script.google.com/macros/s/${DEFAULT_GOOGLE_SHEET_DEPLOYMENT_ID}/exec`;
+
 export default SETTINGS_KEYS;

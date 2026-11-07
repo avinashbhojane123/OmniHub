@@ -822,9 +822,10 @@ describe('TaskService Comprehensive Production Suite', () => {
     });
 
     it('ensureUpcomingRecurrences should not re-spawn skipped recurrence instance', async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
       const task = await taskService.createTask({
         title: 'Daily Calisthenics',
-        date: '2026-10-31',
+        date: today,
         recurrenceRule: {
           type: 'daily',
           interval: 1,
@@ -894,10 +895,17 @@ describe('TaskService Comprehensive Production Suite', () => {
     });
 
     it('weekly recurrence on Saturday and Sunday should advance to Sunday of same weekend', async () => {
-      // 2026-10-31 is Saturday (day 6)
+      // Find the next upcoming Saturday
+      const d = new Date();
+      const day = d.getDay();
+      const diffToSaturday = (6 - day + 7) % 7 || 7;
+      const saturday = addDays(d, diffToSaturday);
+      const saturdayStr = format(saturday, 'yyyy-MM-dd');
+      const sundayStr = format(addDays(saturday, 1), 'yyyy-MM-dd');
+
       const task = await taskService.createTask({
         title: 'Weekend Yoga',
-        date: '2026-10-31',
+        date: saturdayStr,
         recurrenceRule: {
           type: 'weekly',
           interval: 2,
@@ -909,8 +917,8 @@ describe('TaskService Comprehensive Production Suite', () => {
       const series = await taskService.getTasksBySeriesId(task.seriesId!);
       const nextInstance = series.find((t) => t.id !== task.id);
       expect(nextInstance).toBeDefined();
-      // Next instance MUST be Sunday 2026-11-01 of the same weekend
-      expect(nextInstance?.date).toBe('2026-11-01');
+      // Next instance MUST be Sunday of the same weekend
+      expect(nextInstance?.date).toBe(sundayStr);
     });
 
     it('getTasksByDate and detectConflicts should safely handle JS Date objects and numeric timestamps', async () => {
