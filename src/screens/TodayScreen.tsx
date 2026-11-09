@@ -345,11 +345,22 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
     [overdueTasks]
   );
 
+  const loudTodayTasks = useMemo(() => {
+    return todayTasks.filter(
+      (t) =>
+        t.priority === 'high' ||
+        Boolean(t.recurrenceRule?.isLoudAlarm) ||
+        Boolean((t as any).isLoud) ||
+        Boolean((t as any).isLoudAlarm)
+    );
+  }, [todayTasks]);
+
   const displayedTodayTasks = useMemo(() => {
     if (taskFilter === 'pending') return pendingTodayTasks;
     if (taskFilter === 'completed') return completedTodayTasks;
+    if (taskFilter === 'loud') return loudTodayTasks;
     return todayTasks;
-  }, [taskFilter, pendingTodayTasks, completedTodayTasks, todayTasks]);
+  }, [taskFilter, pendingTodayTasks, completedTodayTasks, loudTodayTasks, todayTasks]);
 
   const calendarFilterCounts = useMemo(() => {
     return {
@@ -726,6 +737,14 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
             onPress={handlePressNextUp}
             onComplete={handleCompleteNextUp}
             onSnooze={unifiedNextUp.type === 'task' ? handleSnoozeNextUp : undefined}
+            onFocus={
+              unifiedNextUp.type === 'task'
+                ? () => {
+                    setFocusTaskId(unifiedNextUp.id);
+                    setFocusTimerVisible(true);
+                  }
+                : undefined
+            }
             formatTaskTime={formatTaskTime}
           />
         )}
@@ -849,8 +868,6 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({ navigation }) => {
           eventToEdit={eventToEdit}
         />
       )}
-
-      {/* Focus / Pomodoro Timer Modal (Lazy Mounted) */}
 
       {/* Focus / Pomodoro Timer Modal (Lazy Mounted) */}
       {focusTimerVisible && (

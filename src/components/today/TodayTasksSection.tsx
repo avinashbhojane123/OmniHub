@@ -5,7 +5,7 @@ import { useAppTheme } from '../../hooks/useTheme';
 import { radius, spacing } from '../../theme';
 import { TodayTaskItem } from './TodayTaskItem';
 
-export type TaskFilterType = 'all' | 'pending' | 'completed';
+export type TaskFilterType = 'all' | 'pending' | 'completed' | 'loud';
 
 interface TodayTasksSectionProps {
   tasks: Task[];
@@ -28,7 +28,7 @@ interface TodayTasksSectionProps {
   formatTaskTime: (timeStr?: string) => string;
 }
 
-const FILTER_KEYS: TaskFilterType[] = ['all', 'pending', 'completed'];
+const FILTER_KEYS: TaskFilterType[] = ['all', 'pending', 'completed', 'loud'];
 
 export const TodayTasksSectionComponent: React.FC<TodayTasksSectionProps> = ({
   tasks,
@@ -126,7 +126,7 @@ export const TodayTasksSectionComponent: React.FC<TodayTasksSectionProps> = ({
         );
       })()}
 
-      {/* Task Status Filters (All, Pending, Done) with accurate counts */}
+      {/* Task Status Filters (All, Pending, Done, Loud) with accurate counts */}
       {totalCount > 0 && (
         <View style={styles.taskFilterRow}>
           {FILTER_KEYS.map((filterKey) => {
@@ -135,14 +135,24 @@ export const TodayTasksSectionComponent: React.FC<TodayTasksSectionProps> = ({
                 ? totalCount
                 : filterKey === 'pending'
                 ? pendingCount
-                : completedCount;
+                : filterKey === 'completed'
+                ? completedCount
+                : allTasks.filter(
+                    t =>
+                      t.priority === 'high' ||
+                      Boolean(t.recurrenceRule?.isLoudAlarm) ||
+                      Boolean((t as any).isLoud) ||
+                      Boolean((t as any).isLoudAlarm)
+                  ).length;
             const isActive = taskFilter === filterKey;
             const label =
               filterKey === 'all'
                 ? `All (${count})`
                 : filterKey === 'pending'
                 ? `Pending (${count})`
-                : `Done (${count})`;
+                : filterKey === 'completed'
+                ? `Done (${count})`
+                : `Loud (${count})`;
             return (
               <TouchableOpacity
                 key={filterKey}
@@ -150,7 +160,15 @@ export const TodayTasksSectionComponent: React.FC<TodayTasksSectionProps> = ({
                 style={[
                   styles.taskFilterChip,
                   isActive
-                    ? { backgroundColor: colors.primary, borderColor: colors.primary }
+                    ? {
+                        backgroundColor: colors.primary,
+                        borderColor: colors.primary,
+                        shadowColor: colors.primary,
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 4,
+                        elevation: 2,
+                      }
                     : { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
                 ]}
                 hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
@@ -161,7 +179,7 @@ export const TodayTasksSectionComponent: React.FC<TodayTasksSectionProps> = ({
                 <Text
                   style={[
                     styles.taskFilterChipText,
-                    { color: isActive ? '#FFFFFF' : colors.textSecondary },
+                    { color: isActive ? '#FFFFFF' : colors.textSecondary, fontWeight: isActive ? '800' : '600' },
                   ]}
                 >
                   {label}

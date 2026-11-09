@@ -48,15 +48,46 @@ export const TodayHabitsSectionComponent: React.FC<TodayHabitsSectionProps> = ({
       {/* Habit Streaks: Header & Actions */}
       <View style={styles.habitStreaksHeaderRow}>
         <View style={styles.habitStreaksTitleCol}>
-          <Text style={[styles.habitStreaksTitle, { color: colors.text }]}>
-            Habit Streaks {habits.length > 0 ? `(${completedTodayCount}/${habits.length})` : ''}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.habitStreaksTitle, { color: colors.text }]}>
+              Daily Rituals
+            </Text>
+            {habits.length > 0 && (
+              <View
+                style={[
+                  styles.tallyChip,
+                  {
+                    backgroundColor:
+                      completedTodayCount === habits.length
+                        ? 'rgba(16, 185, 129, 0.16)'
+                        : colors.surfaceElevated,
+                    borderColor:
+                      completedTodayCount === habits.length
+                        ? '#10B981'
+                        : colors.borderSubtle,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.tallyChipText,
+                    {
+                      color:
+                        completedTodayCount === habits.length
+                          ? '#10B981'
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  {completedTodayCount === habits.length
+                    ? '🎉 All Done'
+                    : `${completedTodayCount} of ${habits.length} Done`}
+                </Text>
+              </View>
+            )}
+          </View>
           <Text style={[styles.habitStreaksSubtitle, { color: colors.textSecondary }]}>
-            {habits.length > 0
-              ? completedTodayCount === habits.length
-                ? '🎉 All routines completed today!'
-                : `${completedTodayCount} of ${habits.length} routines completed`
-              : 'Consistency creates destiny'}
+            Consistency creates destiny
           </Text>
         </View>
 
@@ -195,6 +226,21 @@ const styles = StyleSheet.create({
   },
   habitStreaksTitleCol: {
     flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tallyChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  tallyChipText: {
+    fontSize: 11,
+    fontWeight: '800',
   },
   headerActionsRow: {
     flexDirection: 'row',

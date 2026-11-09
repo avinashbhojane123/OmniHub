@@ -15,17 +15,16 @@ interface TodayTaskItemProps {
   formatTaskTime: (timeStr?: string) => string;
 }
 
-const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
+export const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
   task,
   isOverdue,
   onToggle,
   onPress,
   onDelete,
   onSnooze,
-  onToggleSubtask,
   formatTaskTime,
 }) => {
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const isTaskDone = task.status === 'completed';
   const isTaskCancelled = task.status === 'cancelled';
 
@@ -43,15 +42,29 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
     return formatTaskTime(`${hh}:${mm}`);
   }, [isSnoozed, task.snoozeUntil, formatTaskTime]);
 
-  const accentHighlight = task.recurrenceRule?.accentColor;
+  const accentHighlight = task.recurrenceRule?.accentColor || task.accentColor;
+
+  const priorityColor =
+    task.priority === 'high'
+      ? '#EF4444'
+      : task.priority === 'medium'
+      ? '#F59E0B'
+      : '#64748B';
+
+  const priorityLabel =
+    task.priority === 'high'
+      ? 'High'
+      : task.priority === 'medium'
+      ? 'Med'
+      : 'Low';
 
   return (
     <View
       style={[
         styles.card,
         {
-          backgroundColor: colors.surface,
-          borderColor: colors.borderSubtle,
+          backgroundColor: isDark ? '#15112E' : colors.surface,
+          borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.borderSubtle,
           ...(accentHighlight && !isTaskDone ? { borderLeftColor: accentHighlight, borderLeftWidth: 3.5 } : {}),
         },
       ]}
@@ -61,7 +74,7 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
         onPress={() => onToggle(task)}
         style={[
           styles.checkbox,
-          { borderColor: colors.borderSubtle },
+          { borderColor: isDark ? 'rgba(255, 255, 255, 0.2)' : colors.borderSubtle },
           isTaskDone && {
             backgroundColor: colors.primary,
             borderColor: colors.primary,
@@ -86,7 +99,7 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
 
       {/* Task Info Column */}
       <View style={styles.infoCol}>
-        {/* Top Row: Title (tap to edit) + Delete Button */}
+        {/* Top Row: Title (tap to edit) + Priority Pip + Delete Button */}
         <View style={styles.titleRow}>
           <TouchableOpacity
             style={styles.titleTouchable}
@@ -118,8 +131,16 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Metadata Row: Badges, Time, Recurrence & Quick Snooze */}
+        {/* Metadata Row: Priority Pip, Category Badges, Time, Recurrence & Quick Snooze */}
         <View style={styles.metaRow}>
+          {/* Priority Pip Capsule */}
+          <View style={[styles.priorityPill, { backgroundColor: withOpacity(priorityColor, 0.12) }]}>
+            <View style={[styles.priorityPip, { backgroundColor: priorityColor }]} />
+            <Text style={[styles.priorityPillText, { color: priorityColor }]}>
+              {priorityLabel}
+            </Text>
+          </View>
+
           {isTaskCancelled && (
             <View
               style={[
@@ -135,6 +156,7 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
               </Text>
             </View>
           )}
+
           {isOverdue && !isTaskDone && !isTaskCancelled && !isSnoozed && (
             <View
               style={[
@@ -172,17 +194,20 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
               </Text>
             </View>
           )}
+
           {task.startTime && (
             <Text style={[styles.taskTime, { color: colors.textMuted }]}>
               ⏰ {formatTaskTime(task.startTime)}
               {task.endTime ? ` – ${formatTaskTime(task.endTime)}${task.recurrenceRule?.isOvernight ? ' (+1d)' : ''}` : ''}
             </Text>
           )}
+
           {task.recurrenceRule && task.recurrenceRule.type !== 'none' && (
             <Text style={[styles.taskTime, { color: colors.primary }]}>
               🔄 {task.recurrenceRule.type}
             </Text>
           )}
+
           {isSnoozed && (
             <View
               style={[
@@ -198,10 +223,11 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
               </Text>
             </View>
           )}
+
           {!isTaskDone && (
             <TouchableOpacity
               onPress={() => onSnooze(task)}
-              style={[styles.snoozeBtn, { borderColor: colors.borderSubtle }]}
+              style={[styles.snoozeBtn, { borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : colors.borderSubtle }]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
               accessibilityLabel={`Snooze task ${task.title} 10 minutes`}
@@ -210,8 +236,6 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
             </TouchableOpacity>
           )}
         </View>
-
-
       </View>
     </View>
   );
@@ -219,30 +243,31 @@ const TodayTaskItemComponent: React.FC<TodayTaskItemProps> = ({
 
 const styles = StyleSheet.create({
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: 14,
+    borderWidth: 1,
     padding: 14,
     marginBottom: 10,
-    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 5,
+    elevation: 2,
   },
   checkbox: {
     width: 24,
     height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
+    borderRadius: 7,
+    borderWidth: 1.8,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    marginTop: 2,
   },
   statusCheckmark: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '900',
   },
   infoCol: {
@@ -252,45 +277,56 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 8,
+    marginBottom: 6,
   },
   titleTouchable: {
     flex: 1,
+    marginRight: 8,
   },
   title: {
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 19,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    lineHeight: 20,
   },
   titleDone: {
     textDecorationLine: 'line-through',
+    opacity: 0.6,
   },
   deleteBtn: {
     padding: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   deleteIcon: {
-    fontSize: 13,
+    fontSize: 14,
   },
   metaRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
-    marginTop: 6,
+    marginTop: 4,
   },
   priorityPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-    borderWidth: 1,
+  },
+  priorityPip: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   priorityPillText: {
     fontSize: 10,
     fontWeight: '800',
-    textTransform: 'uppercase',
   },
   categoryPill: {
-    paddingHorizontal: 6,
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
     borderWidth: 1,
@@ -300,55 +336,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   taskTime: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  snoozeBtn: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  snoozeText: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '600',
   },
   snoozeActivePill: {
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
     borderWidth: 1,
   },
   snoozeActiveText: {
     fontSize: 10,
-    fontWeight: '700',
-  },
-  bulletsWrapper: {
-    marginTop: 4,
-    gap: 2,
-  },
-  bulletRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  bulletBullet: {
-    fontSize: 13,
     fontWeight: '800',
   },
-  bulletText: {
-    fontSize: 12,
+  snoozeBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
   },
-  bulletTextDone: {
-    textDecorationLine: 'line-through',
-  },
-  moreBulletsText: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
-    marginLeft: 12,
+  snoozeText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
 });
 
 export const TodayTaskItem = React.memo(TodayTaskItemComponent);
-
