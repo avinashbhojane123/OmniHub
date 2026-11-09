@@ -561,7 +561,7 @@ export const KeepNotesScreen: React.FC = () => {
   ];
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+    <View style={[styles.screen, { backgroundColor: isDark ? '#080712' : colors.background, paddingTop: insets.top }]}>
       <StatusBar barStyle={colors.statusBar} />
 
       {/* TOP BAR / SELECTION HEADER */}
@@ -570,8 +570,8 @@ export const KeepNotesScreen: React.FC = () => {
           style={[
             styles.selectionHeader,
             {
-              backgroundColor: isDark ? '#1E293B' : '#EFF6FF',
-              borderBottomColor: colors.borderSubtle,
+              backgroundColor: isDark ? '#14102C' : '#EFF6FF',
+              borderBottomColor: isDark ? '#2D2355' : colors.borderSubtle,
             },
           ]}
         >
@@ -735,8 +735,8 @@ export const KeepNotesScreen: React.FC = () => {
             style={[
               styles.searchBarPill,
               {
-                backgroundColor: colors.surface,
-                borderColor: colors.borderSubtle,
+                backgroundColor: isDark ? '#14102C' : colors.surface,
+                borderColor: isDark ? '#2D2355' : colors.borderSubtle,
               },
             ]}
           >
@@ -933,9 +933,13 @@ export const KeepNotesScreen: React.FC = () => {
                       backgroundColor: isActive
                         ? colors.primary
                         : isDark
-                          ? 'rgba(255,255,255,0.06)'
+                          ? '#14102C'
                           : '#F1F5F9',
-                      borderColor: isActive ? colors.primary : colors.borderSubtle,
+                      borderColor: isActive
+                        ? colors.primary
+                        : isDark
+                          ? '#2D2355'
+                          : colors.borderSubtle,
                     },
                   ]}
                   onPress={() => handleSelectTab(tab.key)}
@@ -961,9 +965,13 @@ export const KeepNotesScreen: React.FC = () => {
                   backgroundColor: selectedColor
                     ? colors.primary
                     : isDark
-                      ? 'rgba(255,255,255,0.06)'
+                      ? '#14102C'
                       : '#F1F5F9',
-                  borderColor: selectedColor ? colors.primary : colors.borderSubtle,
+                  borderColor: selectedColor
+                    ? colors.primary
+                    : isDark
+                      ? '#2D2355'
+                      : colors.borderSubtle,
                 },
               ]}
               onPress={() => setShowColorFilterPicker(true)}
@@ -993,9 +1001,13 @@ export const KeepNotesScreen: React.FC = () => {
                       backgroundColor: isLabelActive
                         ? colors.primary
                         : isDark
-                          ? 'rgba(255,255,255,0.06)'
+                          ? '#14102C'
                           : '#F1F5F9',
-                      borderColor: isLabelActive ? colors.primary : colors.borderSubtle,
+                      borderColor: isLabelActive
+                        ? colors.primary
+                        : isDark
+                          ? '#2D2355'
+                          : colors.borderSubtle,
                     },
                   ]}
                   onPress={() => {
@@ -1019,8 +1031,8 @@ export const KeepNotesScreen: React.FC = () => {
               style={[
                 styles.tabChip,
                 {
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9',
-                  borderColor: colors.borderSubtle,
+                  backgroundColor: isDark ? '#14102C' : '#F1F5F9',
+                  borderColor: isDark ? '#2D2355' : colors.borderSubtle,
                 },
               ]}
               onPress={() => setShowManageLabelsModal(true)}
@@ -1307,8 +1319,8 @@ export const KeepNotesScreen: React.FC = () => {
             style={[
               styles.bottomDock,
               {
-                backgroundColor: colors.surface,
-                borderColor: colors.borderSubtle,
+                backgroundColor: isDark ? '#14102C' : colors.surface,
+                borderColor: isDark ? '#2D2355' : colors.borderSubtle,
               },
             ]}
           >
@@ -1512,7 +1524,7 @@ const styles = StyleSheet.create({
   sectionContainer: { marginBottom: 16, },
   sectionHeading: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.8,
     marginBottom: 8,
     marginLeft: 6,
