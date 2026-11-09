@@ -1286,7 +1286,7 @@ export const ChatRoomScreen: React.FC = () => {
       case 'dark-slate':
         return '#0F172A';
       default:
-        return '#0B141A';
+        return '#080712';
     }
   };
 

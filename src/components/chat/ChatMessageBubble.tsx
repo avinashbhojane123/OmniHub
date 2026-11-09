@@ -294,19 +294,19 @@ export interface ChatMessageBubbleProps {
 }
 
 const NICK_PALETTE = [
-  '#25D366', // WhatsApp Green
+  '#10B981', // Emerald
   '#38BDF8', // Sky Cyan
   '#F472B6', // Rose Pink
   '#FBBF24', // Amber
   '#A78BFA', // Violet
   '#FB923C', // Coral Orange
-  '#34D399', // Emerald
+  '#34D399', // Mint
   '#60A5FA', // Dodger Blue
   '#E879F9', // Orchid
 ];
 
 export const getMemberNicknameColor = (nick?: string | null): string => {
-  if (!nick) return '#25D366';
+  if (!nick) return '#10B981';
   let hash = 0;
   for (let i = 0; i < nick.length; i++) {
     hash = nick.charCodeAt(i) + ((hash << 5) - hash);
@@ -432,12 +432,12 @@ const renderMessageTextWithLinks = (
         <View
           key={`code_${match.index}`}
           style={{
-            backgroundColor: '#0B0F19',
+            backgroundColor: '#0E0B20',
             borderRadius: 8,
             padding: 10,
             marginVertical: 4,
             borderWidth: 1,
-            borderColor: 'rgba(255, 255, 255, 0.1)',
+            borderColor: '#231C42',
           }}
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>

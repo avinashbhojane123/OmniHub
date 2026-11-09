@@ -86,8 +86,8 @@ describe('useToday & Time Utilities Suite', () => {
 
     it('should prioritize calendar events scheduled for upcoming hours', () => {
       const now = new Date();
-      const nextH = (now.getHours() + 1) % 24;
-      const timeStr = `${String(nextH).padStart(2, '0')}:00`;
+      const timeStr =
+        now.getHours() >= 23 ? '23:59' : `${String(now.getHours() + 1).padStart(2, '0')}:00`;
 
       const calEvent: CalendarEvent = {
         id: 'cal-1',
