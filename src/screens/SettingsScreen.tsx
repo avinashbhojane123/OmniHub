@@ -11,18 +11,11 @@ import {
   Platform,
   Linking,
   Share,
-  Modal,
-  KeyboardAvoidingView,
-  TouchableWithoutFeedback,
-  Keyboard,
-  ActivityIndicator,
-  TextInput,
   BackHandler,
 } from 'react-native';
 import notifee, { AuthorizationStatus } from '@notifee/react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { format } from 'date-fns';
 import { useAppTheme } from '../hooks/useTheme';
 import { settingsRepository } from '../database/repositories/SettingsRepository';
 import { SETTINGS_KEYS } from '../constants/settingsKeys';
@@ -97,7 +90,6 @@ export const SettingsScreen: React.FC = () => {
     } catch (err) {
       console.warn('Failed to load DB diagnostics in SettingsScreen:', err);
     }
-
   }, []);
 
   useFocusEffect(
@@ -163,7 +155,6 @@ export const SettingsScreen: React.FC = () => {
     await settingsRepository.set(SETTINGS_KEYS.DEFAULT_SNOOZE_MINUTES, mins);
   };
 
-
   const handleExportBackup = async () => {
     try {
       const json = await backupService.exportBackup();
@@ -216,41 +207,62 @@ export const SettingsScreen: React.FC = () => {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTitleRow}>
+            {showBackBtn && (
+              <TouchableOpacity
+                onPress={handleGoBack}
+                style={[styles.backBtn, { borderColor: colors.cardBorder, backgroundColor: colors.surfaceElevated }]}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
+                <Text style={[styles.backBtnText, { color: colors.text }]}>‹</Text>
+              </TouchableOpacity>
+            )}
             <View style={styles.headerTextCol}>
               <Text style={[styles.title, typography.headerLarge, { color: colors.text }]}>
                 Settings
               </Text>
               <Text style={[styles.sub, typography.caption, { color: colors.textSecondary }]}>
-                Notifications, Reminders & Cloud Sync
+                Notifications, Reminders & System Diagnostics
               </Text>
             </View>
           </View>
         </View>
 
-
-        {/* Section: Android Notifications & Alarms */}
+        {/* Section 1: Android Notifications & Alarms */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, typography.caption, { color: colors.textSecondary }]}>
             ANDROID NOTIFICATIONS & ALARMS
           </Text>
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            {/* Complete Do Not Disturb (DND) */}
-            <View style={[styles.settingRow, dndEnabled && { backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: radius.md, paddingHorizontal: 8 }]}>
+            {/* Master Do Not Disturb (DND) */}
+            <View
+              style={[
+                styles.settingRow,
+                styles.dndRow,
+                dndEnabled && styles.dndRowActive,
+              ]}
+            >
               <View style={styles.settingTextCol}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={[styles.settingLabel, typography.title, { color: dndEnabled ? colors.danger : colors.text }]}>
+                <View style={styles.labelWithBadgeRow}>
+                  <Text
+                    style={[
+                      styles.settingLabel,
+                      typography.title,
+                      { color: dndEnabled ? colors.danger : colors.text },
+                    ]}
+                  >
                     🌙 Complete Do Not Disturb
                   </Text>
                   {dndEnabled && (
-                    <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.danger + '20', borderWidth: 1, borderColor: colors.danger }}>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: colors.danger }}>MUTED</Text>
+                    <View style={styles.mutedBadge}>
+                      <Text style={styles.mutedBadgeText}>MUTED</Text>
                     </View>
                   )}
                 </View>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
                   {dndEnabled
                     ? 'All alarms, reminders & alerts are completely silenced application-wide.'
-                    : 'Mute all alarms, routines, loud reminders & battery alerts application-wide'}
+                    : 'Mute all alarms, routines, loud reminders & battery alerts application-wide.'}
                 </Text>
               </View>
               <Switch
@@ -263,6 +275,7 @@ export const SettingsScreen: React.FC = () => {
 
             <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
 
+            {/* Enable Reminders Switch */}
             <View style={styles.settingRow}>
               <View style={styles.settingTextCol}>
                 <Text style={[styles.settingLabel, typography.title, { color: colors.text }]}>
@@ -343,7 +356,7 @@ export const SettingsScreen: React.FC = () => {
                   Default Snooze
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
-                  Alarm snooze duration
+                  DEFAULT ALARM RE-TRIGGER CADENCE
                 </Text>
               </View>
               <View style={styles.snoozeGridRow}>
@@ -354,6 +367,7 @@ export const SettingsScreen: React.FC = () => {
                       key={mins}
                       disabled={!notificationsEnabled}
                       onPress={() => handleSelectSnooze(mins)}
+                      activeOpacity={0.8}
                       style={[
                         styles.snoozeColBtn,
                         {
@@ -402,16 +416,20 @@ export const SettingsScreen: React.FC = () => {
                   ]
                 );
               }}
+              activeOpacity={0.7}
               style={styles.actionRow}
               accessibilityRole="button"
               accessibilityLabel="Open Lock Screen Alarm Pop-up Settings"
             >
+              <View style={styles.actionIconPillPurple}>
+                <Text style={styles.actionIconText}>📱</Text>
+              </View>
               <View style={styles.settingTextCol}>
-                <Text style={[styles.actionLabel, typography.title, { color: '#8B5CF6' }]}>
-                  📱 Lock Screen Alarm Pop-up (MIUI / HyperOS)
+                <Text style={[styles.actionLabel, typography.title, { color: '#A78BFA' }]}>
+                  Lock Screen Alarm Pop-up (MIUI / HyperOS)
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
-                  Grant permission to show full-screen alarm window when locked
+                  Allow full-screen ringing window over lock screen
                 </Text>
               </View>
               <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
@@ -458,16 +476,20 @@ export const SettingsScreen: React.FC = () => {
                   ]
                 );
               }}
+              activeOpacity={0.7}
               style={styles.actionRow}
               accessibilityRole="button"
               accessibilityLabel="Open AutoStart and Battery Settings"
             >
+              <View style={styles.actionIconPillGreen}>
+                <Text style={styles.actionIconText}>⚡</Text>
+              </View>
               <View style={styles.settingTextCol}>
-                <Text style={[styles.actionLabel, typography.title, { color: '#10B981' }]}>
-                  ⚡ Auto-Start & Battery (No Restrictions)
+                <Text style={[styles.actionLabel, typography.title, { color: '#34D399' }]}>
+                  Auto-Start & Battery (No Restrictions)
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
-                  Prevent Xiaomi from killing background alarms and timers
+                  Prevent OEM task killer from terminating background timers
                 </Text>
               </View>
               <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
@@ -484,13 +506,17 @@ export const SettingsScreen: React.FC = () => {
                   Linking.openSettings();
                 }
               }}
+              activeOpacity={0.7}
               style={styles.actionRow}
               accessibilityRole="button"
               accessibilityLabel="Open Exact Alarm System Settings"
             >
+              <View style={styles.actionIconPillAmber}>
+                <Text style={styles.actionIconText}>⏰</Text>
+              </View>
               <View style={styles.settingTextCol}>
-                <Text style={[styles.actionLabel, typography.title, { color: colors.text }]}>
-                  ⏰ Alarms & Reminders (Android 12+)
+                <Text style={[styles.actionLabel, typography.title, { color: '#FBBF24' }]}>
+                  Alarms & Reminders (Android 12+)
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
                   Allow exact alarm scheduling without Doze throttling
@@ -501,10 +527,10 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Section: Local Data & Cloud Backup */}
+        {/* Section 2: Local Data & Cloud Backup */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, typography.caption, { color: colors.textSecondary }]}>
-            DATA & BACKUP
+            LOCAL DATA & BACKUP
           </Text>
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {/* Storage Diagnostic Chips */}
@@ -514,22 +540,33 @@ export const SettingsScreen: React.FC = () => {
                 { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle },
               ]}
             >
-              <Text style={[styles.storageStatsTitle, { color: colors.textSecondary }]}>
-                LOCAL DATABASE INVENTORY
-              </Text>
+              <View style={styles.storageHeaderRow}>
+                <View style={styles.emeraldBeacon} />
+                <Text style={[styles.storageStatsTitle, { color: colors.textSecondary }]}>
+                  LOCAL DATABASE INVENTORY
+                </Text>
+              </View>
               <View style={styles.storageStatsGrid}>
-                <Text style={[styles.storageStatChip, { color: colors.text }]}>
-                  📋 <Text style={styles.boldNum}>{dbCounts.tasks}</Text> Tasks
-                </Text>
-                <Text style={[styles.storageStatChip, { color: colors.text }]}>
-                  🔄 <Text style={styles.boldNum}>{dbCounts.habits}</Text> Habits
-                </Text>
-                <Text style={[styles.storageStatChip, { color: colors.text }]}>
-                  📝 <Text style={styles.boldNum}>{dbCounts.notes}</Text> Notes
-                </Text>
-                <Text style={[styles.storageStatChip, { color: colors.text }]}>
-                  📅 <Text style={styles.boldNum}>{dbCounts.events}</Text> Events
-                </Text>
+                <View style={[styles.storageStatBadge, { borderColor: colors.borderSubtle }]}>
+                  <Text style={[styles.storageStatChip, { color: colors.text }]}>
+                    📋 <Text style={styles.boldNum}>{dbCounts.tasks}</Text> Tasks
+                  </Text>
+                </View>
+                <View style={[styles.storageStatBadge, { borderColor: colors.borderSubtle }]}>
+                  <Text style={[styles.storageStatChip, { color: colors.text }]}>
+                    🔄 <Text style={styles.boldNum}>{dbCounts.habits}</Text> Habits
+                  </Text>
+                </View>
+                <View style={[styles.storageStatBadge, { borderColor: colors.borderSubtle }]}>
+                  <Text style={[styles.storageStatChip, { color: colors.text }]}>
+                    📝 <Text style={styles.boldNum}>{dbCounts.notes}</Text> Notes
+                  </Text>
+                </View>
+                <View style={[styles.storageStatBadge, { borderColor: colors.borderSubtle }]}>
+                  <Text style={[styles.storageStatChip, { color: colors.text }]}>
+                    📅 <Text style={styles.boldNum}>{dbCounts.events}</Text> Events
+                  </Text>
+                </View>
               </View>
             </View>
 
@@ -537,13 +574,17 @@ export const SettingsScreen: React.FC = () => {
 
             <TouchableOpacity
               onPress={handleExportBackup}
+              activeOpacity={0.7}
               style={styles.actionRow}
               accessibilityRole="button"
               accessibilityLabel="Export Backup"
             >
+              <View style={styles.actionIconPillLavender}>
+                <Text style={styles.actionIconText}>💾</Text>
+              </View>
               <View style={styles.settingTextCol}>
                 <Text style={[styles.actionLabel, typography.title, { color: colors.primaryLight }]}>
-                  💾 Export SQLite Backup (Share JSON)
+                  Export SQLite Backup (Share JSON)
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
                   Exports all tasks, habits, calendar events, notes & settings
@@ -551,11 +592,10 @@ export const SettingsScreen: React.FC = () => {
               </View>
               <Text style={[styles.chevron, { color: colors.textMuted }]}>›</Text>
             </TouchableOpacity>
-
           </View>
         </View>
 
-        {/* Section: About & Privacy */}
+        {/* Section 3: About & Privacy */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, typography.caption, { color: colors.textSecondary }]}>
             ABOUT & PRIVACY
@@ -568,13 +608,17 @@ export const SettingsScreen: React.FC = () => {
                   'LifePlanner & Tasks stores 100% of your tasks, habits, notes, and alarms locally on your device in an encrypted SQLite database.\n\n• Zero Cloud Telemetry\n• No Third-Party Analytics Trackers\n• Full Offline Independence\n• You Own Your Data'
                 );
               }}
+              activeOpacity={0.7}
               style={styles.actionRow}
               accessibilityRole="button"
               accessibilityLabel="Open Privacy Policy"
             >
+              <View style={styles.actionIconPillBlue}>
+                <Text style={styles.actionIconText}>🛡️</Text>
+              </View>
               <View style={styles.settingTextCol}>
                 <Text style={[styles.actionLabel, typography.title, { color: colors.text }]}>
-                  🛡️ Privacy Architecture
+                  Privacy Architecture
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
                   100% on-device SQLite storage, zero cloud tracking
@@ -592,13 +636,17 @@ export const SettingsScreen: React.FC = () => {
                   'Built with React Native 0.87, React 19, and OP-Engineering OP-SQLite.\n\nOpen Source Software licensed under the MIT License.\n\nDesigned for extreme productivity, GTD task planning, and habit mastery.'
                 );
               }}
+              activeOpacity={0.7}
               style={styles.actionRow}
               accessibilityRole="button"
               accessibilityLabel="Open About & Software Licenses"
             >
+              <View style={styles.actionIconPillBlue}>
+                <Text style={styles.actionIconText}>ℹ️</Text>
+              </View>
               <View style={styles.settingTextCol}>
                 <Text style={[styles.actionLabel, typography.title, { color: colors.text }]}>
-                  ℹ️ About & Software Licenses
+                  About & Software Licenses
                 </Text>
                 <Text style={[styles.settingDesc, typography.caption, { color: colors.textSecondary }]}>
                   Version v0.0.1 • MIT Open Source License
@@ -616,7 +664,6 @@ export const SettingsScreen: React.FC = () => {
           </Text>
         </View>
       </ScrollView>
-
     </View>
   );
 };
@@ -653,39 +700,91 @@ const styles = StyleSheet.create({
   headerTextCol: {
     flex: 1,
   },
-  title: {},
+  title: {
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
   sub: {
     marginTop: 2,
+    letterSpacing: 0.2,
   },
   section: {
     marginBottom: spacing.xl,
   },
   sectionTitle: {
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
+    fontSize: 11,
     marginBottom: spacing.sm,
+    textTransform: 'uppercase',
   },
   card: {
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.md,
   },
+  dndRow: {
+    borderRadius: radius.sm,
+    paddingHorizontal: 4,
+    paddingVertical: spacing.xs,
+  },
+  dndRowActive: {
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    paddingHorizontal: 8,
+  },
+  labelWithBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  mutedBadge: {
+    marginLeft: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  mutedBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#EF4444',
+    letterSpacing: 0.5,
+  },
   storageStatsBox: {
     borderRadius: radius.sm,
     borderWidth: 1,
-    padding: 10,
+    padding: 12,
     marginBottom: spacing.xs,
+  },
+  storageHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  emeraldBeacon: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    marginRight: 6,
   },
   storageStatsTitle: {
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 6,
+    letterSpacing: 0.6,
   },
   storageStatsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 8,
+  },
+  storageStatBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
   },
   storageStatChip: {
     fontSize: 12,
@@ -715,9 +814,7 @@ const styles = StyleSheet.create({
   },
   snoozeBtnTextActive: {
     color: '#FFFFFF',
-  },
-  cancelBtnText: {
-    fontWeight: '700',
+    fontWeight: '800',
   },
   settingRow: {
     flexDirection: 'row',
@@ -731,6 +828,7 @@ const styles = StyleSheet.create({
   },
   settingLabel: {
     marginBottom: 2,
+    fontWeight: '700',
   },
   settingDesc: {
     lineHeight: 16,
@@ -743,14 +841,62 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.xs,
+    paddingVertical: 6,
+  },
+  actionIconPillPurple: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  actionIconPillGreen: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  actionIconPillAmber: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  actionIconPillLavender: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(167, 139, 250, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  actionIconPillBlue: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  actionIconText: {
+    fontSize: 14,
   },
   actionLabel: {
     fontWeight: '700',
     marginBottom: 2,
   },
   chevron: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '300',
   },
   footerInfo: {
@@ -760,108 +906,6 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 11,
-    letterSpacing: 0.2,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  modalBackdropTouchable: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  modalCard: {
-    width: '100%',
-    maxHeight: '90%',
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.xl,
-    zIndex: 1,
-  },
-  modalTitle: {
-    marginBottom: spacing.xs,
-  },
-  modalSubtitle: {
-    marginBottom: spacing.md,
-    lineHeight: 18,
-  },
-  fieldLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-    marginTop: 6,
-  },
-  companionInput: {
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    fontSize: 13,
-    marginBottom: spacing.sm,
-  },
-  syncLoadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginVertical: 8,
-  },
-  syncLoadingText: {
-    fontSize: 12,
-  },
-  companionActionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-    marginBottom: spacing.md,
-  },
-  companionActionBtn: {
-    flex: 1,
-    minWidth: '45%',
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: radius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  companionBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  modalBtnRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  modalBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  modalScrollBody: {
-    paddingBottom: spacing.sm,
-  },
-  companionAutoSyncRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    marginTop: 4,
-    marginBottom: spacing.xs,
-  },
-  companionAutoSyncTextCol: {
-    flex: 1,
-    paddingRight: spacing.sm,
+    letterSpacing: 0.3,
   },
 });
