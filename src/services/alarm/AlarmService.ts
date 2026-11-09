@@ -43,7 +43,7 @@ export class AlarmService {
 
   private cachedHabits: Array<{ id: string; name: string; reminderTime: string; daysOfWeek: number[] }> = [];
   private cachedEvents: Array<{ id: string; title: string; date: string; time: string; description?: string }> = [];
-  private cachedTasks: Array<{ id: string; title: string; date: string; time: string; description?: string; isLoud: boolean }> = [];
+  private cachedTasks: Array<{ id: string; title: string; date: string; time: string; description?: string; isLoud: boolean; snoozeUntil?: string }> = [];
   private autoSnoozeCounts: Map<string, number> = new Map();
 
   private habitsLoaded: boolean = false;
@@ -1540,6 +1540,7 @@ export class AlarmService {
         time: t.startTime!,
         description: t.description || t.notes,
         isLoud: Boolean(t.isLoudAlarm || t.priority === 'high' || t.recurrenceRule?.isLoudAlarm),
+        snoozeUntil: t.snoozeUntil,
       }));
       this.tasksLoaded = true;
 
@@ -1644,6 +1645,7 @@ export class AlarmService {
               time: t.startTime!,
               description: t.description || t.notes,
               isLoud: Boolean(t.isLoudAlarm || t.priority === 'high' || t.recurrenceRule?.isLoudAlarm),
+              snoozeUntil: t.snoozeUntil,
             }));
           this.tasksLoaded = true;
         } catch {}

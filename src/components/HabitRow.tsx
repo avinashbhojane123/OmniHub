@@ -4,7 +4,7 @@ import { HabitWithStreak } from '../types';
 import { useAppTheme } from '../hooks/useTheme';
 import { radius, spacing, typography } from '../theme';
 import { withOpacity } from '../utils/color';
-import { parseHabitNameItems, formatNumberedItem } from '../utils/bulletNotes';
+import { parseHabitNameItems, formatNumberedItem, getBulletNotesStats } from '../utils/bulletNotes';
 import { format, subDays } from 'date-fns';
 
 interface HabitRowProps {
@@ -53,8 +53,10 @@ const HabitRowComponent: React.FC<HabitRowProps> = ({
     return days;
   }, [habit.weeklyLogs, habit.completedToday]);
 
-  const subtasksCount = habit.subtasks?.length || 0;
-  const completedSubtasksCount = habit.subtasks?.filter(s => s.completed).length || 0;
+  const subtaskStats = useMemo(
+    () => getBulletNotesStats(habit.description),
+    [habit.description]
+  );
 
   return (
     <View
@@ -173,10 +175,10 @@ const HabitRowComponent: React.FC<HabitRowProps> = ({
             ) : null}
 
             {/* Subtask Capsule Progress */}
-            {subtasksCount > 0 && (
+            {subtaskStats.total > 0 && (
               <View style={[styles.subtaskPill, { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.12)' : 'rgba(139, 92, 246, 0.08)' }]}>
                 <Text style={[styles.subtaskPillText, { color: colors.primary }]}>
-                  📝 {completedSubtasksCount}/{subtasksCount}
+                  📝 {subtaskStats.completed}/{subtaskStats.total}
                 </Text>
               </View>
             )}
