@@ -272,7 +272,7 @@ export const BatteryAlarmScreen: React.FC = () => {
       style={[
         styles.safeArea,
         {
-          backgroundColor: isDark ? '#0A0F1D' : '#F1F5F9',
+          backgroundColor: isDark ? '#080712' : '#F1F5F9',
           paddingTop: Math.max(insets.top, 12),
         },
       ]}
@@ -286,19 +286,27 @@ export const BatteryAlarmScreen: React.FC = () => {
             style={[
               styles.backButton,
               {
-                backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-                borderColor: isDark ? '#334155' : '#E2E8F0',
+                backgroundColor: isDark ? '#14102C' : '#FFFFFF',
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
               },
             ]}
             onPress={handleGoBack}
             activeOpacity={0.7}
           >
             <Text style={[styles.backButtonText, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>
-              ←
+              ‹
             </Text>
           </TouchableOpacity>
           {/* Active Screen Badge */}
-          <View style={[styles.brandPill, { borderColor: batteryColor }]}>
+          <View
+            style={[
+              styles.brandPill,
+              {
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
+                backgroundColor: isDark ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.1)',
+              },
+            ]}
+          >
             <Text style={styles.brandIcon}>⚡</Text>
             <Text style={styles.brandTitle}>Battery Guard & Alarm</Text>
           </View>
@@ -342,12 +350,12 @@ export const BatteryAlarmScreen: React.FC = () => {
               {
                 backgroundColor: settings.batteryGuardActive
                   ? isDark
-                    ? '#064E3B'
+                    ? 'rgba(6, 78, 59, 0.45)'
                     : '#D1FAE5'
                   : isDark
-                  ? '#1E293B'
+                  ? '#14102C'
                   : '#E2E8F0',
-                borderColor: settings.batteryGuardActive ? '#10B981' : '#64748B',
+                borderColor: settings.batteryGuardActive ? '#10B981' : isDark ? '#2D2355' : '#64748B',
               },
             ]}
           >
@@ -389,8 +397,8 @@ export const BatteryAlarmScreen: React.FC = () => {
             style={[
               styles.heroCard,
               {
-                backgroundColor: isDark ? '#131B2E' : '#FFFFFF',
-                borderColor: isDark ? '#1E293B' : '#E2E8F0',
+                backgroundColor: isDark ? '#14102C' : '#FFFFFF',
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
               },
             ]}
           >
@@ -436,8 +444,8 @@ export const BatteryAlarmScreen: React.FC = () => {
                 style={[
                   styles.circleInnerContent,
                   {
-                    borderColor: isDark ? '#1E293B' : '#E2E8F0',
-                    backgroundColor: isDark ? '#0A0F1D' : '#F8FAFC',
+                    borderColor: isDark ? '#231C42' : '#E2E8F0',
+                    backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
                   },
                 ]}
               >
@@ -469,7 +477,7 @@ export const BatteryAlarmScreen: React.FC = () => {
               <View
                 style={[
                   styles.linearBarTrack,
-                  { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' },
+                  { backgroundColor: isDark ? '#0E0B20' : '#E2E8F0' },
                 ]}
               >
                 <View
@@ -512,8 +520,8 @@ export const BatteryAlarmScreen: React.FC = () => {
               style={[
                 styles.estimateBox,
                 {
-                  backgroundColor: isDark ? '#0A0F1D' : '#F8FAFC',
-                  borderColor: isDark ? '#1E293B' : '#E2E8F0',
+                  backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
+                  borderColor: isDark ? '#231C42' : '#E2E8F0',
                 },
               ]}
             >
@@ -534,8 +542,8 @@ export const BatteryAlarmScreen: React.FC = () => {
                 style={[
                   styles.sessionBox,
                   {
-                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : '#ECFDF5',
-                    borderColor: '#10B98140',
+                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.12)' : '#ECFDF5',
+                    borderColor: isDark ? 'rgba(16, 185, 129, 0.35)' : '#10B98140',
                   },
                 ]}
               >
@@ -548,7 +556,16 @@ export const BatteryAlarmScreen: React.FC = () => {
 
             {/* Metrics 2x2 Grid with Real-time Power & Current */}
             <View style={styles.metricsGrid}>
-              <View style={[styles.metricItem, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
+              <View
+                style={[
+                  styles.metricItem,
+                  {
+                    backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
+                    borderColor: isDark ? '#231C42' : '#E2E8F0',
+                    borderWidth: 1,
+                  },
+                ]}
+              >
                 <Text style={styles.metricLabel}>🌡️ Temp</Text>
                 <Text
                   style={[
@@ -563,7 +580,16 @@ export const BatteryAlarmScreen: React.FC = () => {
                 </Text>
               </View>
 
-              <View style={[styles.metricItem, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
+              <View
+                style={[
+                  styles.metricItem,
+                  {
+                    backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
+                    borderColor: isDark ? '#231C42' : '#E2E8F0',
+                    borderWidth: 1,
+                  },
+                ]}
+              >
                 <Text style={styles.metricLabel}>⚡ Voltage & Current</Text>
                 <Text
                   style={[
@@ -578,7 +604,16 @@ export const BatteryAlarmScreen: React.FC = () => {
                 </Text>
               </View>
 
-              <View style={[styles.metricItem, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
+              <View
+                style={[
+                  styles.metricItem,
+                  {
+                    backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
+                    borderColor: isDark ? '#231C42' : '#E2E8F0',
+                    borderWidth: 1,
+                  },
+                ]}
+              >
                 <Text style={styles.metricLabel}>💚 Health & Cycles</Text>
                 <Text
                   style={[
@@ -600,7 +635,16 @@ export const BatteryAlarmScreen: React.FC = () => {
                 </Text>
               </View>
 
-              <View style={[styles.metricItem, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
+              <View
+                style={[
+                  styles.metricItem,
+                  {
+                    backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
+                    borderColor: isDark ? '#231C42' : '#E2E8F0',
+                    borderWidth: 1,
+                  },
+                ]}
+              >
                 <Text style={styles.metricLabel}>🔌 Power & Speed</Text>
                 <Text
                   style={[
@@ -628,8 +672,8 @@ export const BatteryAlarmScreen: React.FC = () => {
             style={[
               styles.configCard,
               {
-                backgroundColor: isDark ? '#131B2E' : '#FFFFFF',
-                borderColor: isDark ? '#1E293B' : '#E2E8F0',
+                backgroundColor: isDark ? '#14102C' : '#FFFFFF',
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
               },
             ]}
           >
@@ -680,14 +724,28 @@ export const BatteryAlarmScreen: React.FC = () => {
                   {/* 1% Fine Steppers */}
                   <View style={styles.stepperRow}>
                     <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}
+                      style={[
+                        styles.stepperBtn,
+                        {
+                          backgroundColor: isDark ? '#0E0B20' : '#E2E8F0',
+                          borderColor: isDark ? '#231C42' : '#CBD5E1',
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={() => handleSetFullTarget(settings.fullChargeTarget - 1)}
                       activeOpacity={0.7}
                     >
                       <Text style={[styles.stepperBtnText, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>−</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}
+                      style={[
+                        styles.stepperBtn,
+                        {
+                          backgroundColor: isDark ? '#0E0B20' : '#E2E8F0',
+                          borderColor: isDark ? '#231C42' : '#CBD5E1',
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={() => handleSetFullTarget(settings.fullChargeTarget + 1)}
                       activeOpacity={0.7}
                     >
@@ -709,8 +767,8 @@ export const BatteryAlarmScreen: React.FC = () => {
                           isSelected
                             ? styles.targetPillActive
                             : {
-                                backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
-                                borderColor: isDark ? '#334155' : '#E2E8F0',
+                                backgroundColor: isDark ? '#0E0B20' : '#F1F5F9',
+                                borderColor: isDark ? '#231C42' : '#E2E8F0',
                               },
                         ]}
                       >
@@ -718,7 +776,7 @@ export const BatteryAlarmScreen: React.FC = () => {
                           style={[
                             styles.targetPillText,
                             isSelected
-                              ? styles.targetPillTextActive
+                              ? { color: '#080712', fontWeight: '800' }
                               : { color: isDark ? '#CBD5E1' : '#475569' },
                           ]}
                         >
@@ -767,8 +825,8 @@ export const BatteryAlarmScreen: React.FC = () => {
             style={[
               styles.configCard,
               {
-                backgroundColor: isDark ? '#131B2E' : '#FFFFFF',
-                borderColor: isDark ? '#1E293B' : '#E2E8F0',
+                backgroundColor: isDark ? '#14102C' : '#FFFFFF',
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
               },
             ]}
           >
@@ -817,14 +875,28 @@ export const BatteryAlarmScreen: React.FC = () => {
                   </Text>
                   <View style={styles.stepperRow}>
                     <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}
+                      style={[
+                        styles.stepperBtn,
+                        {
+                          backgroundColor: isDark ? '#0E0B20' : '#E2E8F0',
+                          borderColor: isDark ? '#231C42' : '#CBD5E1',
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={() => handleSetLowTarget(settings.lowBatteryTarget - 1)}
                       activeOpacity={0.7}
                     >
                       <Text style={[styles.stepperBtnText, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>−</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}
+                      style={[
+                        styles.stepperBtn,
+                        {
+                          backgroundColor: isDark ? '#0E0B20' : '#E2E8F0',
+                          borderColor: isDark ? '#231C42' : '#CBD5E1',
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={() => handleSetLowTarget(settings.lowBatteryTarget + 1)}
                       activeOpacity={0.7}
                     >
@@ -845,8 +917,8 @@ export const BatteryAlarmScreen: React.FC = () => {
                           isSelected
                             ? [styles.targetPillActive, { backgroundColor: '#EF4444', borderColor: '#EF4444' }]
                             : {
-                                backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
-                                borderColor: isDark ? '#334155' : '#E2E8F0',
+                                backgroundColor: isDark ? '#0E0B20' : '#F1F5F9',
+                                borderColor: isDark ? '#231C42' : '#E2E8F0',
                               },
                         ]}
                       >
@@ -854,7 +926,7 @@ export const BatteryAlarmScreen: React.FC = () => {
                           style={[
                             styles.targetPillText,
                             isSelected
-                              ? styles.targetPillTextActive
+                              ? { color: '#FFFFFF', fontWeight: '800' }
                               : { color: isDark ? '#CBD5E1' : '#475569' },
                           ]}
                         >
@@ -891,8 +963,8 @@ export const BatteryAlarmScreen: React.FC = () => {
             style={[
               styles.configCard,
               {
-                backgroundColor: isDark ? '#131B2E' : '#FFFFFF',
-                borderColor: isDark ? '#1E293B' : '#E2E8F0',
+                backgroundColor: isDark ? '#14102C' : '#FFFFFF',
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
               },
             ]}
           >
@@ -944,14 +1016,28 @@ export const BatteryAlarmScreen: React.FC = () => {
                   </Text>
                   <View style={styles.stepperRow}>
                     <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}
+                      style={[
+                        styles.stepperBtn,
+                        {
+                          backgroundColor: isDark ? '#0E0B20' : '#E2E8F0',
+                          borderColor: isDark ? '#231C42' : '#CBD5E1',
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={() => handleSetTempTarget(settings.tempTarget - 1)}
                       activeOpacity={0.7}
                     >
                       <Text style={[styles.stepperBtnText, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>−</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.stepperBtn, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}
+                      style={[
+                        styles.stepperBtn,
+                        {
+                          backgroundColor: isDark ? '#0E0B20' : '#E2E8F0',
+                          borderColor: isDark ? '#231C42' : '#CBD5E1',
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={() => handleSetTempTarget(settings.tempTarget + 1)}
                       activeOpacity={0.7}
                     >
@@ -973,8 +1059,8 @@ export const BatteryAlarmScreen: React.FC = () => {
                           isSelected
                             ? [styles.targetPillActive, { backgroundColor: '#F59E0B', borderColor: '#F59E0B' }]
                             : {
-                                backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
-                                borderColor: isDark ? '#334155' : '#E2E8F0',
+                                backgroundColor: isDark ? '#0E0B20' : '#F1F5F9',
+                                borderColor: isDark ? '#231C42' : '#E2E8F0',
                               },
                         ]}
                       >
@@ -982,7 +1068,7 @@ export const BatteryAlarmScreen: React.FC = () => {
                           style={[
                             styles.targetPillText,
                             isSelected
-                              ? styles.targetPillTextActive
+                              ? { color: '#080712', fontWeight: '800' }
                               : { color: isDark ? '#CBD5E1' : '#475569' },
                           ]}
                         >
@@ -992,9 +1078,20 @@ export const BatteryAlarmScreen: React.FC = () => {
                     );
                   })}
                 </View>
-                <Text style={[styles.tempNote, { color: isDark ? '#64748B' : '#94A3B8' }]}>
-                  Fast chargers normally heat batteries to 40–43°C. 45°C★ is recommended to catch genuine thermal risk.
-                </Text>
+                <View
+                  style={{
+                    backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
+                    borderColor: isDark ? '#231C42' : '#E2E8F0',
+                    borderWidth: 1,
+                    borderRadius: 10,
+                    padding: 10,
+                    marginTop: 10,
+                  }}
+                >
+                  <Text style={[styles.tempNote, { color: isDark ? '#94A3B8' : '#64748B', marginTop: 0 }]}>
+                    💡 Fast chargers normally heat batteries to 40–43°C. 45°C★ is recommended to catch genuine thermal risk.
+                  </Text>
+                </View>
               </View>
             )}
           </View>
@@ -1004,8 +1101,8 @@ export const BatteryAlarmScreen: React.FC = () => {
             style={[
               styles.configCard,
               {
-                backgroundColor: isDark ? '#131B2E' : '#FFFFFF',
-                borderColor: isDark ? '#1E293B' : '#E2E8F0',
+                backgroundColor: isDark ? '#14102C' : '#FFFFFF',
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
               },
             ]}
           >
@@ -1056,7 +1153,7 @@ export const BatteryAlarmScreen: React.FC = () => {
               />
             </View>
 
-            <View style={[styles.divider, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]} />
+            <View style={[styles.divider, { backgroundColor: isDark ? '#231C42' : '#E2E8F0' }]} />
 
             {/* Continuous Siren */}
             <View style={styles.settingRow}>
@@ -1086,7 +1183,7 @@ export const BatteryAlarmScreen: React.FC = () => {
               />
             </View>
 
-            <View style={[styles.divider, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]} />
+            <View style={[styles.divider, { backgroundColor: isDark ? '#231C42' : '#E2E8F0' }]} />
 
             {/* Auto Repeat Alarm */}
             <View style={styles.settingRow}>
@@ -1116,7 +1213,7 @@ export const BatteryAlarmScreen: React.FC = () => {
               />
             </View>
 
-            <View style={[styles.divider, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]} />
+            <View style={[styles.divider, { backgroundColor: isDark ? '#231C42' : '#E2E8F0' }]} />
 
             {/* Vibration */}
             <View style={styles.settingRow}>
@@ -1146,7 +1243,7 @@ export const BatteryAlarmScreen: React.FC = () => {
               />
             </View>
 
-            <View style={[styles.divider, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]} />
+            <View style={[styles.divider, { backgroundColor: isDark ? '#231C42' : '#E2E8F0' }]} />
 
             {/* Charger Plugged Chime */}
             <View style={styles.settingRow}>
@@ -1176,7 +1273,7 @@ export const BatteryAlarmScreen: React.FC = () => {
               />
             </View>
 
-            <View style={[styles.divider, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]} />
+            <View style={[styles.divider, { backgroundColor: isDark ? '#231C42' : '#E2E8F0' }]} />
 
             {/* Charger Unplugged Chime */}
             <View style={styles.settingRow}>
@@ -1212,8 +1309,8 @@ export const BatteryAlarmScreen: React.FC = () => {
             style={[
               styles.configCard,
               {
-                backgroundColor: isDark ? '#131B2E' : '#FFFFFF',
-                borderColor: isDark ? '#1E293B' : '#E2E8F0',
+                backgroundColor: isDark ? '#14102C' : '#FFFFFF',
+                borderColor: isDark ? '#2D2355' : '#E2E8F0',
               },
             ]}
           >
@@ -1265,8 +1362,10 @@ export const BatteryAlarmScreen: React.FC = () => {
                         justifyContent: 'space-between',
                         paddingVertical: 10,
                         paddingHorizontal: 12,
-                        borderRadius: 10,
-                        backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                        borderRadius: 12,
+                        backgroundColor: isDark ? '#0E0B20' : '#F8FAFC',
+                        borderColor: isDark ? '#231C42' : '#E2E8F0',
+                        borderWidth: 1,
                       }}
                     >
                       <View style={{ flex: 1, paddingRight: 8 }}>
@@ -1320,21 +1419,49 @@ export const BatteryAlarmScreen: React.FC = () => {
             {/* Sub-row for testing Low Battery & Overheat Alarms */}
             <View style={styles.testSubRow}>
               <TouchableOpacity
-                style={[styles.testSubButton, { backgroundColor: '#EF4444' }]}
+                style={[
+                  styles.testSubButton,
+                  {
+                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#EF4444',
+                    borderColor: '#EF4444',
+                    borderWidth: 1.5,
+                  },
+                ]}
                 activeOpacity={0.85}
                 onPress={() => handleTestAlarm('low')}
                 disabled={testingAlarm}
               >
-                <Text style={styles.testSubButtonText}>🪫 Test Low ({settings.lowBatteryTarget}%)</Text>
+                <Text
+                  style={[
+                    styles.testSubButtonText,
+                    { color: isDark ? '#EF4444' : '#FFFFFF' },
+                  ]}
+                >
+                  🪫 Test Low ({settings.lowBatteryTarget}%)
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.testSubButton, { backgroundColor: '#F59E0B' }]}
+                style={[
+                  styles.testSubButton,
+                  {
+                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.2)' : '#F59E0B',
+                    borderColor: '#F59E0B',
+                    borderWidth: 1.5,
+                  },
+                ]}
                 activeOpacity={0.85}
                 onPress={() => handleTestAlarm('temp')}
                 disabled={testingAlarm}
               >
-                <Text style={styles.testSubButtonText}>🔥 Test Heat ({settings.tempTarget}°C)</Text>
+                <Text
+                  style={[
+                    styles.testSubButtonText,
+                    { color: isDark ? '#F59E0B' : '#FFFFFF' },
+                  ]}
+                >
+                  🔥 Test Heat ({settings.tempTarget}°C)
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1541,7 +1668,7 @@ const styles = StyleSheet.create({
   iconBadgeText: { fontSize: 22, },
   cardHeaderTitle: { fontSize: 16, fontWeight: '800', },
   cardHeaderSub: { fontSize: 12, marginTop: 2, },
-  targetSection: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.08)', },
+  targetSection: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#231C42', },
   targetHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, },
   targetLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, },
   stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 6, },
@@ -1564,7 +1691,7 @@ const styles = StyleSheet.create({
   },
   targetPillActive: { backgroundColor: '#10B981', borderColor: '#10B981', },
   targetPillText: { fontSize: 12, fontWeight: '700', },
-  targetPillTextActive: { color: '#FFFFFF', fontWeight: '800', },
+  targetPillTextActive: { color: '#080712', fontWeight: '800', },
   alreadyReachedBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1602,7 +1729,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    borderTopColor: '#231C42',
   },
   subSettingTitle: { fontSize: 13, fontWeight: '700', },
   subSettingDesc: { fontSize: 11, marginTop: 2, lineHeight: 15, },
@@ -1642,7 +1769,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  testButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.3, },
+  testButtonText: { color: '#080712', fontSize: 15, fontWeight: '800', letterSpacing: 0.3, },
   testSubRow: { flexDirection: 'row', gap: 10, },
   testSubButton: {
     flex: 1,
