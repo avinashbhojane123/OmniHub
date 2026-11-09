@@ -90,7 +90,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   navigation,
 }) => {
   const insets = useSafeAreaInsets();
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const { categories, refresh, createTask, updateTask, deleteTask } = useTasks();
 
   const taskId = route.params?.taskId;
@@ -1026,7 +1026,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
   }, [startTime, endTime, isOvernight]);
 
   return (
-    <View style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <View style={[styles.safeArea, { backgroundColor: isDark ? '#080712' : colors.background }]}>
       <StatusBar barStyle={colors.statusBar} />
 
       {/* Header Bar */}
@@ -1035,14 +1035,20 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
           styles.topBar,
           {
             paddingTop: Math.max(insets.top, 16),
-            backgroundColor: colors.surface,
-            borderBottomColor: taskAccentColor ? `${taskAccentColor}50` : colors.borderSubtle,
+            backgroundColor: isDark ? '#14102C' : colors.surface,
+            borderBottomColor: taskAccentColor ? `${taskAccentColor}50` : (isDark ? '#2D2355' : colors.borderSubtle),
           },
         ]}
       >
         <TouchableOpacity
           onPress={navigateBack}
-          style={[styles.navButton, { backgroundColor: colors.surfaceElevated }]}
+          style={[
+            styles.navButton,
+            {
+              backgroundColor: isDark ? '#0E0B20' : colors.surfaceElevated,
+              borderColor: isDark ? '#2D2355' : colors.borderSubtle,
+            },
+          ]}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           accessibilityRole="button"
           accessibilityLabel="Go back"
@@ -1111,15 +1117,20 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
             style={[
               styles.cardContainer,
               {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.borderSubtle,
+                backgroundColor: isDark ? '#14102C' : colors.surfaceElevated,
+                borderColor: isDark ? '#2D2355' : colors.borderSubtle,
               },
             ]}
           >
             {/* Title Header */}
             <View style={styles.sectionHeaderRow}>
               <View style={styles.sectionHeaderTitleGroup}>
-                <View style={[styles.sectionIconBadge, { backgroundColor: `${activeColorTheme}20` }]}>
+                <View
+                  style={[
+                    styles.sectionIconBadge,
+                    { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.15)' : `${activeColorTheme}20` },
+                  ]}
+                >
                   <Text style={styles.sectionIconEmoji}>📝</Text>
                 </View>
                 <Text style={[styles.cardHeaderLabel, { color: colors.textSecondary }]}>
@@ -1131,7 +1142,11 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                   styles.charBadge,
                   {
                     backgroundColor:
-                      title.length >= 240 ? colors.dangerBg : colors.surfaceHighlight,
+                      title.length >= 240
+                        ? colors.dangerBg
+                        : isDark
+                        ? '#1E1840'
+                        : colors.surfaceHighlight,
                   },
                 ]}
               >
@@ -1151,11 +1166,13 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
               style={[
                 styles.inputWrapper,
                 {
-                  backgroundColor: colors.surface,
+                  backgroundColor: isDark ? '#0E0B20' : colors.surface,
                   borderColor: errors.title
                     ? colors.danger
                     : taskAccentColor
                     ? `${taskAccentColor}80`
+                    : isDark
+                    ? '#231C42'
                     : colors.borderSubtle,
                 },
               ]}
@@ -1191,7 +1208,12 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
             ) : null}
 
             {/* Subtle Divider between Title and Notes */}
-            <View style={[styles.cardDivider, { backgroundColor: colors.borderSubtle }]} />
+            <View
+              style={[
+                styles.cardDivider,
+                { backgroundColor: isDark ? '#231C42' : colors.borderSubtle },
+              ]}
+            />
 
             {/* Notes Section inside Task Card */}
             <View style={styles.subFieldHeaderRow}>
@@ -1203,8 +1225,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
               style={[
                 styles.notesWrapper,
                 {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.borderSubtle,
+                  backgroundColor: isDark ? '#0E0B20' : colors.surface,
+                  borderColor: isDark ? '#231C42' : colors.borderSubtle,
                 },
               ]}
             >
@@ -1226,15 +1248,20 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
             style={[
               styles.cardContainer,
               {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.borderSubtle,
+                backgroundColor: isDark ? '#14102C' : colors.surfaceElevated,
+                borderColor: isDark ? '#2D2355' : colors.borderSubtle,
               },
             ]}
           >
             {/* Schedule Header */}
             <View style={styles.sectionHeaderRow}>
               <View style={styles.sectionHeaderTitleGroup}>
-                <View style={[styles.sectionIconBadge, { backgroundColor: `${activeColorTheme}20` }]}>
+                <View
+                  style={[
+                    styles.sectionIconBadge,
+                    { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.15)' : `${activeColorTheme}20` },
+                  ]}
+                >
                   <Text style={styles.sectionIconEmoji}>📅</Text>
                 </View>
                 <Text style={[styles.cardHeaderLabel, { color: colors.textSecondary }]}>
@@ -1252,8 +1279,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
               style={[
                 styles.dateHeroTile,
                 {
-                  backgroundColor: colors.surface,
-                  borderColor: errors.date ? colors.danger : colors.borderSubtle,
+                  backgroundColor: isDark ? '#0E0B20' : colors.surface,
+                  borderColor: errors.date ? colors.danger : (isDark ? '#231C42' : colors.borderSubtle),
                 },
               ]}
               accessibilityRole="button"
@@ -1263,7 +1290,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                 <View
                   style={[
                     styles.dateIconSquircle,
-                    { backgroundColor: `${activeColorTheme}18` },
+                    { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.15)' : `${activeColorTheme}18` },
                   ]}
                 >
                   <Text style={styles.dateSquircleEmoji}>📅</Text>
@@ -1283,7 +1310,12 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                   </Text>
                 </View>
               </View>
-              <View style={[styles.changeDatePill, { backgroundColor: `${activeColorTheme}18` }]}>
+              <View
+                style={[
+                  styles.changeDatePill,
+                  { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.2)' : `${activeColorTheme}18` },
+                ]}
+              >
                 <Text style={[styles.changeDatePillText, { color: activeColorTheme }]}>
                   Change ›
                 </Text>
@@ -1294,13 +1326,21 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
             ) : null}
 
             {/* Subtle Divider */}
-            <View style={[styles.cardDivider, { backgroundColor: colors.borderSubtle }]} />
+            <View
+              style={[
+                styles.cardDivider,
+                { backgroundColor: isDark ? '#231C42' : colors.borderSubtle },
+              ]}
+            />
 
             {/* Timing Mode Segmented Tabs */}
             <View
               style={[
                 styles.timingSegmentContainer,
-                { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
+                {
+                  backgroundColor: isDark ? '#0E0B20' : colors.surface,
+                  borderColor: isDark ? '#231C42' : colors.borderSubtle,
+                },
               ]}
             >
               <TouchableOpacity
@@ -1363,7 +1403,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
               <View
                 style={[
                   styles.allDayHeroBanner,
-                  { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
+                  {
+                    backgroundColor: isDark ? '#0E0B20' : colors.surface,
+                    borderColor: isDark ? '#231C42' : colors.borderSubtle,
+                  },
                 ]}
               >
                 <Text style={styles.allDayHeroEmoji}>☀️</Text>
@@ -1391,8 +1434,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                     style={[
                       styles.timeTile,
                       {
-                        backgroundColor: colors.surface,
-                        borderColor: errors.time ? colors.danger : colors.borderSubtle,
+                        backgroundColor: isDark ? '#0E0B20' : colors.surface,
+                        borderColor: errors.time ? colors.danger : (isDark ? '#231C42' : colors.borderSubtle),
                       },
                     ]}
                     accessibilityRole="button"
@@ -1413,8 +1456,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                     style={[
                       styles.timeTile,
                       {
-                        backgroundColor: colors.surface,
-                        borderColor: errors.time ? colors.danger : colors.borderSubtle,
+                        backgroundColor: isDark ? '#0E0B20' : colors.surface,
+                        borderColor: errors.time ? colors.danger : (isDark ? '#231C42' : colors.borderSubtle),
                       },
                     ]}
                   >
@@ -1432,7 +1475,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                           accessibilityRole="button"
                           accessibilityLabel="Clear end time"
-                          style={[styles.clearEndPill, { backgroundColor: colors.surfaceHighlight }]}
+                          style={[
+                            styles.clearEndPill,
+                            { backgroundColor: isDark ? '#1E1840' : colors.surfaceHighlight },
+                          ]}
                         >
                           <Text style={[styles.clearEndPillText, { color: colors.textMuted }]}>
                             ✕ Clear
@@ -1470,8 +1516,12 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                   style={[
                     styles.durationSummaryCard,
                     {
-                      backgroundColor: activeDurationDisplay ? `${activeColorTheme}14` : colors.surface,
-                      borderColor: activeDurationDisplay ? `${activeColorTheme}35` : colors.borderSubtle,
+                      backgroundColor: activeDurationDisplay
+                        ? (isDark ? 'rgba(139, 92, 246, 0.12)' : `${activeColorTheme}14`)
+                        : (isDark ? '#0E0B20' : colors.surface),
+                      borderColor: activeDurationDisplay
+                        ? (isDark ? 'rgba(139, 92, 246, 0.3)' : `${activeColorTheme}35`)
+                        : (isDark ? '#231C42' : colors.borderSubtle),
                     },
                   ]}
                 >
@@ -1541,8 +1591,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                           style={[
                             styles.presetChip,
                             {
-                              backgroundColor: isSel ? `${activeColorTheme}25` : colors.surface,
-                              borderColor: isSel ? activeColorTheme : colors.borderSubtle,
+                              backgroundColor: isSel
+                                ? (isDark ? 'rgba(139, 92, 246, 0.28)' : `${activeColorTheme}25`)
+                                : (isDark ? '#0E0B20' : colors.surface),
+                              borderColor: isSel ? activeColorTheme : (isDark ? '#231C42' : colors.borderSubtle),
                             },
                           ]}
                           accessibilityRole="button"
@@ -1594,8 +1646,12 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                             style={[
                               styles.presetChip,
                               {
-                                backgroundColor: isSel ? activeColorTheme : colors.surface,
-                                borderColor: isSel ? activeColorTheme : colors.borderSubtle,
+                                backgroundColor: isSel
+                                  ? activeColorTheme
+                                  : (isDark ? '#0E0B20' : colors.surface),
+                                borderColor: isSel
+                                  ? activeColorTheme
+                                  : (isDark ? '#231C42' : colors.borderSubtle),
                               },
                             ]}
                             accessibilityRole="button"
@@ -1621,7 +1677,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                           }}
                           style={[
                             styles.presetChip,
-                            { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
+                            {
+                              backgroundColor: isDark ? '#0E0B20' : colors.surface,
+                              borderColor: isDark ? '#231C42' : colors.borderSubtle,
+                            },
                           ]}
                           accessibilityRole="button"
                           accessibilityLabel="Clear end time"
@@ -1646,8 +1705,12 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                     style={[
                       styles.overnightCard,
                       {
-                        backgroundColor: isOvernight ? `${activeColorTheme}18` : colors.warningBg,
-                        borderColor: isOvernight ? activeColorTheme : colors.warning,
+                        backgroundColor: isOvernight
+                          ? (isDark ? 'rgba(139, 92, 246, 0.18)' : `${activeColorTheme}18`)
+                          : (isDark ? 'rgba(245, 158, 11, 0.12)' : colors.warningBg),
+                        borderColor: isOvernight
+                          ? activeColorTheme
+                          : (isDark ? 'rgba(245, 158, 11, 0.4)' : colors.warning),
                       },
                     ]}
                     accessibilityRole="checkbox"
@@ -1675,7 +1738,11 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                     <View
                       style={[
                         styles.overnightBadge,
-                        { backgroundColor: isOvernight ? activeColorTheme : colors.surfaceHighlight },
+                        {
+                          backgroundColor: isOvernight
+                            ? activeColorTheme
+                            : (isDark ? '#1E1840' : colors.surfaceHighlight),
+                        },
                       ]}
                     >
                       <Text style={{ color: isOvernight ? '#FFFFFF' : colors.textMuted, fontSize: 11, fontWeight: '700' }}>
@@ -1699,14 +1766,19 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
             style={[
               styles.cardContainer,
               {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.borderSubtle,
+                backgroundColor: isDark ? '#14102C' : colors.surfaceElevated,
+                borderColor: isDark ? '#2D2355' : colors.borderSubtle,
               },
             ]}
           >
             <View style={styles.sectionHeaderRow}>
               <View style={styles.sectionHeaderTitleGroup}>
-                <View style={[styles.sectionIconBadge, { backgroundColor: `${activeColorTheme}20` }]}>
+                <View
+                  style={[
+                    styles.sectionIconBadge,
+                    { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.15)' : `${activeColorTheme}20` },
+                  ]}
+                >
                   <Text style={styles.sectionIconEmoji}>🏷️</Text>
                 </View>
                 <Text style={[styles.cardHeaderLabel, { color: colors.textSecondary }]}>
@@ -1726,8 +1798,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                 style={[
                   styles.categoryChip,
                   {
-                    backgroundColor: !categoryId ? `${activeColorTheme}22` : colors.surface,
-                    borderColor: !categoryId ? activeColorTheme : colors.borderSubtle,
+                    backgroundColor: !categoryId
+                      ? (isDark ? 'rgba(139, 92, 246, 0.25)' : `${activeColorTheme}22`)
+                      : (isDark ? '#0E0B20' : colors.surface),
+                    borderColor: !categoryId ? activeColorTheme : (isDark ? '#231C42' : colors.borderSubtle),
                   },
                 ]}
                 accessibilityRole="button"
@@ -1753,8 +1827,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                     style={[
                       styles.categoryChip,
                       {
-                        backgroundColor: isSelected ? `${c.color}28` : colors.surface,
-                        borderColor: isSelected ? c.color : colors.borderSubtle,
+                        backgroundColor: isSelected
+                          ? `${c.color}28`
+                          : (isDark ? '#0E0B20' : colors.surface),
+                        borderColor: isSelected ? c.color : (isDark ? '#231C42' : colors.borderSubtle),
                       },
                     ]}
                     accessibilityRole="button"
@@ -1783,7 +1859,7 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                   styles.categoryChip,
                   styles.categoryChipDashed,
                   {
-                    backgroundColor: colors.surface,
+                    backgroundColor: isDark ? '#0E0B20' : colors.surface,
                     borderColor: activeColorTheme,
                   },
                 ]}
@@ -1803,14 +1879,19 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
               style={[
                 styles.cardContainer,
                 {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.borderSubtle,
+                  backgroundColor: isDark ? '#14102C' : colors.surfaceElevated,
+                  borderColor: isDark ? '#2D2355' : colors.borderSubtle,
                 },
               ]}
             >
               <View style={styles.sectionHeaderRow}>
                 <View style={styles.sectionHeaderTitleGroup}>
-                  <View style={[styles.sectionIconBadge, { backgroundColor: `${activeColorTheme}20` }]}>
+                  <View
+                    style={[
+                      styles.sectionIconBadge,
+                      { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.15)' : `${activeColorTheme}20` },
+                    ]}
+                  >
                     <Text style={styles.sectionIconEmoji}>⚡</Text>
                   </View>
                   <Text style={[styles.cardHeaderLabel, { color: colors.textSecondary }]}>
@@ -1828,8 +1909,10 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                       style={[
                         styles.statusChipItem,
                         {
-                          backgroundColor: isSelected ? `${s.color}22` : colors.surface,
-                          borderColor: isSelected ? s.color : colors.borderSubtle,
+                          backgroundColor: isSelected
+                            ? `${s.color}25`
+                            : (isDark ? '#0E0B20' : colors.surface),
+                          borderColor: isSelected ? s.color : (isDark ? '#231C42' : colors.borderSubtle),
                         },
                       ]}
                       accessibilityRole="button"
@@ -1871,8 +1954,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
                 style={[
                   styles.metadataCard,
                   {
-                    backgroundColor: colors.surfaceElevated,
-                    borderColor: colors.borderSubtle,
+                    backgroundColor: isDark ? '#0E0B20' : colors.surfaceElevated,
+                    borderColor: isDark ? '#231C42' : colors.borderSubtle,
                   },
                 ]}
               >
@@ -1898,8 +1981,8 @@ export const CreateEditTaskScreen: React.FC<CreateEditTaskScreenProps> = ({
               style={[
                 styles.deleteCardButton,
                 {
-                  borderColor: `${colors.danger}60`,
-                  backgroundColor: colors.dangerBg,
+                  borderColor: isDark ? 'rgba(239, 68, 68, 0.4)' : `${colors.danger}60`,
+                  backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : colors.dangerBg,
                   opacity: isSaving ? 0.5 : 1,
                 },
               ]}
@@ -2046,6 +2129,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2059,21 +2143,21 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     elevation: 3,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
   },
   saveBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14, letterSpacing: 0.2, },
   keyboardAvoid: { flex: 1, },
   scrollContent: { padding: spacing.lg, gap: spacing.md, },
   cardContainer: {
-    borderRadius: radius.lg,
+    borderRadius: 16,
     borderWidth: 1,
     padding: spacing.lg,
     marginBottom: 4,
     elevation: 1,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowRadius: 3,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -2096,7 +2180,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: radius.md,
+    borderRadius: 12,
     borderWidth: 1.5,
     paddingHorizontal: spacing.md,
     paddingVertical: Platform.OS === 'ios' ? 10 : 4,
@@ -2109,8 +2193,8 @@ const styles = StyleSheet.create({
   subFieldHeaderRow: { marginBottom: spacing.xs, },
   subFieldLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, },
   notesWrapper: {
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     minHeight: 110,
@@ -2121,8 +2205,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
   },
   dateTileLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1, },
   dateIconSquircle: {
@@ -2140,7 +2224,7 @@ const styles = StyleSheet.create({
   changeDatePillText: { fontSize: 12, fontWeight: '700', },
   timingSegmentContainer: {
     flexDirection: 'row',
-    borderRadius: radius.md,
+    borderRadius: 10,
     borderWidth: 1,
     padding: 3,
     marginBottom: spacing.xs,
@@ -2148,7 +2232,7 @@ const styles = StyleSheet.create({
   timingSegmentBtn: {
     flex: 1,
     paddingVertical: 9,
-    borderRadius: radius.sm,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2165,8 +2249,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
     gap: spacing.md,
     marginTop: spacing.xs,
   },
@@ -2175,7 +2259,7 @@ const styles = StyleSheet.create({
   allDayHeroTitle: { fontSize: 14, fontWeight: '700', },
   allDayHeroSubtitle: { fontSize: 12, fontWeight: '500', marginTop: 2, },
   timeSlotsRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md, },
-  timeTile: { flex: 1, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, },
+  timeTile: { flex: 1, padding: spacing.md, borderRadius: 12, borderWidth: 1.5, },
   timeTileHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, },
   timeTileLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.6, },
   clearEndPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.xs, },
@@ -2186,8 +2270,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
     marginTop: spacing.md,
     gap: spacing.sm,
   },
@@ -2201,7 +2285,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: radius.full,
-    borderWidth: 1,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2212,8 +2296,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
     gap: spacing.sm,
   },
   overnightIcon: { fontSize: 16, },
@@ -2225,7 +2309,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 9,
     borderRadius: radius.full,
-    borderWidth: 1,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2240,21 +2324,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
   },
   statusChipItemText: { fontSize: 13, fontWeight: '700', },
   metadataCard: {
     marginTop: spacing.xs,
     padding: spacing.md,
-    borderRadius: radius.md,
+    borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
   },
   metadataText: { fontSize: 11, fontWeight: '500', },
   deleteCardButton: {
-    borderWidth: 1,
-    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: spacing.xs,

@@ -98,8 +98,12 @@ export function computeUnifiedNextUp(
       if (parsedStart !== null) {
         tStartMin = parsedStart;
         const parsedEnd = parseTimeToMinutes(upcomingTask.endTime);
-        const endMin = parsedEnd !== null && parsedEnd > parsedStart ? parsedEnd : parsedStart + 60;
-        if (tStartMin <= nowMin && nowMin < endMin) {
+        const endMin = parsedEnd !== null
+          ? (parsedEnd > parsedStart ? parsedEnd : parsedEnd + 1440)
+          : parsedStart + 60;
+        if (parsedEnd !== null && parsedEnd <= parsedStart) {
+          isActive = nowMin >= tStartMin || nowMin < parsedEnd;
+        } else if (tStartMin <= nowMin && nowMin < endMin) {
           isActive = true;
         }
       }
@@ -138,8 +142,15 @@ export function computeUnifiedNextUp(
     if (evStartMin === null) continue;
 
     const parsedEnd = parseTimeToMinutes(ev.endTime);
-    const evEndMin = parsedEnd !== null && parsedEnd > evStartMin ? parsedEnd : evStartMin + 45;
-    const isActive = evStartMin <= nowMin && nowMin < evEndMin;
+    const evEndMin = parsedEnd !== null
+      ? (parsedEnd > evStartMin ? parsedEnd : parsedEnd + 1440)
+      : evStartMin + 45;
+    let isActive = false;
+    if (parsedEnd !== null && parsedEnd <= evStartMin) {
+      isActive = nowMin >= evStartMin || nowMin < parsedEnd;
+    } else {
+      isActive = evStartMin <= nowMin && nowMin < evEndMin;
+    }
 
     if (isActive || evStartMin >= nowMin - 15) {
       candidates.push({
