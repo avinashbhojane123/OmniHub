@@ -196,6 +196,11 @@ class BatteryGuardService : Service() {
         val sound = prefs.getBoolean("battery_sound", true)
         val vibration = prefs.getBoolean("battery_vibration", true)
 
+        val snoozeUntil = prefs.getLong("battery_snooze_until", 0L)
+        if (System.currentTimeMillis() < snoozeUntil) {
+            return
+        }
+
         // 1. Full Charge Alarm Check
         if (fullEnabled && isCharging && batteryPct >= fullTarget) {
             if (!hasTriggeredFullAlarm) {

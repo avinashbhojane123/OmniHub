@@ -766,7 +766,7 @@ export class NotificationService {
         } catch {}
         try {
           const { alarmService } = await import('../alarm/AlarmService');
-          alarmService.stopRinging();
+          alarmService.stopRinging(false);
         } catch {}
         if (taskId) {
           const defaultSnoozeStr = await settingsRepository.get('defaultSnoozeMinutes', '10');
@@ -776,6 +776,10 @@ export class NotificationService {
         if (notificationId) {
           await notifee.cancelNotification(notificationId);
         }
+        try {
+          await notifee.cancelNotification('active_ringing_alarm');
+          await notifee.cancelNotification('active_battery_alarm');
+        } catch {}
       }
     }
   }

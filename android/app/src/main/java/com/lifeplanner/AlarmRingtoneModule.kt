@@ -36,11 +36,15 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
     override fun initialize() {
         super.initialize()
         activeContext = reactContext
+        reactAppContext = reactContext
     }
 
     override fun invalidate() {
         super.invalidate()
         stop()
+        if (reactAppContext == reactContext) {
+            reactAppContext = null
+        }
     }
 
     @Deprecated("Deprecated in Java/React Native")
@@ -48,18 +52,28 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
         @Suppress("DEPRECATION")
         super.onCatalystInstanceDestroy()
         stop()
+        if (reactAppContext == reactContext) {
+            reactAppContext = null
+        }
     }
 
     @Synchronized
     @ReactMethod
-    fun play(playAudio: Boolean, playVibrate: Boolean) {
-        playRingtone(reactContext, playAudio, playVibrate)
+    fun play(playAudio: Boolean, playVibrate: Boolean, alarmId: String? = null, title: String? = null, description: String? = null) {
+        playRingtone(reactContext, playAudio, playVibrate, alarmId, title, description)
     }
 
     @Synchronized
     @ReactMethod
     fun stop() {
         stopRingtone(reactContext)
+    }
+
+    @ReactMethod
+    fun cancelAlarmNotification(alarmId: String) {
+        try {
+            cancelNotification(reactContext, alarmId)
+        } catch (e: Exception) {}
     }
 
     @ReactMethod
@@ -211,6 +225,7 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
     }
 
     companion object {
+        var reactAppContext: ReactApplicationContext? = null
         private var activeContext: Context? = null
         private var mediaPlayer: MediaPlayer? = null
         private var fallbackRingtone: Ringtone? = null
@@ -395,33 +410,39 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
             }
 
             try {
-                mediaPlayer?.let {
-                    if (it.isPlaying) {
-                        it.stop()
-                    }
-                    it.release()
+                mediaPlayer?.let { mp ->
+                    try {
+                        mp.stop()
+                    } catch (e: Exception) {}
+                    try {
+                        mp.release()
+                    } catch (e: Exception) {}
                 }
-                mediaPlayer = null
+            } catch (e: Exception) {}
+            mediaPlayer = null
 
-                fallbackRingtone?.let {
-                    if (it.isPlaying) {
-                        it.stop()
-                    }
+            try {
+                fallbackRingtone?.let { r ->
+                    try {
+                        r.stop()
+                    } catch (e: Exception) {}
                 }
-                fallbackRingtone = null
-                isPlaying = false
+            } catch (e: Exception) {}
+            fallbackRingtone = null
+            isPlaying = false
 
-                val alarmIdToCancel = activeAlarmId
-                if (clearMetadata) {
-                    activeAlarmId = null
-                    activeTitle = null
-                    activeDescription = null
-                }
+            val alarmIdToCancel = activeAlarmId
+            if (clearMetadata) {
+                activeAlarmId = null
+                activeTitle = null
+                activeDescription = null
+            }
 
-                abandonAlarmAudioFocus()
+            abandonAlarmAudioFocus()
 
-                val targetCtx = context ?: activeContext
-                targetCtx?.let { ctx ->
+            val targetCtx = context ?: reactAppContext ?: activeContext
+            targetCtx?.let { ctx ->
+                try {
                     val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         val vibratorManager =
                             ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
@@ -431,24 +452,23 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
                         ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
                     }
                     vibrator?.cancel()
+                } catch (e: Exception) {}
 
-                    // Cancel native ongoing notification posted by AlarmReceiver
-                    try {
-                        val nm = NotificationManagerCompat.from(ctx)
-                        if (alarmIdToCancel != null) {
-                            val notifId = Math.abs(alarmIdToCancel.hashCode()) % 90000 + 10000
-                            nm.cancel(notifId)
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
+                // Cancel native ongoing notification posted by AlarmReceiver
+                try {
+                    val nm = NotificationManagerCompat.from(ctx)
+                    if (alarmIdToCancel != null) {
+                        val notifId = Math.abs(alarmIdToCancel.hashCode()) % 90000 + 10000
+                        nm.cancel(notifId)
                     }
+                    nm.cancel(99999)
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
+            }
 
-                if (notifyJs) {
-                    emitAlarmState(false)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            if (notifyJs) {
+                emitAlarmState(false)
             }
         }
 
@@ -456,9 +476,16 @@ class AlarmRingtoneModule(private val reactContext: ReactApplicationContext) :
             emitAlarmState(true, alarmId, title, description)
         }
 
+        fun cancelNotification(context: Context, alarmId: String) {
+            try {
+                val notifId = Math.abs(alarmId.hashCode()) % 90000 + 10000
+                NotificationManagerCompat.from(context).cancel(notifId)
+            } catch (e: Exception) {}
+        }
+
         private fun emitAlarmState(isRinging: Boolean, alarmId: String? = null, title: String? = null, description: String? = null) {
             try {
-                val reactCtx = activeContext as? ReactContext
+                val reactCtx = reactAppContext ?: (activeContext as? ReactContext)
                 if (reactCtx != null && reactCtx.hasActiveReactInstance()) {
                     val params = Arguments.createMap().apply {
                         putBoolean("isRinging", isRinging)

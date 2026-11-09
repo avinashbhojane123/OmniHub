@@ -954,7 +954,7 @@ class BatteryService {
       }
       this.currentActiveBatteryAlarm = null;
       try {
-        await alarmService.stopRinging();
+        await alarmService.stopRinging(dismissSession);
       } catch {}
       if (this.chimeTimer) {
         clearTimeout(this.chimeTimer);

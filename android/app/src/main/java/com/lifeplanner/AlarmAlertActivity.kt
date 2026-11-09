@@ -39,6 +39,9 @@ class AlarmAlertActivity : ReactActivity() {
         val alarmId = intent?.getStringExtra("alarmId") ?: ""
         val title = intent?.getStringExtra("alarmTitle") ?: intent?.getStringExtra("title") ?: "Alarm"
         val description = intent?.getStringExtra("alarmDescription") ?: intent?.getStringExtra("description") ?: ""
+        intent?.removeExtra("alarmId")
+        intent?.removeExtra("alarmTitle")
+        intent?.removeExtra("alarmDescription")
         AlarmRingtoneModule.notifyAlarmTriggered(alarmId, title, description)
     }
 

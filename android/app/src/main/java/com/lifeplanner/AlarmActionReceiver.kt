@@ -70,18 +70,29 @@ class AlarmActionReceiver : BroadcastReceiver() {
                 )
             }
         } else if ("com.lifeplanner.ACTION_SNOOZE_ALARM" == action || "ACTION_SNOOZE" == action) {
-            AlarmRingtoneModule.stopRingtone(context)
+            AlarmRingtoneModule.stopRingtone(context, clearMetadata = true, notifyJs = true)
             try {
                 NotificationManagerCompat.from(context).cancel(notifId)
+                if (alarmId.isNotEmpty()) {
+                    AlarmRingtoneModule.cancelNotification(context, alarmId)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
 
             // Reschedule alarm for 5 minutes later
             val snoozeTime = System.currentTimeMillis() + 5 * 60 * 1000L
+
+            if (alarmId.startsWith("battery") || alarmId.contains("battery")) {
+                try {
+                    val prefs = context.getSharedPreferences(BatteryGuardService.PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit().putLong("battery_snooze_until", snoozeTime).apply()
+                } catch (e: Exception) {}
+            }
+
             AlarmRingtoneModule.scheduleAlarm(
                 context = context,
-                alarmId = if (alarmId.isNotEmpty()) alarmId else "snooze_${System.currentTimeMillis()}",
+                alarmId = if (alarmId.isNotEmpty()) (if (alarmId.startsWith("alarm_snooze_")) alarmId else "alarm_snooze_$alarmId") else "alarm_snooze_${System.currentTimeMillis()}",
                 timestampMs = snoozeTime,
                 title = title,
                 description = if (description.isNotEmpty()) description else "Snoozed alarm ringing now!"

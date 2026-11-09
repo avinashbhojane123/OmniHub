@@ -39,6 +39,7 @@ export class AlarmService {
   private foregroundMonitorTimer: any = null;
   private triggeredKeysForMinute: Set<string> = new Set();
   private currentMinuteKey: string = '';
+  private snoozedUntilMap: Map<string, number> = new Map();
 
   private cachedHabits: Array<{ id: string; name: string; reminderTime: string; daysOfWeek: number[] }> = [];
   private cachedEvents: Array<{ id: string; title: string; date: string; time: string; description?: string }> = [];
@@ -251,6 +252,35 @@ export class AlarmService {
         const rawId = String(nativeState.alarmId || '');
         const parsed = this.parseAlarmId(rawId);
 
+        const targetKey = parsed.cleanTaskId
+          ? `task_${parsed.cleanTaskId}`
+          : parsed.cleanHabitId
+          ? `habit_${parsed.cleanHabitId}`
+          : parsed.cleanEventId
+          ? `event_${parsed.cleanEventId}`
+          : parsed.alarmType === 'battery'
+          ? 'battery'
+          : '';
+
+        if (targetKey && (this.snoozedUntilMap.get(targetKey) || 0) > Date.now()) {
+          if (AlarmRingtone?.stop) {
+            AlarmRingtone.stop();
+          }
+          return;
+        }
+
+        if (parsed.cleanTaskId) {
+          try {
+            const task = await taskRepository.findById(parsed.cleanTaskId);
+            if (task?.snoozeUntil && new Date(task.snoozeUntil).getTime() > Date.now()) {
+              if (AlarmRingtone?.stop) {
+                AlarmRingtone.stop();
+              }
+              return;
+            }
+          } catch {}
+        }
+
         this.startRinging(
           nativeState.title || 'Alarm',
           parsed.cleanHabitId,
@@ -333,17 +363,8 @@ export class AlarmService {
         } catch {}
       } else if (actionId === 'snooze_alarm' || actionId === 'snooze') {
         const activeStateSnapshot = { ...this.currentState };
-        this.stopRinging(true);
-        if (taskId) {
-          try {
-            const { notificationService } = await import('../notifications/NotificationService');
-            await notificationService.snoozeTaskReminder(taskId, 5);
-          } catch {
-            await this.snoozeAlarm(5, activeStateSnapshot);
-          }
-        } else {
-          await this.snoozeAlarm(5, activeStateSnapshot);
-        }
+        this.stopRinging(false);
+        await this.snoozeAlarm(5, activeStateSnapshot);
         try {
           if (notificationId) {
             await notifee.cancelNotification(notificationId);
@@ -351,6 +372,7 @@ export class AlarmService {
           await notifee.cancelNotification('active_ringing_alarm');
           await notifee.cancelNotification('active_battery_alarm');
         } catch {}
+        return;
       }
     } else if (type === EventType.DELIVERED || type === EventType.PRESS) {
       if (actionId === 'stop_alarm' || actionId === 'dismiss' || actionId === 'done') {
@@ -374,17 +396,8 @@ export class AlarmService {
       }
       if (actionId === 'snooze_alarm' || actionId === 'snooze') {
         const activeStateSnapshot = { ...this.currentState };
-        this.stopRinging(true);
-        if (taskId) {
-          try {
-            const { notificationService } = await import('../notifications/NotificationService');
-            await notificationService.snoozeTaskReminder(taskId, 5);
-          } catch {
-            await this.snoozeAlarm(5, activeStateSnapshot);
-          }
-        } else {
-          await this.snoozeAlarm(5, activeStateSnapshot);
-        }
+        this.stopRinging(false);
+        await this.snoozeAlarm(5, activeStateSnapshot);
         if (notificationId) {
           try {
             await notifee.cancelNotification(notificationId);
@@ -408,18 +421,55 @@ export class AlarmService {
       const isTaskAlarm = actionType === 'task_alarm';
       const isBatteryAlarm = actionType === 'battery_alarm';
 
+      const targetHabitId = (data?.habitId as string) || habitId;
+      const targetTaskId = (data?.taskId as string) || taskId;
+      const targetEventId = (data?.eventId as string) || eventId;
+
       const alarmKey = isHabitAlarm
-        ? `habit_${(data?.habitId as string) || habitId || ''}`
+        ? `habit_${targetHabitId || ''}`
         : isEventAlarm
-        ? `event_${(data?.eventId as string) || eventId || ''}`
+        ? `event_${targetEventId || ''}`
         : isTaskAlarm
-        ? `task_${(data?.taskId as string) || taskId || ''}`
+        ? `task_${targetTaskId || ''}`
         : isBatteryAlarm
         ? 'battery'
         : '';
 
-      if (alarmKey && this.triggeredKeysForMinute.has(alarmKey)) {
-        return;
+      if (alarmKey) {
+        const snoozeUntil = this.snoozedUntilMap.get(alarmKey) || 0;
+        if (Date.now() < snoozeUntil) {
+          if (notificationId) {
+            notifee.cancelNotification(notificationId).catch(() => {});
+          }
+          return;
+        }
+        if (this.triggeredKeysForMinute.has(alarmKey)) {
+          return;
+        }
+      }
+
+      if (targetTaskId) {
+        try {
+          const task = await taskRepository.findById(targetTaskId);
+          if (task?.snoozeUntil && new Date(task.snoozeUntil).getTime() > Date.now()) {
+            if (notificationId) {
+              notifee.cancelNotification(notificationId).catch(() => {});
+            }
+            return;
+          }
+        } catch {}
+      }
+
+      if (isBatteryAlarm) {
+        try {
+          const bSnooze = await settingsRepository.get('battery_snooze_until', '0');
+          if (Date.now() < Number(bSnooze)) {
+            if (notificationId) {
+              notifee.cancelNotification(notificationId).catch(() => {});
+            }
+            return;
+          }
+        } catch {}
       }
 
       if (!this.currentState.isRinging) {
@@ -428,12 +478,10 @@ export class AlarmService {
         }
         if (isHabitAlarm) {
           const title = (data?.habitName as string) || (data?.taskTitle as string) || 'Habit Alarm';
-          const targetHabitId = (data?.habitId as string) || habitId;
           const timeStr = data?.timeStr as string;
           this.startRinging(title, targetHabitId, timeStr, undefined, undefined, undefined, false, 'habit');
         } else if (isEventAlarm) {
           const title = (data?.eventTitle as string) || (data?.title as string) || 'Event Reminder';
-          const targetEventId = (data?.eventId as string) || eventId;
           const timeStr = data?.timeStr as string;
           const desc = data?.description as string;
           this.startRinging(title, undefined, timeStr, targetEventId, desc, undefined, false, 'event');
@@ -441,7 +489,7 @@ export class AlarmService {
           const title = (data?.taskTitle as string) || (data?.title as string) || 'Task Reminder';
           const taskTimeStr = data?.timeStr as string;
           const desc = data?.description as string;
-          this.startRinging(title, undefined, taskTimeStr, undefined, desc, taskId, false, 'task');
+          this.startRinging(title, undefined, taskTimeStr, undefined, desc, targetTaskId, false, 'task');
         } else if (isBatteryAlarm) {
           const title = (data?.title as string) || 'Battery Alarm';
           const desc = data?.description as string;
@@ -528,7 +576,8 @@ export class AlarmService {
     if (!skipNativePlay) {
       if (AlarmRingtone?.play) {
         try {
-          AlarmRingtone.play(soundEnabled, vibrationEnabled);
+          const nativeAlarmId = habitId ? `alarm_habit_${habitId}` : taskId ? `alarm_task_${taskId}` : eventId ? `alarm_event_${eventId}` : 'alarm';
+          AlarmRingtone.play(soundEnabled, vibrationEnabled, nativeAlarmId, title, description);
         } catch (e) {
           console.warn('[AlarmService] AlarmRingtone.play error, falling back to Vibration:', e);
           if (vibrationEnabled) {
@@ -849,24 +898,33 @@ export class AlarmService {
     try {
       const wasRinging = this.currentState.isRinging;
       const ringingHabitId = this.currentState.habitId;
+      const ringingTaskId = this.currentState.taskId;
+      const ringingEventId = this.currentState.eventId;
       const isBattery =
         this.currentState.alarmType === 'battery' ||
         this.currentState.timeString === 'Battery Alarm' ||
         (this.currentState.title || '').toLowerCase().includes('battery');
 
-      const alarmKey =
-        this.currentState.habitId
-          ? `habit_${this.currentState.habitId}`
-          : this.currentState.eventId
-          ? `event_${this.currentState.eventId}`
-          : this.currentState.taskId
-          ? `task_${this.currentState.taskId}`
-          : isBattery
-          ? 'battery'
-          : this.currentState.title;
-
-      if (alarmKey) {
-        this.triggeredKeysForMinute.add(alarmKey);
+      if (ringingHabitId) {
+        this.triggeredKeysForMinute.add(`habit_${ringingHabitId}`);
+        this.triggeredKeysForMinute.add(`alarm_habit_${ringingHabitId}`);
+        this.triggeredKeysForMinute.add(`alarm_snooze_habit_${ringingHabitId}`);
+      }
+      if (ringingTaskId) {
+        this.triggeredKeysForMinute.add(`task_${ringingTaskId}`);
+        this.triggeredKeysForMinute.add(`alarm_task_${ringingTaskId}`);
+        this.triggeredKeysForMinute.add(`alarm_snooze_task_${ringingTaskId}`);
+      }
+      if (ringingEventId) {
+        this.triggeredKeysForMinute.add(`event_${ringingEventId}`);
+        this.triggeredKeysForMinute.add(`alarm_event_${ringingEventId}`);
+        this.triggeredKeysForMinute.add(`alarm_snooze_event_${ringingEventId}`);
+      }
+      if (isBattery) {
+        this.triggeredKeysForMinute.add('battery');
+      }
+      if (this.currentState.title) {
+        this.triggeredKeysForMinute.add(this.currentState.title);
       }
 
       if (resetAutoSnooze) {
@@ -902,6 +960,34 @@ export class AlarmService {
         notifee.cancelNotification('active_battery_alarm');
       } catch {}
 
+      if (ringingHabitId) {
+        notifee.cancelNotification(`alarm_habit_${ringingHabitId}`).catch(() => {});
+        notifee.cancelNotification(`alarm_${ringingHabitId}`).catch(() => {});
+        if (AlarmRingtone?.cancelAlarmNotification) {
+          try {
+            AlarmRingtone.cancelAlarmNotification(`alarm_habit_${ringingHabitId}`);
+          } catch {}
+        }
+      }
+      if (ringingTaskId) {
+        notifee.cancelNotification(`alarm_task_${ringingTaskId}`).catch(() => {});
+        notifee.cancelNotification(`task_${ringingTaskId}`).catch(() => {});
+        if (AlarmRingtone?.cancelAlarmNotification) {
+          try {
+            AlarmRingtone.cancelAlarmNotification(`alarm_task_${ringingTaskId}`);
+          } catch {}
+        }
+      }
+      if (ringingEventId) {
+        notifee.cancelNotification(`alarm_event_${ringingEventId}`).catch(() => {});
+        notifee.cancelNotification(`event_${ringingEventId}`).catch(() => {});
+        if (AlarmRingtone?.cancelAlarmNotification) {
+          try {
+            AlarmRingtone.cancelAlarmNotification(`alarm_event_${ringingEventId}`);
+          } catch {}
+        }
+      }
+
       if (isBattery) {
         try {
           const { batteryService } = require('../battery/BatteryService');
@@ -924,7 +1010,7 @@ export class AlarmService {
         this.notify();
       }
 
-      if (ringingHabitId) {
+      if (ringingHabitId && resetAutoSnooze) {
         this.rescheduleNextHabitAlarm(ringingHabitId);
       }
     } finally {
@@ -971,6 +1057,29 @@ export class AlarmService {
       ? 'habit_'
       : '';
     const snoozeAlarmId = `alarm_snooze_${prefix}${targetId}`;
+
+    const targetKey = isBattery ? 'battery' : taskId ? `task_${taskId}` : habitId ? `habit_${habitId}` : eventId ? `event_${eventId}` : 'alarm';
+    this.snoozedUntilMap.set(targetKey, snoozeTarget.getTime());
+    this.triggeredKeysForMinute.add(targetKey);
+    this.triggeredKeysForMinute.add(snoozeAlarmId);
+
+    if (taskId) {
+      try {
+        await taskRepository.update(taskId, { snoozeUntil: snoozeTarget.toISOString() });
+      } catch (e) {
+        console.warn('[AlarmService] Failed to persist task snooze:', e);
+      }
+    }
+
+    if (isBattery) {
+      try {
+        await settingsRepository.set('battery_snooze_until', String(snoozeTarget.getTime()));
+      } catch {}
+      try {
+        const { batteryService } = require('../battery/BatteryService');
+        await batteryService.snoozeAlarm(snoozeMinutes);
+      } catch {}
+    }
 
     // 1. Schedule with native Android AlarmManager if available (guaranteed wake-up through Doze)
     if (AlarmRingtone?.scheduleExactAlarm) {
@@ -1554,6 +1663,8 @@ export class AlarmService {
         for (const habit of this.cachedHabits) {
           const alarmKey = `habit_${habit.id}`;
           if (this.triggeredKeysForMinute.has(alarmKey)) continue;
+          const snoozeMs = this.snoozedUntilMap.get(alarmKey) || 0;
+          if (Date.now() < snoozeMs) continue;
           if (!habit.daysOfWeek.includes(currentDayIndex)) continue;
 
           const parsed = this.parseTime(habit.reminderTime);
@@ -1568,6 +1679,8 @@ export class AlarmService {
         for (const ev of this.cachedEvents) {
           const alarmKey = `event_${ev.id}`;
           if (this.triggeredKeysForMinute.has(alarmKey)) continue;
+          const snoozeMs = this.snoozedUntilMap.get(alarmKey) || 0;
+          if (Date.now() < snoozeMs) continue;
           const evDate = (ev.date || '').includes('T') ? ev.date.split('T')[0] : ev.date;
           if (evDate !== todayIso) continue;
 
@@ -1583,6 +1696,9 @@ export class AlarmService {
         for (const tk of this.cachedTasks) {
           const alarmKey = `task_${tk.id}`;
           if (this.triggeredKeysForMinute.has(alarmKey)) continue;
+          const snoozeMs = this.snoozedUntilMap.get(alarmKey) || 0;
+          if (Date.now() < snoozeMs) continue;
+          if (tk.snoozeUntil && new Date(tk.snoozeUntil).getTime() > Date.now()) continue;
           const tkDate = (tk.date || '').includes('T') ? tk.date.split('T')[0] : tk.date;
           if (tkDate !== todayIso || !tk.isLoud) continue;
 
