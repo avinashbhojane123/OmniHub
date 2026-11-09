@@ -15,7 +15,7 @@ export const MovieCard: React.FC<MovieCardProps> = React.memo(
     return (
       <TouchableOpacity
         style={[styles.movieCard, { width: cardWidth }]}
-        activeOpacity={0.88}
+        activeOpacity={0.85}
         onPress={() => onPress(movie)}
       >
         <View style={styles.posterContainer}>
@@ -112,20 +112,19 @@ export const MovieCard: React.FC<MovieCardProps> = React.memo(
     prev.movie.original_language === next.movie.original_language,
 );
 
-
 const styles = StyleSheet.create({
   movieCard: {
     margin: 6,
     borderRadius: 14,
-    backgroundColor: '#121620',
+    backgroundColor: '#131028',
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#1E2433',
+    borderColor: '#2A224D',
   },
   posterContainer: {
     aspectRatio: 2 / 3,
     width: '100%',
-    backgroundColor: '#1A1E29',
+    backgroundColor: '#0F0C1E',
   },
   cardPoster: {
     width: '100%',
@@ -134,7 +133,7 @@ const styles = StyleSheet.create({
   fallbackPosterWrap: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#161B26',
+    backgroundColor: '#0F0C1E',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 12,
@@ -144,7 +143,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   fallbackPosterTitle: {
-    color: '#9CA3AF',
+    color: '#94A3B8',
     fontSize: 11,
     fontWeight: '600',
     textAlign: 'center',
@@ -153,17 +152,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: 'rgba(9, 11, 16, 0.82)',
-    paddingHorizontal: 6,
+    backgroundColor: 'rgba(11, 8, 25, 0.88)',
+    paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 8,
-    borderWidth: 0.5,
-    borderColor: '#FBBF24',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
   },
   ratingBadgeText: {
     color: '#FBBF24',
     fontSize: 11,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   bookmarkShortcut: {
     position: 'absolute',
@@ -172,24 +172,29 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(9, 11, 16, 0.75)',
+    backgroundColor: 'rgba(11, 8, 25, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   bookmarkShortcutActive: {
-    backgroundColor: 'rgba(225, 29, 72, 0.85)',
+    backgroundColor: 'rgba(225, 29, 72, 0.9)',
+    borderColor: '#F43F5E',
   },
   bookmarkShortcutText: {
-    fontSize: 14,
+    fontSize: 13,
   },
   cardMeta: {
     padding: 10,
+    backgroundColor: '#131028',
   },
   cardTitle: {
-    color: '#F9FAFB',
+    color: '#F8FAFC',
     fontSize: 13,
     fontWeight: '700',
     marginBottom: 4,
+    letterSpacing: -0.2,
   },
   cardSubMeta: {
     flexDirection: 'row',
@@ -197,40 +202,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cardYear: {
-    color: '#9CA3AF',
+    color: '#94A3B8',
     fontSize: 11,
+    fontWeight: '500',
   },
   cardRuntime: {
-    color: '#6B7280',
+    color: '#64748B',
     fontSize: 11,
+    fontWeight: '500',
   },
   networkBadge: {
     position: 'absolute',
     top: 8,
     left: 42,
-    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    backgroundColor: 'rgba(15, 12, 35, 0.92)',
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 6,
-    borderWidth: 0.5,
-    borderColor: '#3B82F6',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.35)',
     maxWidth: '55%',
   },
   networkBadgeText: {
-    color: '#60A5FA',
+    color: '#A78BFA',
     fontSize: 9,
     fontWeight: '800',
   },
   tvCardBadge: {
-    backgroundColor: 'rgba(59, 130, 246, 0.18)',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
     borderRadius: 4,
-    borderWidth: 0.5,
-    borderColor: '#3B82F6',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.4)',
   },
   tvCardBadgeText: {
-    color: '#60A5FA',
+    color: '#C4B5FD',
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -239,11 +246,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 8,
     right: 8,
-    backgroundColor: 'rgba(225, 29, 72, 0.9)',
+    backgroundColor: 'rgba(225, 29, 72, 0.92)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-    borderWidth: 0.5,
+    borderWidth: 1,
     borderColor: '#FB7185',
   },
   langBadgeText: {
@@ -253,5 +260,3 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
-
-
