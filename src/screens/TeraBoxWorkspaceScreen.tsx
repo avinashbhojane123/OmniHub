@@ -570,6 +570,7 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; background: #000; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
@@ -577,48 +578,89 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
   </style>
 </head>
 <body>
-  <video id="player" src="${activeStreamUrl}" playsinline autoplay controls poster="${currentMedia?.thumbnail || ''}"></video>
+  <video id="player" playsinline autoplay controls poster="${currentMedia?.thumbnail || ''}"></video>
   <script>
     var v = document.getElementById('player');
-    v.currentTime = ${currentTime};
-    v.playbackRate = ${playbackSpeed};
-    v.play().catch(function() {
-      v.muted = true;
-      v.play();
-    });
+    var streamUrl = "${activeStreamUrl}";
+    var isHls = streamUrl.includes('m3u8') || streamUrl.includes('share/streaming');
+
+    function notify(type, data) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ type: type }, data || {})));
+      }
+    }
+
+    function initHls() {
+      if (isHls && window.Hls && Hls.isSupported()) {
+        var hls = new Hls({
+          enableWorker: false,
+          xhrSetup: function(xhr, url) {
+            xhr.setRequestHeader('Referer', 'https://www.terabox.app/');
+          }
+        });
+        hls.loadSource(streamUrl);
+        hls.attachMedia(v);
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+          if (${currentTime} > 0) v.currentTime = ${currentTime};
+          v.playbackRate = ${playbackSpeed};
+          v.play().catch(function() {
+            v.muted = true;
+            v.play();
+          });
+        });
+        hls.on(Hls.Events.ERROR, function(event, data) {
+          if (data.fatal) {
+            switch(data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                notify('ERROR', { message: 'Video stream could not be loaded' });
+                hls.destroy();
+                break;
+            }
+          }
+        });
+      } else {
+        v.src = streamUrl;
+        if (${currentTime} > 0) v.currentTime = ${currentTime};
+        v.playbackRate = ${playbackSpeed};
+        v.play().catch(function() {
+          v.muted = true;
+          v.play();
+        });
+      }
+    }
+
+    initHls();
 
     v.addEventListener('timeupdate', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'PROGRESS',
-          currentTime: Math.floor(v.currentTime),
-          duration: Math.floor(v.duration || 0)
-        }));
-      }
+      notify('PROGRESS', {
+        currentTime: Math.floor(v.currentTime),
+        duration: Math.floor(v.duration || ${totalDuration || 0})
+      });
     });
     v.addEventListener('waiting', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'BUFFERING', buffering: true }));
-      }
+      notify('BUFFERING', { buffering: true });
     });
     v.addEventListener('playing', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'BUFFERING', buffering: false, playing: true }));
-      }
+      notify('BUFFERING', { buffering: false, playing: true });
     });
     v.addEventListener('pause', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'PAUSED' }));
-      }
+      notify('PAUSED');
     });
-    v.addEventListener('error', function() {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: 'Video stream could not be loaded' }));
+    v.addEventListener('error', function(e) {
+      if (!isHls) {
+        notify('ERROR', { message: 'Playback Error: Video stream could not be loaded' });
       }
     });
   </script>
 </body>
 </html>`,
+                  baseUrl: 'https://www.terabox.app/',
                 }}
                 style={{ width: '100%', height: '100%', backgroundColor: '#000000' }}
                 allowsFullscreenVideo={true}
