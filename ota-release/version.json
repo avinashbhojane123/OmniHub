@@ -1,8 +1,8 @@
 {
-  "version": 1794393607843,
-  "buildTime": "04:10:07 pm",
-  "sizeBytes": 2787907,
-  "sizeMb": "2.66",
+  "version": 1794395095886,
+  "buildTime": "04:34:55 pm",
+  "sizeBytes": 3088321,
+  "sizeMb": "2.95",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "OTA update from Antigravity"
+  "notes": "Fix TeraBox Hls player: offline inlined engine, CustomPlaylistLoader, Android WebView permissions"
 }

@@ -22,6 +22,7 @@ import { WebView } from 'react-native-webview';
 import { useAppTheme } from '../hooks/useTheme';
 import { teraboxService, ExtractTeraBoxResult, TeraBoxStream } from '../services/terabox/TeraBoxService';
 import { nativePlayerBridge } from '../services/terabox/TeraBoxNativePlayer';
+import { HLS_LIGHT_SCRIPT } from '../services/terabox/hlsScript';
 
 const QUALITY_ORDER = ['1080p', '720p', '480p', '360p'];
 
@@ -572,25 +573,23 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
                   html: `<!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.light.min.js"></script>
-  <script>
-    if (!window.Hls) {
-      document.write('<script src="https://unpkg.com/hls.js@1.5.8/dist/hls.light.min.js"><\\/script>');
-    }
-  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; background: #000; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
     video { width: 100%; height: 100%; object-fit: contain; background: #000; }
   </style>
+  <script>
+${HLS_LIGHT_SCRIPT}
+  </script>
 </head>
 <body>
   <video id="player" playsinline autoplay controls poster="${currentMedia?.thumbnail || ''}"></video>
   <script>
     var v = document.getElementById('player');
     var streamUrl = "${activeStreamUrl}";
-    var manifestText = ${JSON.stringify(activeManifest || '')};
+    var manifestText = ${JSON.stringify(activeManifest || '').replace(/<\/script/gi, '<\\/script')};
     var isHls = streamUrl.includes('m3u8') || streamUrl.includes('share/streaming') || !!manifestText;
     var retryCount = 0;
 
@@ -600,30 +599,49 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
       }
     }
 
+    window.onerror = function(msg, source, lineno, colno) {
+      notify('ERROR', { message: 'Player JS Error: ' + msg });
+    };
+
+    function CustomPlaylistLoader(config) {
+      var defaultLoader = new Hls.DefaultConfig.loader(config);
+      this.destroy = function() { try { defaultLoader.destroy(); } catch(e){} };
+      this.abort = function() { try { defaultLoader.abort(); } catch(e){} };
+      this.load = function(context, cfg, callbacks) {
+        if (manifestText && (context.type === 'manifest' || context.type === 'level')) {
+          setTimeout(function() {
+            var now = performance.now();
+            callbacks.onSuccess(
+              { url: context.url, data: manifestText },
+              {
+                trequest: now,
+                tfirst: now,
+                tload: now,
+                loaded: manifestText.length,
+                total: manifestText.length
+              },
+              context
+            );
+          }, 0);
+          return;
+        }
+        defaultLoader.load(context, cfg, callbacks);
+      };
+    }
+
     function initHls() {
       if (isHls && window.Hls && Hls.isSupported()) {
         var hls = new Hls({
           enableWorker: false,
+          lowLatencyMode: false,
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
-          xhrSetup: function(xhr, url) {
-            xhr.setRequestHeader('Referer', 'https://www.terabox.app/');
-          }
+          pLoader: CustomPlaylistLoader
         });
 
-        if (manifestText) {
-          try {
-            var blob = new Blob([manifestText], { type: 'application/vnd.apple.mpegurl' });
-            var blobUrl = URL.createObjectURL(blob);
-            hls.loadSource(blobUrl);
-          } catch(e) {
-            hls.loadSource(streamUrl);
-          }
-        } else {
-          hls.loadSource(streamUrl);
-        }
-
+        hls.loadSource(streamUrl);
         hls.attachMedia(v);
+
         hls.on(Hls.Events.MANIFEST_PARSED, function() {
           notify('BUFFERING', { buffering: false });
           if (${currentTime} > 0) v.currentTime = ${currentTime};
@@ -636,14 +654,15 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
 
         hls.on(Hls.Events.ERROR, function(event, data) {
           if (data.fatal) {
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < 2) {
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < 3) {
               retryCount++;
               hls.startLoad();
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < 2) {
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < 3) {
               retryCount++;
               hls.recoverMediaError();
             } else {
-              notify('ERROR', { message: 'Video stream could not be loaded' });
+              var detail = (data.details || 'stream failure') + (data.response && data.response.code ? ' (' + data.response.code + ')' : '');
+              notify('ERROR', { message: 'Video stream could not be loaded: ' + detail });
               hls.destroy();
             }
           }
@@ -672,13 +691,14 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
     });
     v.addEventListener('playing', function() {
       notify('BUFFERING', { buffering: false, playing: true });
+      notify('PLAYING');
     });
     v.addEventListener('pause', function() {
       notify('PAUSED');
     });
     v.addEventListener('error', function(e) {
       if (!isHls) {
-        notify('ERROR', { message: 'Playback Error: Video stream could not be loaded' });
+        notify('ERROR', { message: 'Native Video Error: Stream could not be played' });
       }
     });
   </script>
@@ -692,6 +712,11 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
                 mediaPlaybackRequiresUserAction={false}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
+                allowFileAccess={true}
+                allowFileAccessFromFileURLs={true}
+                allowUniversalAccessFromFileURLs={true}
+                mixedContentMode="always"
+                androidLayerType="hardware"
                 onMessage={(event: any) => {
                   try {
                     const msg = JSON.parse(event.nativeEvent.data);
@@ -702,6 +727,9 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
                       setIsBuffering(!!msg.buffering);
                     } else if (msg.type === 'PAUSED') {
                       setIsPlaying(false);
+                    } else if (msg.type === 'PLAYING') {
+                      setIsPlaying(true);
+                      setIsBuffering(false);
                     } else if (msg.type === 'ERROR') {
                       setPlayerError(msg.message || 'Stream loading error');
                     }
@@ -711,7 +739,7 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
             ) : null}
 
             {/* Buffering Indicator */}
-            {isBuffering && (
+            {isBuffering && !playerError && (
               <View style={styles.bufferingOverlay}>
                 <ActivityIndicator size="large" color="#06B6D4" />
                 <Text style={styles.bufferingText}>Buffering stream...</Text>
