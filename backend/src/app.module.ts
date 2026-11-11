@@ -11,6 +11,7 @@ import { BatteryModule } from './battery/battery.module';
 import { TasksModule } from './tasks/tasks.module';
 import { DevicesModule } from './devices/devices.module';
 import { AuthModule } from './auth/auth.module';
+import { TeraboxModule } from './terabox/terabox.module';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -199,6 +200,7 @@ export function getTypeOrmOptions(
     TasksModule,
     DevicesModule,
     AuthModule,
+    TeraboxModule,
   ],
   controllers: [AppController],
   providers: [AppService, RateLimitGuard],
