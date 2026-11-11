@@ -1,8 +1,8 @@
 {
-  "version": 1794395526986,
-  "buildTime": "04:42:06 pm",
-  "sizeBytes": 3088971,
-  "sizeMb": "2.95",
+  "version": 1794247203540,
+  "buildTime": "11:30:03 pm",
+  "sizeBytes": 2750701,
+  "sizeMb": "2.62",
   "bundleUrl": "/ota/index.android.bundle",
-  "notes": "Fix CustomPlaylistLoader stats object with parsing and loading timestamps"
+  "notes": "OTA update from Antigravity"
 }

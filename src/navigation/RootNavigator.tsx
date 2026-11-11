@@ -24,7 +24,6 @@ import { ChatRoomScreen } from '../screens/ChatRoomScreen';
 import { BatteryAlarmScreen } from '../screens/BatteryAlarmScreen';
 import { CreateEditTaskScreen } from '../screens/CreateEditTaskScreen';
 import { TasksScreen } from '../screens/TasksScreen';
-import { TeraBoxWorkspaceScreen } from '../screens/TeraBoxWorkspaceScreen';
 import { useAppTheme } from '../hooks/useTheme';
 
 export type { MainTabParamList };
@@ -35,7 +34,6 @@ export type RootStackParamList = {
   BatteryAlarm: undefined;
   ChatRoom: undefined;
   MovieWorkspace: undefined;
-  TeraBoxWorkspace: undefined;
   TasksScreen: undefined;
   CreateEditTask:
     | {
@@ -106,7 +104,6 @@ export const linking: LinkingOptions<RootStackParamList> = {
       BatteryAlarm: 'battery',
       ChatRoom: 'chat',
       MovieWorkspace: 'movies',
-      TeraBoxWorkspace: 'terabox',
       TasksScreen: 'tasks',
       CreateEditTask: {
         path: 'task/:taskId?',
@@ -183,7 +180,6 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({
         <Stack.Screen name="BatteryAlarm" component={BatteryAlarmScreen} />
         <Stack.Screen name="ChatRoom" component={ChatRoomScreen} />
         <Stack.Screen name="MovieWorkspace" component={MovieWorkspaceScreen} />
-        <Stack.Screen name="TeraBoxWorkspace" component={TeraBoxWorkspaceScreen} />
         <Stack.Screen name="TasksScreen" component={TasksScreen} />
         <Stack.Screen
           name="CreateEditTask"

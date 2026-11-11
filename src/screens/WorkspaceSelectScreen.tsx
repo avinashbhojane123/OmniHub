@@ -43,7 +43,7 @@ import { otaService, OTAStatus, UpdateCheckResult } from '../services/ota/OTASer
 import { alarmService } from '../services/alarm/AlarmService';
 import { chatSocketService } from '../services/chat/ChatSocketService';
 
-export type WorkspaceMode = 'planner' | 'battery' | 'chat' | 'movies' | 'terabox';
+export type WorkspaceMode = 'planner' | 'battery' | 'chat' | 'movies';
 
 interface WorkspaceConfig {
   id: WorkspaceMode;
@@ -111,19 +111,6 @@ const WORKSPACES: WorkspaceConfig[] = [
     lightBg: '#FFF1F2',
     route: 'MovieWorkspace',
     features: ['Trending & TV Series', 'Trailers & Cast Details', 'My Watchlist & Watched'],
-  },
-  {
-    id: 'terabox',
-    name: 'TeraStream (ExoPlayer)',
-    tagline: 'Zero-ad streaming for TeraBox video links',
-    category: 'STREAMING',
-    icon: '▶',
-    color: '#06B6D4',
-    colorLight: '#22D3EE',
-    darkBg: '#083344',
-    lightBg: '#ECFEFF',
-    route: 'TeraBoxWorkspace',
-    features: ['No Ads & No TeraBox UI', 'Native ExoPlayer & PiP', '1080p/720p Quality Switch'],
   },
 ];
 

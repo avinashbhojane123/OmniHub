@@ -8,7 +8,6 @@ import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 
 import java.io.File
-import com.lifeplanner.terabox.TeraBoxPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -27,7 +26,6 @@ class MainApplication : Application(), ReactApplication {
           add(AlarmRingtonePackage())
           add(DeviceBatteryPackage())
           add(OTAPackage())
-          add(TeraBoxPackage())
         },
       jsBundleFilePath = customBundlePath,
     )
