@@ -56,6 +56,7 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
   // State: Player Screen / Modal
   const [playerModalVisible, setPlayerModalVisible] = useState(false);
   const [activeStreamUrl, setActiveStreamUrl] = useState<string>('');
+  const [activeManifest, setActiveManifest] = useState<string>('');
   const [isPlaying, setIsPlaying] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
@@ -170,8 +171,9 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
   };
 
   // Launch Player
-  const startPlayback = (streamUrl: string, startFromSeconds = 0) => {
+  const startPlayback = (streamUrl: string, startFromSeconds = 0, manifest = '') => {
     setActiveStreamUrl(streamUrl);
+    setActiveManifest(manifest);
     setCurrentTime(startFromSeconds);
     setTotalDuration(currentMedia?.duration || 7200);
     setIsPlaying(true);
@@ -233,6 +235,7 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
     if (stream) {
       setSelectedQuality(quality);
       setActiveStreamUrl(stream.url);
+      setActiveManifest(stream.manifest || '');
       setPlayerReloadKey((k) => k + 1);
       setIsBuffering(true);
     }
@@ -536,7 +539,7 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
                       const targetStream =
                         currentMedia.streams.find((s) => s.quality === selectedQuality) ||
                         currentMedia.streams[0];
-                      startPlayback(targetStream.url, 0);
+                      startPlayback(targetStream.url, 0, targetStream.manifest || '');
                     }}
                   >
                     <Text style={styles.playFromStartBtnText}>▶ Stream with ExoPlayer</Text>
@@ -570,7 +573,12 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.light.min.js"></script>
+  <script>
+    if (!window.Hls) {
+      document.write('<script src="https://unpkg.com/hls.js@1.5.8/dist/hls.light.min.js"><\\/script>');
+    }
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; background: #000; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
@@ -582,7 +590,9 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
   <script>
     var v = document.getElementById('player');
     var streamUrl = "${activeStreamUrl}";
-    var isHls = streamUrl.includes('m3u8') || streamUrl.includes('share/streaming');
+    var manifestText = ${JSON.stringify(activeManifest || '')};
+    var isHls = streamUrl.includes('m3u8') || streamUrl.includes('share/streaming') || !!manifestText;
+    var retryCount = 0;
 
     function notify(type, data) {
       if (window.ReactNativeWebView) {
@@ -594,13 +604,28 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
       if (isHls && window.Hls && Hls.isSupported()) {
         var hls = new Hls({
           enableWorker: false,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
           xhrSetup: function(xhr, url) {
             xhr.setRequestHeader('Referer', 'https://www.terabox.app/');
           }
         });
-        hls.loadSource(streamUrl);
+
+        if (manifestText) {
+          try {
+            var blob = new Blob([manifestText], { type: 'application/vnd.apple.mpegurl' });
+            var blobUrl = URL.createObjectURL(blob);
+            hls.loadSource(blobUrl);
+          } catch(e) {
+            hls.loadSource(streamUrl);
+          }
+        } else {
+          hls.loadSource(streamUrl);
+        }
+
         hls.attachMedia(v);
         hls.on(Hls.Events.MANIFEST_PARSED, function() {
+          notify('BUFFERING', { buffering: false });
           if (${currentTime} > 0) v.currentTime = ${currentTime};
           v.playbackRate = ${playbackSpeed};
           v.play().catch(function() {
@@ -608,19 +633,18 @@ export const TeraBoxWorkspaceScreen: React.FC = () => {
             v.play();
           });
         });
+
         hls.on(Hls.Events.ERROR, function(event, data) {
           if (data.fatal) {
-            switch(data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                hls.recoverMediaError();
-                break;
-              default:
-                notify('ERROR', { message: 'Video stream could not be loaded' });
-                hls.destroy();
-                break;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < 2) {
+              retryCount++;
+              hls.startLoad();
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < 2) {
+              retryCount++;
+              hls.recoverMediaError();
+            } else {
+              notify('ERROR', { message: 'Video stream could not be loaded' });
+              hls.destroy();
             }
           }
         });

@@ -3,6 +3,7 @@
 export interface TeraBoxStream {
   quality: string;
   url: string;
+  manifest?: string;
   resolution?: string;
   format?: string;
 }
@@ -341,21 +342,50 @@ export class TeraBoxService {
           { label: '360p', type: 'M3U8_AUTO_360', minDim: 0, res: '640x360' },
         ];
 
+        // Pre-validate & fetch manifests in parallel to guarantee stream viability
         const streams: TeraBoxStream[] = [];
-        for (const q of qualityConfigs) {
-          if (maxDim > 0 && q.minDim > 0 && maxDim < q.minDim) {
-            continue;
-          }
-          const streamUrl = `${baseDomain}/share/streaming?uk=${uk}&shareid=${shareid}&type=${q.type}&fid=${fs_id}&sign=${sign}&timestamp=${timestamp}&jsToken=${jsToken}&esl=1&isplayer=1&ehps=1&clienttype=0&app_id=250528&web=1&channel=0`;
-          streams.push({
-            quality: q.label,
-            url: streamUrl,
-            resolution: q.res,
-            format: 'application/x-mpegURL',
-          });
+        const candidateConfigs = qualityConfigs.filter(
+          (q) => !(maxDim > 0 && q.minDim > 0 && maxDim < q.minDim),
+        );
+
+        const testedStreams = await Promise.all(
+          candidateConfigs.map(async (q) => {
+            const streamUrl = `${baseDomain}/share/streaming?uk=${uk}&shareid=${shareid}&type=${q.type}&fid=${fs_id}&sign=${sign}&timestamp=${timestamp}&jsToken=${jsToken}&esl=1&isplayer=1&ehps=1&clienttype=0&app_id=250528&web=1&channel=0`;
+            try {
+              const testCtrl = new AbortController();
+              const testTimeout = setTimeout(() => testCtrl.abort(), 4000);
+              const m3u8Res = await fetch(streamUrl, {
+                headers: {
+                  'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                  Referer: `${baseDomain}/`,
+                },
+                signal: testCtrl.signal,
+              });
+              clearTimeout(testTimeout);
+
+              const text = await m3u8Res.text();
+              if (text.startsWith('#EXTM3U')) {
+                return {
+                  quality: q.label,
+                  url: streamUrl,
+                  manifest: text,
+                  resolution: q.res,
+                  format: 'application/x-mpegURL',
+                };
+              }
+            } catch {
+              // Ignore failure for this resolution
+            }
+            return null;
+          }),
+        );
+
+        for (const s of testedStreams) {
+          if (s) streams.push(s);
         }
 
-        // If no streams qualified, add 480p and 360p by default
+        // If no pre-validated streams (e.g. timeout), provide direct stream URLs as fallback
         if (streams.length === 0) {
           for (const q of ['480p', '360p']) {
             streams.push({
