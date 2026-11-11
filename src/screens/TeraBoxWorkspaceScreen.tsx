@@ -605,22 +605,36 @@ ${HLS_LIGHT_SCRIPT}
 
     function CustomPlaylistLoader(config) {
       var defaultLoader = new Hls.DefaultConfig.loader(config);
+      this.stats = defaultLoader ? defaultLoader.stats : null;
       this.destroy = function() { try { defaultLoader.destroy(); } catch(e){} };
       this.abort = function() { try { defaultLoader.abort(); } catch(e){} };
       this.load = function(context, cfg, callbacks) {
         if (manifestText && (context.type === 'manifest' || context.type === 'level')) {
+          var now = performance.now();
+          var stats = (defaultLoader && defaultLoader.stats) ? defaultLoader.stats : {
+            aborted: false,
+            loaded: manifestText.length,
+            retry: 0,
+            total: manifestText.length,
+            chunkCount: 0,
+            bwEstimate: 0,
+            loading: { start: now, first: now, end: now },
+            parsing: { start: now, end: now },
+            buffering: { start: 0, first: 0, end: 0 }
+          };
+          stats.loaded = manifestText.length;
+          stats.total = manifestText.length;
+          stats.loading = { start: now, first: now, end: now };
+          stats.parsing = { start: now, end: now };
+          stats.buffering = { start: 0, first: 0, end: 0 };
+          this.stats = stats;
+
           setTimeout(function() {
-            var now = performance.now();
             callbacks.onSuccess(
               { url: context.url, data: manifestText },
-              {
-                trequest: now,
-                tfirst: now,
-                tload: now,
-                loaded: manifestText.length,
-                total: manifestText.length
-              },
-              context
+              stats,
+              context,
+              null
             );
           }, 0);
           return;
